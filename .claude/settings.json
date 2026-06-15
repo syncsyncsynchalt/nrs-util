@@ -1,0 +1,30 @@
+{
+  "deniedMcpServers": [
+    { "serverName": "Microsoft_Learn" },
+    { "serverName": "Microsoft_365" },
+    { "serverName": "Google_Drive" }
+  ],
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git ls-files:*)",
+      "Bash(ls:*)",
+      "Bash(wc:*)",
+      "PowerShell(git status:*)",
+      "PowerShell(git diff:*)",
+      "PowerShell(git log:*)",
+      "PowerShell(& $py tools\\nrs_query.py:*)",
+      "PowerShell(& $py tools\\disasm.py:*)",
+      "PowerShell(& $py tools\\pe_analyze.py:*)",
+      "PowerShell(& $py tools\\nrs_strings.py:*)",
+      "PowerShell(& $py tools\\session_summary.py:*)",
+      "PowerShell(& $py tools\\read_log.py:*)",
+      "PowerShell(& $py tools\\log_analyzer.py:*)",
+      "PowerShell(& $py tools\\list_modules.py:*)"
+    ]
+  }
+}

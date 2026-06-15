@@ -1,0 +1,63 @@
+{
+  "version": "2.0.0",
+  "options": {
+    "env": {
+      "PY": "${command:python.interpreterPath}"
+    }
+  },
+  "tasks": [
+    {
+      "label": "nrs: launch (spawn 90s)",
+      "type": "shell",
+      "command": "${env:PY}",
+      "args": ["boot/launch.py", "--spawn", "--duration", "90"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "group": { "kind": "build", "isDefault": true },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "detail": "MANIFEST.json の load_order でモジュールを連結ロードし nrs.exe を spawn。pcpa_server は自動起動。"
+    },
+    {
+      "label": "logs: tail (filtered)",
+      "type": "shell",
+      "command": "${env:PY}",
+      "args": ["tools/logs/read_log.py", "-f", "(REGION_CHK|ERRCODE|HLSM|Error 09)"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "isBackground": true,
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "detail": "主要イベント（REGION_CHK / ERRCODE / HLSM / Error 09）を追尾表示。"
+    },
+    {
+      "label": "logs: session summary",
+      "type": "shell",
+      "command": "${env:PY}",
+      "args": ["tools/logs/session_summary.py"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "detail": "直近セッションの要約を出力。"
+    },
+    {
+      "label": "hygiene: check doc sync",
+      "type": "shell",
+      "command": "${env:PY}",
+      "args": ["tools/hygiene/check_doc_sync.py"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "group": "test",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "detail": "MANIFEST の rva 実在性 / base.js 先頭 / persistence 整合を機械検証。"
+    },
+    {
+      "label": "ghidra: start headless MCP",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-File", "tools/ghidra_mcp/start_headless.ps1"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "detail": "Ghidra MCP サーバを起動（冪等・既起動なら no-op）。"
+    }
+  ]
+}

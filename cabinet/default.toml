@@ -1,0 +1,29 @@
+# cabinet/default.toml — 筐体プロファイル
+#
+# TeknoParrot UserProfile(*.xml) + micetools config.def/KCF の役割を1ファイルに集約。
+# ハードコード値（region/identity/network）の単一ソース。boot/keychip/server/pcpa_server.py が読む。
+#
+# ★将来ネットワーク対応の予約地: マルチプレイは筐体ごとに distinct な identity が必須。
+#   ここに serial/keyid/mainid と network.host を確保してあるので、ネットワーク実装時は
+#   値を変えるだけで rework 不要（[[network_role]]=serve のモジュールが host を参照する設計）。
+
+[identity]                      # keychip 由来（keychip.appboot.* / keychip.billing.*）
+gameid     = "SBVA"             # keychip.appboot.gameid
+region     = "01"               # keychip.appboot.region  01=JAPAN（JAPAN build。FACTS/BUGS Error 0903）
+platformid = "AAA"              # keychip.appboot.platformid
+systemflag = "00"               # keychip.appboot.systemflag  bit0=develop
+keyid      = "0000000000000000" # keychip.billing.keyid   ★MP: 筐体ごとに distinct に
+mainid     = "00000000000"      # keychip.billing.mainid (board id)  ★MP: 筐体ごとに distinct に
+serial     = "ABG1234567"       # ALL.Net PowerOn serial(11桁)  ★MP: 筐体識別子（現状未使用・予約）
+
+[network]                       # amNet（現状）/ ALL.Net（将来）
+ip      = "192.168.1.209"       # amNet query_nic_status の IP。nrs は INADDR_ANY で bind するため任意で可
+mask    = "255.255.255.0"
+gateway = "192.168.1.1"
+dns1    = "192.168.1.1"
+dns2    = "0.0.0.0"
+host    = "127.0.0.1"           # ★将来ネットワーク: ALL.Net/title サーバの所在。SP=loopback / MP=共有ホスト
+
+[billing]
+freeplay  = true
+playlimit = "FFFFFFFF"          # keychip.billing.playlimit  FFFFFFFF=FreePlay

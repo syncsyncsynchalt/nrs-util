@@ -1,0 +1,327 @@
+{
+  "_doc": "Boot composition for nrs.exe (NRS, RingEdge emulate). launch.py concatenates load_order in order (lib/base.js MUST be first). load_order MIRRORS the original numeric file order (00..32) because the boot is load-order sensitive — subsystem-grouped order stalled the game before keychip init (verified 2026-06-12). Keep this numeric-faithful ordering. persistence: persistent=patchCode/data survives detach; runtime=Interceptor/timer reverts (runtime set = standalone blockers); monitor=log-only; served=keychip/server. network_role: local | serve. tools/hygiene/check_doc_sync.py verifies va[] (static VA) against the module file.",
+  "load_order": [
+    {
+      "module": "lib/base.js",
+      "subsys": "lib",
+      "persistence": "na",
+      "va": [],
+      "ssot": "boot/CONVENTIONS.md",
+      "network_role": "local"
+    },
+    {
+      "module": "amdebug/logcapture.js",
+      "subsys": "amdebug",
+      "persistence": "monitor",
+      "va": [
+        "0x1696F38",
+        "0x1696F3C",
+        "0x55C800",
+        "0x55C7BC"
+      ],
+      "ssot": "amdebug/FACTS.md",
+      "network_role": "local"
+    },
+    {
+      "module": "amgfetcher/recv.js",
+      "subsys": "amgfetcher",
+      "persistence": "runtime",
+      "va": [],
+      "ssot": "amgfetcher/FACTS.md",
+      "network_role": "local"
+    },
+    {
+      "module": "keychip/client.js",
+      "subsys": "keychip",
+      "persistence": "runtime",
+      "va": [
+        "0x98AEA0"
+      ],
+      "ssot": "keychip/FACTS.md",
+      "network_role": "serve"
+    },
+    {
+      "module": "amnet/state.js",
+      "subsys": "amnet",
+      "persistence": "monitor",
+      "va": [
+        "0x9814E0"
+      ],
+      "ssot": "amnet/FACTS.md",
+      "network_role": "serve"
+    },
+    {
+      "module": "amdongle/monitor.js",
+      "subsys": "amdongle",
+      "persistence": "monitor",
+      "va": [
+        "0x96EEC0",
+        "0x96F1A0",
+        "0x96EFC0",
+        "0x96F290",
+        "0x457500",
+        "0x457810",
+        "0x457822",
+        "0x457910",
+        "0x978450",
+        "0x975E00"
+      ],
+      "ssot": "amdongle/FACTS.md",
+      "network_role": "local"
+    },
+    {
+      "module": "amplatform/identity.js",
+      "subsys": "amplatform",
+      "persistence": "persistent",
+      "va": [
+        "0x981D60",
+        "0x981FF0",
+        "0x982C50"
+      ],
+      "ssot": "amplatform/FACTS.md",
+      "network_role": "local"
+    },
+    {
+      "module": "amplatform/hwdetect.js",
+      "subsys": "amplatform",
+      "persistence": "persistent",
+      "va": [
+        "0x891B20"
+      ],
+      "ssot": "amplatform/FACTS.md",
+      "network_role": "local"
+    },
+    {
+      "module": "keychip/region.js",
+      "subsys": "keychip",
+      "persistence": "runtime",
+      "va": [
+        "0x459109",
+        "0x45A846",
+        "0x16014C4",
+        "0x1601744",
+        "0x1601989"
+      ],
+      "ssot": "keychip/FACTS.md",
+      "network_role": "local"
+    },
+    {
+      "module": "amgfetcher/getstatus.js",
+      "subsys": "amgfetcher",
+      "persistence": "runtime",
+      "va": [
+        "0x97718E",
+        "0x9771CB",
+        "0x457FE0",
+        "0x9746C0",
+        "0x974760",
+        "0x9747A0",
+        "0x975140",
+        "0x6FF980",
+        "0x6FF650",
+        "0x9744F0",
+        "0x975857",
+        "0x98ADC0",
+        "0x458271"
+      ],
+      "ssot": "amgfetcher/FACTS.md",
+      "network_role": "local"
+    },
+    {
+      "module": "amjvs/state.js",
+      "subsys": "amjvs",
+      "persistence": "persistent",
+      "va": [
+        "0x67AFA0",
+        "0x987590",
+        "0x9883D3",
+        "0x16B7858",
+        "0x16B785C",
+        "0x16B7860",
+        "0x16B8668",
+        "0x16B7EA0",
+        "0xCCF54C"
+      ],
+      "ssot": "amjvs/FACTS.md",
+      "network_role": "local"
+    },
+    {
+      "module": "mxdrivers/devices.js",
+      "subsys": "mxdrivers",
+      "persistence": "runtime",
+      "va": [],
+      "ssot": "mxdrivers/FACTS.md",
+      "network_role": "local"
+    },
+    {
+      "module": "amdongle/patch.js",
+      "subsys": "amdongle",
+      "persistence": "persistent",
+      "va": [
+        "0x975E00",
+        "0x457AF0"
+      ],
+      "ssot": "amdongle/FACTS.md",
+      "network_role": "local"
+    },
+    {
+      "module": "amjvs/input.js",
+      "subsys": "amjvs",
+      "persistence": "runtime",
+      "va": [
+        "0x988360",
+        "0x9884F0"
+      ],
+      "ssot": "amjvs/FACTS.md",
+      "network_role": "local"
+    },
+    {
+      "module": "amjvs/watchdog.js",
+      "subsys": "amjvs",
+      "persistence": "runtime",
+      "va": [
+        "0x16B7858",
+        "0x16B785C",
+        "0x16B7860",
+        "0x16B8670",
+        "0xCCF548"
+      ],
+      "ssot": "amjvs/FACTS.md",
+      "network_role": "local"
+    },
+    {
+      "module": "app/windowed.js",
+      "subsys": "app",
+      "persistence": "runtime",
+      "va": [],
+      "ssot": "app/FACTS.md",
+      "network_role": "local"
+    },
+    {
+      "module": "amrtc/rtc.js",
+      "subsys": "amrtc",
+      "persistence": "runtime",
+      "va": [],
+      "ssot": "amrtc/FACTS.md",
+      "network_role": "local"
+    },
+    {
+      "module": "app/exit.js",
+      "subsys": "app",
+      "persistence": "runtime",
+      "va": [],
+      "ssot": "app/FACTS.md",
+      "network_role": "local"
+    },
+    {
+      "module": "app/no_selfshutdown.js",
+      "subsys": "app",
+      "persistence": "persistent",
+      "va": [
+        "0x6C3F20"
+      ],
+      "ssot": "app/FACTS.md",
+      "network_role": "local"
+    },
+    {
+      "module": "allnet/billing.js",
+      "subsys": "allnet",
+      "persistence": "persistent",
+      "va": [
+        "0xA065C0"
+      ],
+      "ssot": "allnet/FACTS.md",
+      "network_role": "serve"
+    },
+    {
+      "module": "keychip/setup.js",
+      "subsys": "keychip",
+      "persistence": "runtime",
+      "va": [],
+      "ssot": "keychip/FACTS.md",
+      "network_role": "local"
+    },
+    {
+      "module": "devices/cardreader.js",
+      "subsys": "devices",
+      "persistence": "persistent",
+      "va": [
+        "0x4F6310",
+        "0x4F6330"
+      ],
+      "ssot": "devices/FACTS.md",
+      "network_role": "serve"
+    },
+    {
+      "module": "devices/usbio.js",
+      "subsys": "devices",
+      "persistence": "persistent",
+      "va": [
+        "0x6F0B80"
+      ],
+      "ssot": "devices/FACTS.md",
+      "network_role": "local"
+    },
+    {
+      "module": "devices/touchpanel.js",
+      "subsys": "devices",
+      "persistence": "persistent",
+      "va": [
+        "0x8B3B00",
+        "0x8B3B40"
+      ],
+      "ssot": "devices/FACTS.md",
+      "network_role": "local"
+    },
+    {
+      "module": "amnet/network_type.js",
+      "subsys": "amnet",
+      "persistence": "persistent",
+      "va": [
+        "0x6FF18A",
+        "0x6FF1AC",
+        "0x6FF1B3"
+      ],
+      "ssot": "amnet/FACTS.md",
+      "network_role": "serve"
+    },
+    {
+      "module": "devices/storage.js",
+      "subsys": "devices",
+      "persistence": "persistent",
+      "va": [],
+      "ssot": "devices/FACTS.md",
+      "network_role": "local"
+    },
+    {
+      "module": "startup/extend_image.js",
+      "subsys": "startup",
+      "persistence": "persistent",
+      "va": [
+        "0x72B3A0"
+      ],
+      "ssot": "startup/FACTS.md",
+      "network_role": "local"
+    },
+    {
+      "module": "allnet/connection.js",
+      "subsys": "allnet",
+      "persistence": "persistent",
+      "va": [
+        "0x72DCE0"
+      ],
+      "ssot": "allnet/FACTS.md",
+      "network_role": "serve"
+    },
+    {
+      "module": "startup/pras.js",
+      "subsys": "startup",
+      "persistence": "persistent",
+      "va": [
+        "0x701280"
+      ],
+      "ssot": "startup/FACTS.md",
+      "network_role": "serve"
+    }
+  ]
+}

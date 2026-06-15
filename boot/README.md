@@ -1,0 +1,56 @@
+# boot/ — nrs.exe スタンドアロン起動シム（成果物）
+
+`nrs.exe`(NRS, RingEdge) を物理ハードなしで起動させる実体。RingEdge の各サブシステムを
+emulate / patch する frida モジュール群 + keychip(PCP) サーバ。**解析ツールは `tools/`、これは成果物**。
+
+## 構成（RingEdge 実機準拠）
+
+| dir | RingEdge コンポーネント | 役割 |
+|---|---|---|
+| `lib/` | — | 共有ヘルパ（logMsg 等）。**先頭ロード必須** |
+| `amdongle/` | amDongle 1.12 | ドングル busy 固定 + SM 監視 |
+| `amnet/` | amNet | DHCP/NIC SM、LAN type(state4) |
+| `amjvs/` | amJvs/amJvsp | JVS 初期化/入力注入/状態 watchdog（将来 `pipe/`=TeknoParrot_jvs） |
+| `amplatform/` | amPlatform | board/OS identity、HW 検出(Error 0901) |
+| `amgfetcher/` | amGfetcher | get_status recv 完了、boot SM 前進 |
+| `ambackup/` | amBackup | amBackupWrite クラッシュ stub |
+| `amrtc/` | amRtc | ローカル時刻 |
+| `keychip/` | keychip / PCP / mxkeychip | client 回復、setup、region、`server/`=PCPA サーバ |
+| `mxdrivers/` | mx ドライバ | mxsram/mxsuperio/mxhwreset/jvs pipe デバイス偽装 |
+| `startup/` | amlib SYSTEM STARTUP | FUN_0089a010 SM の extend image(state5)/p-ras(state7) |
+| `devices/` | 周辺デバイス presence 連鎖 | IC Card R/W・Touch Panel・USB I/O・Storage |
+| `allnet/` | ALL.Net | 接続 satisfy(state6)・billing。**将来ネットワーク本体の予約地** |
+| `app/` | ゲーム窓/プロセス | windowed、exit |
+
+## 構成の単一ソース = `MANIFEST.json`
+
+`launch.py` は `MANIFEST.json` の `load_order` 順にモジュールを連結ロードする（ファイル名順ではない）。
+各エントリが `module / subsys / persistence / rva[] / ssot / network_role` を宣言する。
+
+- **persistence**: `persistent`(patchCode/data-write、detach 後も有効) / `runtime`(Interceptor・timer、
+  detach で revert) / `monitor`(log のみ) / `served`(keychip サーバが応答) / `na`。
+  **runtime の集合 = 完全スタンドアロン化の残課題**。
+- **network_role**: `local`(in-game patch のまま) / `serve`(将来ネットワーク化時に実サーバ応答へ移す層)。
+
+規約（命名・ヘッダ）は [`CONVENTIONS.md`](CONVENTIONS.md)。
+
+## 起動
+
+```powershell
+$py="$env:LOCALAPPDATA\Programs\Python\Python313\python.exe"
+& $py boot\launch.py --spawn --duration 90
+```
+`launch.py` が `boot\keychip\server\pcpa_server.py` を自動起動し、**nrs.exe を `frida.spawn` で
+サスペンド起動 → MANIFEST 順に全モジュールをロード → `frida.resume`** → capture。
+attract 到達後 detach しても persistent モジュールは有効。
+
+**サスペンド起動（2026-06-13〜）**: 旧来は `subprocess.Popen`（非サスペンド）→ 後追い attach だったため、
+nrs.exe 最初期の init（amlib/amSram/amEeprom/amBackup のデバイス init）が**フック設置前に走り切り**、
+emulate デバイスを開けず失敗していた（amBackup が -3 を返す真因）。`frida.spawn` サスペンド化で全フックを
+ゲームコードより先に効かせ、amSramInit が mxsram emulation を正しく掴む（amBackup の SRAM 系が
+`data/nvram/sram.bin` に永続）。ATTRACT 経路に回帰なしを実機確認。
+
+## 整合チェック
+```powershell
+& $py tools\hygiene\check_doc_sync.py   # MANIFEST↔モジュール↔FACTS の整合（pre-commit でも自動実行）
+```

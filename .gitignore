@@ -1,0 +1,32 @@
+# 実行時生成アーティファクト
+captures/
+
+# 使い捨てデバッグプローブ
+tools/_dbg_probe.py
+
+# disasm / find スクリプトの出力テキスト
+tools/jvs_test*.txt
+tools/jvs_trace*.txt
+
+# 解析データ (Ghidra生成・大容量・再生成可能) — known_names.json のみ追跡
+data/*
+!data/known_names.json
+
+# pe-sieve バイナリ（GitHub releases から再取得可能）
+tools/re/pe-sieve32.exe
+
+# Ghidra MCP 拡張 zip（GitHub releases から再取得可能・バイナリ）— bridge は追跡
+tools/ghidra_mcp/*.zip
+# Ghidra MCP ビルド中間物（再生成可能）
+tools/ghidra_mcp/build*/
+tools/ghidra_mcp/src/target/
+*.class
+
+# Python キャッシュ
+__pycache__/
+*.pyc
+*.pyo
+
+# エディタ
+*.swp
+*~

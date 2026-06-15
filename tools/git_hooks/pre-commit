@@ -1,0 +1,22 @@
+#!/bin/sh
+# pre-commit: boot/MANIFEST.json ↔ boot モジュール ↔ FACTS の整合チェック（陳腐化検出）。
+# 有効化: git config core.hooksPath tools/git_hooks  （リポジトリで一度だけ）
+# boot モジュール/MANIFEST か主要 md を変更したコミットでのみ実行。
+# 失敗時は exit 1 でコミットを止める。緊急時は git commit --no-verify で迂回可。
+
+changed=$(git diff --cached --name-only)
+echo "$changed" | grep -Eq '^(boot/.*\.(js|json)|.*FACTS\.md|STATUS\.md|BUGS\.md)$' || exit 0
+
+# python フルパス（Windows Store スタブ回避）。無ければ PATH の python にフォールバック。
+PY="$HOME/AppData/Local/Programs/Python/Python313/python.exe"
+[ -x "$PY" ] || PY="$(command -v python3 || command -v python)"
+[ -n "$PY" ] || { echo "[pre-commit] python が見つからず check_doc_sync をスキップ"; exit 0; }
+
+"$PY" "$(git rev-parse --show-toplevel)/tools/hygiene/check_doc_sync.py" --quiet
+rc=$?
+if [ "$rc" -ne 0 ]; then
+    echo ""
+    echo "[pre-commit] boot 構成と FACTS/コードが乖離しています（上記 FAIL）。"
+    echo "  修正後に再コミット、または緊急時は  git commit --no-verify  で迂回。"
+fi
+exit $rc
