@@ -4,7 +4,7 @@ salt(高エントロピー)の開始 = TrueCrypt ボリューム先頭。"""
 import math
 from collections import Counter
 
-ISO = r"C:\src\Border Break (Japan) (DVR-5001).iso"
+ISO = r"C:\src\DVR-5001.iso"
 SECTOR = 2048
 
 def ent(b):
