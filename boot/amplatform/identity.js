@@ -58,10 +58,7 @@
             code.push(0x33, 0xC0);       // xor eax, eax  (return 0)
             code.push(0xC2, 0x04, 0x00); // ret 4
 
-            Memory.patchCode(va(sva), code.length, function(c) {
-                c.writeByteArray(code);
-            });
-            logMsg('amPlatform', name + ' patchCode(' + code.length + 'b)="' + fillStr + '"');
+            patch(sva, code, name + '="' + fillStr + '"');
         } catch(e) { logMsg('WARN', 'amPlatform patchCode ' + name + ': ' + e); }
     }
 
@@ -78,10 +75,7 @@
                 0x33, 0xC0,               // xor eax, eax      ; return 0
                 0xC2, 0x04, 0x00,         // ret 4
             ];
-            Memory.patchCode(va(sva), code.length, function(c) {
-                c.writeByteArray(code);
-            });
-            logMsg('amPlatform', name + ' patchCode(DWORD=' + boardTypeIndex + ', ' + code.length + 'b)');
+            patch(sva, code, name + ' (DWORD=' + boardTypeIndex + ')');
         } catch(e) { logMsg('WARN', 'amPlatform patchCode ' + name + ': ' + e); }
     }
 
