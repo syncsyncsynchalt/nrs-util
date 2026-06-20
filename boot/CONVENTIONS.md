@@ -23,7 +23,7 @@
 
 ## 2. 命名 — 名詞のみ、動詞禁止
 - ディレクトリ = 実機コンポーネント名（`amjvs`）。ファイル = 機能名詞（`state.js` `input.js`
-  `region.js` `monitor.js` `recv.js`）。
+  `region.js` `diag.js` `recv.js`）。
 - `hook/patch/bypass/emulate/satisfy/inject` 等の**動詞をファイル名に使わない**（役割は dir＋ヘッダが表す）。
 
 ## 3. 1 ファイル = 単一 persistence
