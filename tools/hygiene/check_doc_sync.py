@@ -90,14 +90,18 @@ def main():
                 errors.append(f"{mod}: MANIFEST va {tok} not found in module file (drift)")
             elif addr not in facts_hex:
                 warns.append(f"{mod}: va {tok} not documented in any FACTS.md/ARCH.md")
-        # 8. persistence plausibility
+        # 8. persistence plausibility. Recognize BOTH raw primitives and the base.js
+        # helper idioms (hook()/watch()=runtime, patch()=persistent byte write), so the
+        # heuristic doesn't go blind once modules are declarativized.
         persist = e.get("persistence")
         has_runtime = (re.search(r"Interceptor\.(attach|replace)\(", text) is not None
-                       or "setInterval(" in text or "setTimeout(" in text)
+                       or "setInterval(" in text or "setTimeout(" in text
+                       or re.search(r"\b(hook|watch)\(", text) is not None)
+        has_patch = "Memory.patchCode(" in text or re.search(r"\bpatch\(", text) is not None
         if persist == "persistent" and has_runtime:
-            warns.append(f"{mod}: persistence=persistent but has Interceptor/timer (reverts on detach?)")
-        if persist == "monitor" and "Memory.patchCode(" in text:
-            warns.append(f"{mod}: persistence=monitor but has Memory.patchCode (not log-only?)")
+            warns.append(f"{mod}: persistence=persistent but has Interceptor/timer/hook/watch (reverts on detach?)")
+        if persist == "monitor" and has_patch:
+            warns.append(f"{mod}: persistence=monitor but has patchCode/patch() (not log-only?)")
 
     # 5. known_names static-VA keys
     try:
@@ -110,13 +114,47 @@ def main():
     except FileNotFoundError:
         warns.append("known_names.json not found")
 
+    # 9. patches.json (data-driven pure-byte patch table) — validate each row's va is a
+    # static VA, unique, and its bytes spec is resolvable (mnemonic | {retImm/retN} | hex).
+    patches_path = os.path.join(BOOT, "patches.json")
+    n_patches = 0
+    try:
+        with open(patches_path, encoding="utf-8") as f:
+            rows = json.load(f)
+        seen = set()
+        for i, row in enumerate(rows):
+            tok = row.get("va", "")
+            try:
+                addr = int(tok, 16)
+            except (TypeError, ValueError):
+                errors.append(f"patches.json[{i}]: va {tok!r} not a hex static VA")
+                continue
+            if addr < IMAGE_BASE:
+                errors.append(f"patches.json[{i}]: va {tok} < ImageBase (stale RVA?)")
+            if addr in seen:
+                errors.append(f"patches.json[{i}]: duplicate va {tok}")
+            seen.add(addr)
+            b = row.get("bytes")
+            ok_bytes = (b in ("RET0", "RET1")
+                        or (isinstance(b, dict) and ("retImm" in b or "retN" in b))
+                        or (isinstance(b, list) and all(isinstance(x, int) for x in b))
+                        or (isinstance(b, str) and re.fullmatch(r"[0-9A-Fa-f]{2}( [0-9A-Fa-f]{2})*", b.strip())))
+            if not ok_bytes:
+                errors.append(f"patches.json[{i}] ({tok}): unresolvable bytes spec {b!r}")
+            if addr not in facts_hex:
+                warns.append(f"patches.json {tok} not documented in any FACTS.md/ARCH.md")
+        n_patches = len(rows)
+    except FileNotFoundError:
+        pass
+
     if errors:
         print("[FAIL] integrity / dialect errors:")
         for m in errors:
             print(f"  - {m}")
     else:
         n = sum(len(e.get("va", [])) for e in lo)
-        print(f"OK: {len(lo)} modules, base-first, {n} va all static & present; no raw base addressing.")
+        print(f"OK: {len(lo)} modules, base-first, {n} va all static & present; "
+              f"{n_patches} patches.json rows; no raw base addressing.")
 
     if warns and not quiet:
         print("\n[WARN] (non-blocking):")
