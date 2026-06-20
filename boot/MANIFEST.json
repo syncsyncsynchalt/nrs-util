@@ -31,31 +31,31 @@
       "network_role": "local"
     },
     {
-      "module": "amgfetcher/recv.js",
+      "module": "mxgfetcher/recv.js",
       "subsys": "amgfetcher",
       "persistence": "runtime",
       "va": [],
-      "ssot": "amgfetcher/FACTS.md",
+      "ssot": "mxgfetcher/FACTS.md",
       "network_role": "local"
     },
     {
-      "module": "keychip/client.js",
+      "module": "mxkeychip/client.js",
       "subsys": "keychip",
       "persistence": "runtime",
       "va": [
         "0x98AEA0"
       ],
-      "ssot": "keychip/FACTS.md",
+      "ssot": "mxkeychip/FACTS.md",
       "network_role": "serve"
     },
     {
-      "module": "amnet/state.js",
+      "module": "mxnetwork/state.js",
       "subsys": "amnet",
       "persistence": "monitor",
       "va": [
         "0x9814E0"
       ],
-      "ssot": "amnet/FACTS.md",
+      "ssot": "mxnetwork/FACTS.md",
       "network_role": "serve"
     },
     {
@@ -90,7 +90,7 @@
       "network_role": "local"
     },
     {
-      "module": "keychip/region.js",
+      "module": "mxkeychip/region.js",
       "subsys": "keychip",
       "persistence": "runtime",
       "va": [
@@ -100,11 +100,11 @@
         "0x1601744",
         "0x1601989"
       ],
-      "ssot": "keychip/FACTS.md",
+      "ssot": "mxkeychip/FACTS.md",
       "network_role": "local"
     },
     {
-      "module": "amgfetcher/getstatus.js",
+      "module": "mxgfetcher/getstatus.js",
       "subsys": "amgfetcher",
       "persistence": "runtime",
       "va": [
@@ -122,7 +122,7 @@
         "0x98ADC0",
         "0x458271"
       ],
-      "ssot": "amgfetcher/FACTS.md",
+      "ssot": "mxgfetcher/FACTS.md",
       "network_role": "local"
     },
     {
@@ -222,11 +222,11 @@
       "network_role": "local"
     },
     {
-      "module": "keychip/setup.js",
+      "module": "mxkeychip/setup.js",
       "subsys": "keychip",
       "persistence": "runtime",
       "va": [],
-      "ssot": "keychip/FACTS.md",
+      "ssot": "mxkeychip/FACTS.md",
       "network_role": "local"
     }
   ]

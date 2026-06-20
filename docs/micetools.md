@@ -20,10 +20,10 @@ micetools は SEGA の `am*` ライブラリ（amDongle/amEeprom/amBackup/…）
 | nrs-util の Frida スクリプト | micetools の参照実装 | 何が分かるか |
 |---|---|---|
 | `boot/amdongle/patch.js` | `lib/am/amDongle.c` / `.h` | amDongle 状態機械・リクエストコード・PCP 会話の全手順 |
-| `boot/keychip/setup.js`（観測 `frida_diag/keychip_setup_diag.js`） | `amDongle.c::amDongleSetupKeychip` + `micekeychip/` | keychip セットアップが投げる PCP keyword と期待応答 |
+| `boot/mxkeychip/setup.js`（観測 `frida_diag/keychip_setup_diag.js`） | `amDongle.c::amDongleSetupKeychip` + `micekeychip/` | keychip セットアップが投げる PCP keyword と期待応答 |
 | `boot/amdongle/*`（観測 `frida_diag/dongle_update_diag.js`） | `amDongle.c::amDongleUpdate` / tracedata callbacks | dongle update が tracedata.restore で何を待つか |
-| `boot/allnet/billing.js` | `micekeychip/callbacks/billing.c` | playcount/playlimit/nearfull/keyid の応答フォーマット |
-| `boot/amgfetcher/getstatus.js` | `lib/am/amGfetcher.h` + `patches/mxgfetcher.patch` | gfetcher は薄い。実体は AMSRAM ログフラグ程度 |
+| `boot/patches.json(0xA065C0)` | `micekeychip/callbacks/billing.c` | playcount/playlimit/nearfull/keyid の応答フォーマット |
+| `boot/mxgfetcher/getstatus.js` | `lib/am/amGfetcher.h` + `patches/mxgfetcher.patch` | gfetcher は薄い。実体は AMSRAM ログフラグ程度 |
 | region error(0903)調査 | `micekeychip/callbacks/appboot.c::mxkPcpAbRegion` | region は `keychip.appboot.region` の 2 桁 HEX 応答 |
 | Error 1000 調査 | `amDongle.c` の `AM_DONGLE_STATUS_*` 列挙 | dongle 系エラーの正準コード表 |
 
@@ -238,7 +238,7 @@ pcpDebugLevel / libpcpDebugLevel
 ```
 nxAuth.patch には `c7460801000000`(= `mov dword[esi+8],1`)で**マネージャのデバッグレベルを
 コード書換で立てる**例もある。`mxgfetcher.patch` は `LOG_EN_AMSRAM` を 1 にするだけ＝
-**gfetcher は薄く、実体は AMSRAM ログ**という nrs-util の `boot/amgfetcher/getstatus.js` の裏取りになる。
+**gfetcher は薄く、実体は AMSRAM ログ**という nrs-util の `boot/mxgfetcher/getstatus.js` の裏取りになる。
 
 > 注: patch の VA は **micetools が解析した別バイナリ**のもの。**nrs にそのまま使うな**。
 > 使うのは「どのグローバルを立てるか」という**知識**だけ。アドレスは必ず Ghidra MCP で nrs から取り直す。

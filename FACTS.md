@@ -11,15 +11,15 @@ confidence 凡例: [F]=Frida確認 [S]=静的解析 [I]=推論
 ## サブシステム別 FACTS（コードと同階層）
 | subsys | facts | boot dir |
 |---|---|---|
-| amNet（DHCP/NIC/種別） | [boot/amnet/FACTS.md](boot/amnet/FACTS.md) | `boot/amnet/` |
-| keychip / PCP | [boot/keychip/FACTS.md](boot/keychip/FACTS.md) | `boot/keychip/` |
+| amNet（DHCP/NIC/種別） | [boot/mxnetwork/FACTS.md](boot/mxnetwork/FACTS.md) | `boot/mxnetwork/` |
+| keychip / PCP | [boot/mxkeychip/FACTS.md](boot/mxkeychip/FACTS.md) | `boot/mxkeychip/` |
 | amJvs / amJvsp | [boot/amjvs/FACTS.md](boot/amjvs/FACTS.md) | `boot/amjvs/` |
 | amDongle | [boot/amdongle/FACTS.md](boot/amdongle/FACTS.md) | `boot/amdongle/` |
 | amBackup | [boot/ambackup/FACTS.md](boot/ambackup/FACTS.md) | `boot/ambackup/` |
 | amPlatform | [boot/amplatform/FACTS.md](boot/amplatform/FACTS.md) | `boot/amplatform/` |
-| amGfetcher | [boot/amgfetcher/FACTS.md](boot/amgfetcher/FACTS.md) | `boot/amgfetcher/` |
+| amGfetcher | [boot/mxgfetcher/FACTS.md](boot/mxgfetcher/FACTS.md) | `boot/mxgfetcher/` |
 | 周辺デバイス presence 連鎖 | [boot/devices/FACTS.md](boot/devices/FACTS.md) | `boot/devices/` |
-| amlib SYSTEM STARTUP | [boot/startup/FACTS.md](boot/startup/FACTS.md) | `boot/startup/` |
+| amlib SYSTEM STARTUP | [boot/mxsegaboot/FACTS.md](boot/mxsegaboot/FACTS.md) | `boot/mxsegaboot/` |
 
 ## boot 構成・運用
 - ロード順 / persistence / va（static_VA）/ network_role → [boot/MANIFEST.json](boot/MANIFEST.json)（boot 構成の単一ソース）

@@ -1,7 +1,7 @@
-// subsys:      keychip
+// subsys:      mxkeychip
 // persistence: runtime   // network_role=local
 // va: 0x459109 (errCode=4 store FUN_00458fd0), 0x45A846 (errCode=4 store FUN_0045a7f0), 0x16014C4, 0x1601744, 0x1601989
-// ssot:        keychip/FACTS.md
+// ssot:        mxkeychip/FACTS.md
 // role:        Error 0903(region) を TeknoParrot 方式=チェック無力化で恒久解消（amlib region setter の
 //              errCode=4 ストア2箇所を NOP）。PcbRegion=JAPAN(01) data-write は anti-tamper(FUN_0048f9c0)の
 //              region-index 整合用に維持。NOP/DAT書込=永続(patchCode/data) / watchdog・診断=runtime(他コード safety-net)

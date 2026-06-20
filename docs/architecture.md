@@ -41,7 +41,7 @@ satisfy がゲームのチェックとレースし、勝った側のエラーが
 - **P2 — keychip/PCPA サーバを micetools 級に**（差分④⑤）。`pcpa_server.py` を keyword 別
   `callbacks/<group>.py` に分解。暗号は当面 `code=54` bypass で十分、network/billing を本格化するなら
   KCF/AES を実装（micetools が正準）。
-- **P3 — ネットワーク層は「追加」で**（差分⑥）。`boot/allnet/` の予約枠に PowerOn/DownloadOrder/
+- **P3 — ネットワーク層は「追加」で**（差分⑥）。`boot/mxnetwork/` の予約枠に PowerOn/DownloadOrder/
   Billing/AiMeDB/タイトルサーバを足す。SP=loopback / MP=共有ホストの切替は `cabinet` の
   `network_role=serve` 設計で種を撒いてある。今やる必要はないが seam は維持。
 

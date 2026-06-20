@@ -18,5 +18,5 @@
 - **identity**: `../../cabinet/default.toml` `[identity]` に serial/keyid/mainid を確保済。マルチプレイは
   筐体ごとに distinct にするだけ。
 - **endpoint**: 同 `[network] host` を SP=loopback / MP=共有ホストで切替。
-- **方針**: `network_role=serve` のモジュール（`amnet/*`, `keychip/client`, `allnet/*`, `startup/pras`）は
+- **方針**: `network_role=serve` のモジュール（`mxnetwork/*`, `mxkeychip/client`, `allnet/*`, `mxsegaboot/pras`）は
   「patch で誤魔化す」より「実サーバが本当に resolve」へ移す（serve > suppress）。

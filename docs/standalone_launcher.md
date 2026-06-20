@@ -22,7 +22,7 @@ ram\, rom\          ← ゲームデータ
 
 > ⚠️ **ネットワーク IP は TP 値をそのまま流用しない。** TP プロファイルは `192.168.168.0/24`
 > (`Ip=192.168.168.103`)。本プロジェクトの amNet bind 先は `192.168.1.209`（現在は INADDR_ANY 化）で
-> **サブネットが異なる**。正は `boot/amnet/FACTS.md` と `docs/teknoparrot.md` §3 の注記。
+> **サブネットが異なる**。正は `boot/mxnetwork/FACTS.md` と `docs/teknoparrot.md` §3 の注記。
 
 ## DLL 注入方式（OpenParrotLoader 系）
 

@@ -7,7 +7,7 @@ confidence: [F]=Frida確認 [S]=静的解析 [I]=推論
 
 ### patchAmGfetcher IIFE — get_status recv completion fix [S]
 
-すべて RVA 表記（= static_VA − 0x400000）。実装は `boot/boot/amgfetcher/getstatus.js`。
+すべて RVA 表記（= static_VA − 0x400000）。実装は `boot/boot/mxgfetcher/getstatus.js`。
 
 get_status (port 40113) uses raw winsock recv(), NOT pcpaRecvResponse. The normal PCPA completion
 state ([stream+0x21C]) is never updated → 0x58B260 never returns 1 → SM loops endlessly.

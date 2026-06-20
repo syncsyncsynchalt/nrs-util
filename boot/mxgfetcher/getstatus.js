@@ -1,7 +1,7 @@
-// subsys:      amgfetcher
+// subsys:      mxgfetcher
 // persistence: runtime   // network_role=local
 // va: 0x97718E, 0x9771CB, 0x457FE0, 0x9746C0, 0x974760, 0x9747A0, 0x975140, 0x6FF980, 0x6FF650, 0x9744F0, 0x975857, 0x98ADC0, 0x458271
-// ssot:        amgfetcher/FACTS.md ; BUGS.md [FIXED] get_status recv / Error 0903
+// ssot:        mxgfetcher/FACTS.md ; BUGS.md [FIXED] get_status recv / Error 0903
 // role:        get_status/amGfetcher init-flag force + HLSM state7→8 + parser/SM patchCodes + 0x98ADC0 recv-completion fix. Mixed; runtime Interceptors → reverts on detach. Pairs with amgfetcher/recv.js.
 
 // ─────────────────────────────────────────────────────────────────────────────

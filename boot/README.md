@@ -5,22 +5,26 @@ emulate / patch する frida モジュール群 + keychip(PCP) サーバ。**解
 
 ## 構成（RingEdge 実機準拠）
 
+dir = RingEdge 実行ファイル(`mx*.exe`)/ ライブラリ(`am*`)。単純固定バイト patch は dir を持たず
+**`patches.json`**（データ表。`lib/patch_table.js` が適用）。
+
 | dir | RingEdge コンポーネント | 役割 |
 |---|---|---|
-| `lib/` | — | 共有ヘルパ（logMsg 等）。**先頭ロード必須** |
+| `lib/` | — | 共有ヘルパ + `patch()/hook()/watch()` + データ表 applier。**先頭ロード必須** |
 | `amdongle/` | amDongle 1.12 | ドングル busy 固定 + SM 監視 |
-| `amnet/` | amNet | DHCP/NIC SM、LAN type(state4) |
-| `amjvs/` | amJvs/amJvsp | JVS 初期化/入力注入/状態 watchdog（将来 `pipe/`=TeknoParrot_jvs） |
+| `mxnetwork/` | mxnetwork.exe / amNet | DHCP/NIC SM、LAN type(state4)、ALL.Net 接続(state6) |
+| `amjvs/` | amJvs/amJvsp | JVS 初期化/入力注入/状態 watchdog |
 | `amplatform/` | amPlatform | board/OS identity、HW 検出(Error 0901) |
-| `amgfetcher/` | amGfetcher | get_status recv 完了、boot SM 前進 |
+| `mxgfetcher/` | mxgfetcher.exe / amGfetcher | get_status recv 完了、boot SM 前進 |
+| `ambilling/` | ALL.Net Plus Billing (alpbEx) | billing offline idle（実装 `patches.json` 0xA065C0） |
 | `ambackup/` | amBackup | amBackupWrite クラッシュ stub |
 | `amrtc/` | amRtc | ローカル時刻 |
-| `keychip/` | keychip / PCP / mxkeychip | client 回復、setup、region、`server/`=PCPA サーバ |
+| `mxkeychip/` | mxkeychip.exe / keychip / PCP | client 回復、setup、region、`server/`=PCPA サーバ |
 | `mxdrivers/` | mx ドライバ | mxsram/mxsuperio/mxhwreset/jvs pipe デバイス偽装 |
-| `startup/` | amlib SYSTEM STARTUP | FUN_0089a010 SM の extend image(state5)/p-ras(state7) |
-| `devices/` | 周辺デバイス presence 連鎖 | IC Card R/W・Touch Panel・USB I/O・Storage |
-| `allnet/` | ALL.Net | 接続 satisfy(state6)・billing。**将来ネットワーク本体の予約地** |
-| `app/` | ゲーム窓/プロセス | windowed、exit |
+| `mxsegaboot/` | mxsegaboot.exe / SYSTEM STARTUP | extend image(state5)/p-ras(state7)（実装 `patches.json`） |
+| `mxstorage/` | mxstorage.exe | storage presence（実装 `patches.json` 0x4FDA50） |
+| `devices/` | 周辺デバイス presence 連鎖 | IC Card R/W・Touch Panel・USB I/O（実装 `patches.json`） |
+| `app/` | ゲーム窓/プロセス | windowed、exit、self-shutdown 無力化 |
 
 ## 構成の単一ソース = `MANIFEST.json`
 
@@ -40,7 +44,7 @@ emulate / patch する frida モジュール群 + keychip(PCP) サーバ。**解
 $py="$env:LOCALAPPDATA\Programs\Python\Python313\python.exe"
 & $py boot\launch.py --spawn --duration 90
 ```
-`launch.py` が `boot\keychip\server\pcpa_server.py` を自動起動し、**nrs.exe を `frida.spawn` で
+`launch.py` が `boot\mxkeychip\server\pcpa_server.py` を自動起動し、**nrs.exe を `frida.spawn` で
 サスペンド起動 → MANIFEST 順に全モジュールをロード → `frida.resume`** → capture。
 attract 到達後 detach しても persistent モジュールは有効。
 

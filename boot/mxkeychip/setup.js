@@ -1,7 +1,7 @@
-// subsys:      keychip
+// subsys:      mxkeychip
 // persistence: runtime   // network_role=local
 // va: —
-// ssot:        keychip/FACTS.md
+// ssot:        mxkeychip/FACTS.md
 // role:        keychipSM setup を駆動・補助（DAT_016014a2 ラッチ等を satisfy 維持）。runtime
 
 // ─────────────────────────────────────────────────────────────────────────────

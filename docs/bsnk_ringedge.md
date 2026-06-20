@@ -128,7 +128,7 @@ boot で下層から順に適用される多層防御。**nrs-util の keychip/r
 
 > **nrs-util 直結ポイント**: 4 の「mxkeychip 差し替えで AES 層回避」は micetools の keychip サーバ実装方針と一致。
 > 6 の **`code=54` バイパス**と **dev チャレンジ `2CFECBC71CF1E4`** は keychip 認証バイパス
-> (`boot/keychip/setup.js` / 観測 `tools/runtime/frida_diag/keychip_setup_diag.js`) の有力手がかり。
+> (`boot/mxkeychip/setup.js` / 観測 `tools/runtime/frida_diag/keychip_setup_diag.js`) の有力手がかり。
 
 ---
 
@@ -139,7 +139,7 @@ ALL.Net = Amusement Linkage Live Network。4 サービス構成:
 店舗ルータは IPSEC トンネル(`vpn1jpn.sys-all.net`/`vpn2jpn.sys-all.net`)接続。
 
 ### 4.1 Billing（`/allnet/billing/`）
-`boot/allnet/billing.js` の正準仕様。
+`boot/patches.json(0xA065C0)` の正準仕様。
 
 - **単一 HTTPS エンドポイント `ib.naominet.jp:8443`**、**HTTP/1.1 + TLS 1.1** 必須。
 - POST 先 `/request.php`（`/request/`・`/request` もリダイレクトなしで受理必須）。

@@ -1,7 +1,7 @@
-// subsys:      keychip
+// subsys:      mxkeychip
 // persistence: runtime   // network_role=serve
 // va: 0x98AEA0
-// ssot:        keychip/FACTS.md
+// ssot:        mxkeychip/FACTS.md
 // role:        pcpaOpenClient 戻り値回復: orig<0 のときだけ ret→0（40106/40104 のキャッシュ無接続で SendRequest -4 を防ぐ）。runtime
 
 // ─────────────────────────────────────────────────────────────────────────────

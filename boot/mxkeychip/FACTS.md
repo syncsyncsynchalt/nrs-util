@@ -87,7 +87,7 @@ errCode 4 を display struct へ snapshot）。**解法は TeknoParrot 同様チ
 | 0x5A846 (0x45a846) | `MOV [0x016f5af0],4` → NOP10 | `FUN_0045a7f0` | `FUN_00643de0` |
 
 `DAT_016014c4=01`(PcbRegion) の data-write は anti-tamper `FUN_0048f9c0` の region-index 整合（01→0=JAPAN,
-他→3）のため**維持**（errCode 抑止用ではない）。実装 `boot/keychip/region.js`。比較は `docs/teknoparrot.md`/`docs/micetools.md`。
+他→3）のため**維持**（errCode 抑止用ではない）。実装 `boot/mxkeychip/region.js`。比較は `docs/teknoparrot.md`/`docs/micetools.md`。
 
 ---
 

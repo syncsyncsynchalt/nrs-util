@@ -33,7 +33,7 @@ nrs.exe (NRS, x86-32, SEGA RingEdge) を Frida でパッチ・フックして
 | 関数の逆コンパイル C・xref を調べる | Ghidra MCP（下記） |
 | ブートシム本体（1 サブシステム=1 ディレクトリ） | `boot/<subsys>/<file>.js`（構成 `boot/MANIFEST.json`、規約 `boot/CONVENTIONS.md`） |
 | ブートシムの全体像・起動コマンド | `boot/README.md` |
-| keychip / PCPA サーバ | `boot/keychip/server/pcpa_server.py`（応答は本体に inline 実装） |
+| keychip / PCPA サーバ | `boot/mxkeychip/server/pcpa_server.py`（応答は本体に inline 実装） |
 | 独自ランチャー設計（北極星・ロードマップ） | `docs/architecture.md` / `docs/standalone_launcher.md` |
 | TeknoParrot 設定値/JVS/起動の要約（正は `C:\src\TPBootstrapper\`） | `docs/teknoparrot.md` |
 | keychip/amDongle/PCP/KCF の要約（正は `C:\src\micetools\` 直読） | `docs/micetools.md` |

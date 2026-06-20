@@ -27,7 +27,7 @@ GAME_DIR       = os.environ.get("NRS_GAME_DIR", r"C:\src\bbs")
 GAME_EXE       = os.environ.get("NRS_EXE", os.path.join(GAME_DIR, "nrs.exe"))
 GAME_ARGS      = ["-wsvga", "-full", "-img"]  # -img: game mode (from game.bat via nrs.bat)
 PYTHON_EXE     = os.path.join(os.environ.get("LOCALAPPDATA", ""), r"Programs\Python\Python313\python.exe")
-PCPA_SERVER_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "keychip", "server", "pcpa_server.py")
+PCPA_SERVER_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mxkeychip", "server", "pcpa_server.py")
 
 # FRIDA_SCRIPT is assembled by concatenating the boot modules listed in MANIFEST.json
 # in load order (lib/base.js first). MANIFEST.json is the single source of truth for

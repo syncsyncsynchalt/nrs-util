@@ -1,4 +1,4 @@
-// subsys:      amgfetcher
+// subsys:      mxgfetcher
 // persistence: runtime
 // va: recv (winsock export)
 // ssot:        FACTS.md §patchAmGfetcher ; BUGS.md [FIXED] get_status recv completion

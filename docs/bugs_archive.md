@@ -33,13 +33,13 @@ SM ループ → Error 8006「Network timeout error (DHCP)」。
 止まり `response` ペア1個しか登録されず、抽出器が `result` を見つけられず -1（→default→0xffffffff）。
 get_status 等の `&` 区切り応答が正常動作していたのと対照的。「`\r\n` が必須」という旧 FACTS 記述は誤りで、
 それを回避するため runtime force-patch で誤魔化していた、という構図。
-**Fix（serve 経路の正攻法）**: [boot/keychip/server/pcpa_server.py](../boot/keychip/server/pcpa_server.py) の
+**Fix（serve 経路の正攻法）**: [boot/mxkeychip/server/pcpa_server.py](../boot/mxkeychip/server/pcpa_server.py) の
 `query_dhcp_status`/`query_nic_status` 応答を **`&` 区切り**に変更（他の応答と統一）。これで native
 `0x5814E0` が **ret=0** を返し、ctx を自力で満たす（dhcp_status=3 / nic_ready=1）。旧 force-patch
 （`amnet/state.js` の 0x5814E0 onLeave force）は**撤去**し log-only monitor に置換（persistence: monitor）。
 検証（force OFF + `&`）: `amNetDIAG orig=0 nDhcp=3 nicReady=1`、`8006` ログ 0 件、HLSM stable ATTRACT 到達。
 これで amNet は runtime hook 無し（pcpa_server だけ）で serve され、detach 耐性も持つ。nic プロパティ連鎖
-（query_nic_status が ip/mask/gw/dns を inline で返す）の機序は `boot/amnet/FACTS.md` 参照。
+（query_nic_status が ip/mask/gw/dns を inline で返す）の機序は `boot/mxnetwork/FACTS.md` 参照。
 **残課題**: 画面には別の device-scene エラーが残る（`BUGS.md` の [大半解決] device-presence 参照。8006 自体は解決）。
 
 ---
@@ -62,7 +62,7 @@ Fix（TeknoParrot 方式＝チェック無力化）: errCode 4 の `MOV dword pt
 data-write は anti-tamper `FUN_0048f9c0` の region-index 整合（01→0=JAPAN）用に**維持**（errCode 抑止用ではない）。
 比較: micetools は実 KCF(`AM_APPBOOT.m_Region`)で `appboot.region` を正しく返す「データを正す」解（PcbRegion は
 実基板供給前提）。TP は region 検査をフックで通過する「チェック無力化」解。本構成は基板値の供給源が無いので
-TP 方式が正しい。実装 `boot/keychip/region.js` / 詳細 `boot/keychip/FACTS.md`「amlib region gate」。
+TP 方式が正しい。実装 `boot/mxkeychip/region.js` / 詳細 `boot/mxkeychip/FACTS.md`「amlib region gate」。
 検証（2026-06-13 実機, `captures/verify-region-neutralize.png` = 全国ランキング attract デモ描画＝クリーン）:
 NOP10 verify=true（0x59109/0x5A846）。決定打 `REGION_CHK 458fd0#1 game=0x0 dongle=0x1 (game&eff&5)=0x0 -> FAIL
 errCode=0` ＝ FUN_00458fd0 が PcbRegion=0 のまま早期に走り gate FAIL するが、NOP で errCode は **0**（旧 run は
@@ -280,7 +280,7 @@ init SM `FUN_0089a010` の "CHECKING ..." 文字列: IC CARD R/W / TOUCH PANEL /
 ### [FIXED] Error 1000 "Unknown Application Error" (amlib errCode 0x15 = alpbEx billing)
 真因: `FUN_007000c0`(RVA 0x3000c0, alpbEx_billing_poll) が `FUN_00a065c0`(ALL.Net billing client status)
 の未処理戻り値で `DAT_016f5af0=0x15` を立てる（実サーバ不在）。
-修正: `boot/allnet/billing.js`(alpbExGetExecStatus→5, offline idle)で解決。実機確認: 1000 消滅し次の 5101 へ前進。
+修正: `boot/patches.json(0xA065C0)`(alpbExGetExecStatus→5, offline idle)で解決。実機確認: 1000 消滅し次の 5101 へ前進。
 
 ### [FIXED] Error 5101 "IC Card R/W Not Found" (errCode 0x17)
 - 真因: `FUN_0089a010` state2("CHECKING IC CARD R/W")が presence プローブ
@@ -301,14 +301,14 @@ init SM `FUN_0089a010` の "CHECKING ..." 文字列: IC CARD R/W / TOUCH PANEL /
 - 修正: `boot/devices/touchpanel.js` (patchCode, 永続)。
 
 ### [FIXED] Error 8005 "Network type error (WAN)" (errCode 0x14)
-- 修正: `boot/amnet/network_type.js` (patchCode, 永続)。
+- 修正: `boot/patches.json(0x6FF18A/AC/B3)` (patchCode, 永続)。
 
 ---
 
 ## [FIXED] get_status recv completion — raw winsock bypasses PCPA async SM
 
 Root cause: port 40113 uses raw `recv()` (not pcpaRecvResponse), so `[stream+0x21C]` (completion state)
-is never updated → `0x58B260` never returns 1 → SM loops. Fix: `boot/amgfetcher/getstatus.js` sets
+is never updated → `0x58B260` never returns 1 → SM loops. Fix: `boot/mxgfetcher/getstatus.js` sets
 `getStatusRecvDone` flag in `recv` hook; `0x58ADC0 onLeave` forces ret=1 once. Also patches `0x575140`
 (result= field checker) → always return 0 (was always -5 → blocked parser). Details in FACTS.md §patchAmGfetcher.
 

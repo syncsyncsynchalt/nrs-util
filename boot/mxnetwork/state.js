@@ -1,7 +1,7 @@
-// subsys:      amnet
+// subsys:      mxnetwork
 // persistence: monitor   // network_role=serve
 // va: 0x9814E0
-// ssot:        amnet/FACTS.md
+// ssot:        mxnetwork/FACTS.md
 // role:        amNet 応答抽出 0x5814E0 (amNetworkResponseCheck) の native 成否を観測する診断専用
 //              (log-only, no force)。8006 (Network timeout DHCP) は pcpa_server.py の amNet 応答を
 //              '&' 区切りに修正したことで native 解決するため、旧 force-patch は撤去した。
