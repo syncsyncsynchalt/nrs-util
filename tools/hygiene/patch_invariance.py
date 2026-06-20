@@ -59,7 +59,7 @@ GAME_ARGS = ["-wsvga", "-full", "-img"]
 # right after) is resolved at CALL time, by when it is defined.
 _PROLOGUE = r"""
 'use strict';
-var __INV = { patches: [], hooks: [] };
+var __INV = { patches: [], hooks: [], seq: [] };
 (function () {
     // patchCode/attach are non-configurable+non-writable, so a Proxy get-trap that
     // returns a wrapper violates the "inconsistent get" invariant. Instead shadow
@@ -78,7 +78,9 @@ var __INV = { patches: [], hooks: [] };
                 var a = new Uint8Array(addr.readByteArray(size));
                 for (var i = 0; i < a.length; i++) bytes.push(a[i]);
             } catch (e) {}
-            __INV.patches.push({ va: rtToVa(addr), bytes: bytes });
+            var v = rtToVa(addr);
+            __INV.patches.push({ va: v, bytes: bytes });
+            __INV.seq.push({ op: 'patch', va: v });
         }
     });
     Memory = sM;
@@ -87,7 +89,8 @@ var __INV = { patches: [], hooks: [] };
     var sI = Object.create(_I);
     Object.defineProperty(sI, 'attach', { configurable: true, writable: true, value:
         function (addr, cbs) {
-            try { __INV.hooks.push({ va: rtToVa(addr) }); } catch (e) {}
+            try { var v = rtToVa(addr); __INV.hooks.push({ va: v });
+                  __INV.seq.push({ op: 'hook', va: v }); } catch (e) {}
             return _I.attach(addr, cbs);
         }
     });
@@ -121,15 +124,23 @@ def _assemble(boot_dir: str) -> str:
 
 
 def _canonical(effects: dict) -> dict:
-    """Order-independent normal form: sort patches by (va, bytes), hooks by va.
-    A pure refactor may reorder *when* patches apply (e.g. data-table collapse)
-    but must not change the SET — so we compare sets, not sequences."""
+    """Normal form. Patches/hooks are compared as SETS (a pure refactor may reorder
+    *when* independent patches apply — e.g. data-table collapse — without changing
+    the set). BUT at any address that is BOTH patched and hooked, the patch-vs-hook
+    ORDER is itself behaviour (cf. the 'don't mix patchCode + Interceptor at one
+    address' anti-pattern), so we additionally capture the op sequence per such
+    collision address and compare it order-sensitively."""
     patches = sorted(
         ({"va": p["va"].lower(), "bytes": p["bytes"]} for p in effects.get("patches", [])),
         key=lambda p: (p["va"], tuple(p["bytes"])),
     )
     hooks = sorted({h["va"].lower() for h in effects.get("hooks", [])})
-    return {"patches": patches, "hooks": hooks}
+    # Per-address op sequence, retained only for addresses with >1 distinct op type.
+    seq_by_va: dict = {}
+    for ev in effects.get("seq", []):
+        seq_by_va.setdefault(ev["va"].lower(), []).append(ev["op"])
+    collisions = {va: ops for va, ops in seq_by_va.items() if len(set(ops)) > 1}
+    return {"patches": patches, "hooks": hooks, "collisions": collisions}
 
 
 def capture(boot_dir: str) -> dict:
@@ -198,6 +209,11 @@ def _diff(a: dict, b: dict) -> list:
         out.append(f"  - hook only in A: {va}")
     for va in sorted(set(b["hooks"]) - set(a["hooks"])):
         out.append(f"  + hook only in B: {va}")
+    # Ordering drift at addresses that are both patched and hooked.
+    ca, cb = a.get("collisions", {}), b.get("collisions", {})
+    for va in sorted(set(ca) | set(cb)):
+        if ca.get(va) != cb.get(va):
+            out.append(f"  ! patch/hook ORDER differs at {va}: A={ca.get(va)} B={cb.get(va)}")
     return out
 
 
