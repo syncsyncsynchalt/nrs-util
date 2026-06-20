@@ -1,1 +1,16 @@
-[]
+[
+  { "va": "0x4F6310", "bytes": "RET1",        "subsys": "devices",    "ssot": "devices/FACTS.md",    "note": "IC Card R/W ready bit1 → 1 (responded; Error 5101, state2)" },
+  { "va": "0x4F6330", "bytes": "RET0",        "subsys": "devices",    "ssot": "devices/FACTS.md",    "note": "IC Card R/W error bit4 → 0 (healthy reader)" },
+  { "va": "0x8B3B00", "bytes": "RET1",        "subsys": "devices",    "ssot": "devices/FACTS.md",    "note": "Touch Panel status → 1 (responded; Error 5501, state3)" },
+  { "va": "0x8B3B40", "bytes": "RET0",        "subsys": "devices",    "ssot": "devices/FACTS.md",    "note": "Touch Panel error → 0 (healthy)" },
+  { "va": "0x6F0B80", "bytes": "00",          "subsys": "devices",    "ssot": "devices/FACTS.md",    "note": "USB I/O board errCode imm 0F→00 (FUN_006f0ad0; Error 951 non-fatal)" },
+  { "va": "0x4FDA50", "bytes": "RET0",        "subsys": "devices",    "ssot": "devices/FACTS.md",    "note": "FUN_004fda50 is-DVD-boot → 0 (storage OK; Error 913, state5)" },
+  { "va": "0x72B3A0", "bytes": "31 C0 85 F6 74 02 89 06 B0 04 C3", "subsys": "startup", "ssot": "startup/FACTS.md", "note": "FUN_0072b3a0 EXTEND IMAGE install → ret 4 (done) + *ESI=0 (success); state5" },
+  { "va": "0x701280", "bytes": "B0 01 C3",    "subsys": "startup",    "ssot": "startup/FACTS.md",    "note": "FUN_00701280 P-ras ready → mov al,1;ret (FreePlay; state7)" },
+  { "va": "0x891B20", "bytes": "B8 01 00 00 00 C2 04 00", "subsys": "amplatform", "ssot": "amplatform/FACTS.md", "note": "HW type dispatcher → mov eax,1; ret 4 (SEH bypass; Error 0901)" },
+  { "va": "0x6FF18A", "bytes": "01",          "subsys": "amnet",      "ssot": "amnet/FACTS.md",      "note": "FUN_006ff140 LAN flag b50a init 0→1 (Error 8005, state4)" },
+  { "va": "0x6FF1AC", "bytes": "01",          "subsys": "amnet",      "ssot": "amnet/FACTS.md",      "note": "FUN_006ff140 LAN flag b50b init 0→1" },
+  { "va": "0x6FF1B3", "bytes": "01",          "subsys": "amnet",      "ssot": "amnet/FACTS.md",      "note": "FUN_006ff140 LAN flag b50c init 0→1" },
+  { "va": "0xA065C0", "bytes": { "retImm": 5 }, "subsys": "allnet",   "ssot": "allnet/FACTS.md",     "note": "alpbExGetExecStatus → 5 (idle; ALL.Net Plus Billing offline; Error 1000)" },
+  { "va": "0x72DCE0", "bytes": { "retImm": 2 }, "subsys": "allnet",   "ssot": "allnet/FACTS.md",     "note": "amlib_device_status_getter → 2 (ready; state4 network + state6 allnet; Error 8001)" }
+]

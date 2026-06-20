@@ -1,7 +1,8 @@
 # allnet/ — ネットワーク層（予約地・現状は stub）
 
-現状は ALL.Net 接続段を **satisfy（resolved 固定）/ billing offline** で通すだけ（`connection.js` / `billing.js`）。
-将来の**ネットワーク完全対応はこのディレクトリへの追加だけで済む**ように予約してある。
+現状は ALL.Net 接続段を **satisfy（resolved 固定）/ billing offline** で通すだけ（`../patches.json`:
+0x72DCE0 connection / 0xA065C0 billing）。将来の**ネットワーク完全対応はこのディレクトリへの追加だけで
+済む**ように予約してある（Phase 5 で billing→`ambilling`、connection→`mxnetwork` へ再帰属予定）。
 
 ## 将来の実装計画（仕様 = `../../docs/bsnk_ringedge.md §4`）
 

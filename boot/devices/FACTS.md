@@ -14,10 +14,10 @@ boot 後に居座る「Error NNNN」は**ゲームアプリのエラーシーン
 **amlib errCode → 表示 errNo 対応**(実測確定, デバイス連鎖。1つ満たすと次へ前進):
 | errCode | errNo | メッセージ | 発生源 | 対処 |
 |---|---|---|---|---|
-| 0x15(21) | 1000 | Unknown Application Error | `FUN_007000c0` alpbEx billing | `19_patchBilling`(✅) |
-| 0x17(23) | 5101 | IC Card R/W Not Found | `FUN_0089a010` state2 / `FUN_004f6310`(ready)/`FUN_004f6330`(err) | `23_emulateCardReader`(✅) |
-| 0xf(15) | 951 | USB Device Not Found | `FUN_00679de0`/`FUN_0067a670`→`FUN_006f0ad0`（USB I/Oボード 838-15069）| `25_emulateUsbIoBoard`(✅) |
-| 0x16(22) | 5501 | Touch Panel Not Found | `FUN_0089a010` state3 / `FUN_008b3b00`(resp)/`FUN_008b3b40`(err), dev type 0x22 | `26_emulateTouchPanel`(✅) |
+| 0x15(21) | 1000 | Unknown Application Error | `FUN_007000c0` alpbEx billing | `patches.json` 0xA065C0(✅) |
+| 0x17(23) | 5101 | IC Card R/W Not Found | `FUN_0089a010` state2 / `FUN_004f6310`(ready)/`FUN_004f6330`(err) | `patches.json` 0x4F6310/30(✅) |
+| 0xf(15) | 951 | USB Device Not Found | `FUN_00679de0`/`FUN_0067a670`→`FUN_006f0ad0`（USB I/Oボード 838-15069）| `patches.json` 0x6F0B80(✅) |
+| 0x16(22) | 5501 | Touch Panel Not Found | `FUN_0089a010` state3 / `FUN_008b3b00`(resp)/`FUN_008b3b40`(err), dev type 0x22 | `patches.json` 0x8B3B00/40(✅) |
 | 0x14(20) | 8005 | Network type error (WAN) | `FUN_0089a010` state6 / comm dev(type 0x20) error word `deviceMgr+0x1ec` bits2-4(=0x1c) | 未対応(ALL.Net層) |
 
 実証順: 1000→5101→951→5501→8005（各サブシステムを satisfy するたびに次のデバイスエラーへ前進）。

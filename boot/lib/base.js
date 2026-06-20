@@ -79,11 +79,20 @@ function retImm(n) {                              // mov eax,n ; ret          ->
 function retN(n) {                                // ret n  (stdcall arg cleanup; eax untouched)
     return [0xC2, n & 0xFF, (n >>> 8) & 0xFF];
 }
-// Resolve a patches.json `bytes` field: 'RET0' | 'RET1' | {retImm:n} | {retN:n} | [0x..].
+// Resolve a patches.json `bytes` field:
+//   'RET0' | 'RET1'            named stub
+//   {retImm:n} | {retN:n}      built stub
+//   "31 C0 C3"                 hex byte string (disasm.py convention; most readable)
+//   [0x31,0xC0,0xC3]           raw byte array
 function patchBytes(spec) {
     if (Array.isArray(spec)) return spec;
-    if (spec === 'RET0') return RET0;
-    if (spec === 'RET1') return RET1;
+    if (typeof spec === 'string') {
+        if (spec === 'RET0') return RET0;
+        if (spec === 'RET1') return RET1;
+        if (/^[0-9A-Fa-f]{2}( [0-9A-Fa-f]{2})*$/.test(spec.trim()))
+            return spec.trim().split(/\s+/).map(function (h) { return parseInt(h, 16); });
+        throw new Error('unknown bytes mnemonic/hex: ' + spec);
+    }
     if (spec && typeof spec === 'object') {
         if ('retImm' in spec) return retImm(spec.retImm);
         if ('retN'  in spec) return retN(spec.retN);

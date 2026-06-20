@@ -90,16 +90,6 @@
       "network_role": "local"
     },
     {
-      "module": "amplatform/hwdetect.js",
-      "subsys": "amplatform",
-      "persistence": "persistent",
-      "va": [
-        "0x891B20"
-      ],
-      "ssot": "amplatform/FACTS.md",
-      "network_role": "local"
-    },
-    {
       "module": "keychip/region.js",
       "subsys": "keychip",
       "persistence": "runtime",
@@ -232,104 +222,12 @@
       "network_role": "local"
     },
     {
-      "module": "allnet/billing.js",
-      "subsys": "allnet",
-      "persistence": "persistent",
-      "va": [
-        "0xA065C0"
-      ],
-      "ssot": "allnet/FACTS.md",
-      "network_role": "serve"
-    },
-    {
       "module": "keychip/setup.js",
       "subsys": "keychip",
       "persistence": "runtime",
       "va": [],
       "ssot": "keychip/FACTS.md",
       "network_role": "local"
-    },
-    {
-      "module": "devices/cardreader.js",
-      "subsys": "devices",
-      "persistence": "persistent",
-      "va": [
-        "0x4F6310",
-        "0x4F6330"
-      ],
-      "ssot": "devices/FACTS.md",
-      "network_role": "serve"
-    },
-    {
-      "module": "devices/usbio.js",
-      "subsys": "devices",
-      "persistence": "persistent",
-      "va": [
-        "0x6F0B80"
-      ],
-      "ssot": "devices/FACTS.md",
-      "network_role": "local"
-    },
-    {
-      "module": "devices/touchpanel.js",
-      "subsys": "devices",
-      "persistence": "persistent",
-      "va": [
-        "0x8B3B00",
-        "0x8B3B40"
-      ],
-      "ssot": "devices/FACTS.md",
-      "network_role": "local"
-    },
-    {
-      "module": "amnet/network_type.js",
-      "subsys": "amnet",
-      "persistence": "persistent",
-      "va": [
-        "0x6FF18A",
-        "0x6FF1AC",
-        "0x6FF1B3"
-      ],
-      "ssot": "amnet/FACTS.md",
-      "network_role": "serve"
-    },
-    {
-      "module": "devices/storage.js",
-      "subsys": "devices",
-      "persistence": "persistent",
-      "va": [],
-      "ssot": "devices/FACTS.md",
-      "network_role": "local"
-    },
-    {
-      "module": "startup/extend_image.js",
-      "subsys": "startup",
-      "persistence": "persistent",
-      "va": [
-        "0x72B3A0"
-      ],
-      "ssot": "startup/FACTS.md",
-      "network_role": "local"
-    },
-    {
-      "module": "allnet/connection.js",
-      "subsys": "allnet",
-      "persistence": "persistent",
-      "va": [
-        "0x72DCE0"
-      ],
-      "ssot": "allnet/FACTS.md",
-      "network_role": "serve"
-    },
-    {
-      "module": "startup/pras.js",
-      "subsys": "startup",
-      "persistence": "persistent",
-      "va": [
-        "0x701280"
-      ],
-      "ssot": "startup/FACTS.md",
-      "network_role": "serve"
     }
   ]
 }

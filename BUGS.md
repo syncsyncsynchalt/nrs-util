@@ -48,12 +48,12 @@ struct が残る、という上記 root cause を再確認）。よって clean 
 | 0xd | FUN_0045a320 | — | 未対応 |
 | 0xe | FUN_004591b0 | — | 未対応 |
 | 0x18 | FUN_0050a340 | — | 未対応 |
-| 6/10(0xa)/0xb | FUN_00679cb0 | storage/**board-table(10)** | devices/storage.js（10 は未抑止の疑い） |
+| 6/10(0xa)/0xb | FUN_00679cb0 | storage/**board-table(10)** | patches.json 0x4FDA50（10 は未抑止の疑い） |
 | 1 | FUN_006f0a80 | — | keychip/setup.js(KCHOLD) |
-| (iVar2) | FUN_006f0ad0 | USB I/O | devices/usbio.js |
-| 0x15(=1000) | FUN_007000c0 | alpbEx billing | allnet/billing.js ✅ |
-| 0x17/0x16/0x14 | FUN_0089a010 | SYSTEM STARTUP (card/touch/**network**) | devices/*, amnet/* |
-| 0x16 | FUN_008b2e00 | touch | devices/touchpanel.js |
+| (iVar2) | FUN_006f0ad0 | USB I/O | patches.json 0x6F0B80 |
+| 0x15(=1000) | FUN_007000c0 | alpbEx billing | patches.json 0xA065C0 ✅ |
+| 0x17/0x16/0x14 | FUN_0089a010 | SYSTEM STARTUP (card/touch/**network**) | patches.json (0x4F6310/30, 0x8B3B00/40, 0x6FF18A/AC/B3) |
+| 0x16 | FUN_008b2e00 | touch | patches.json 0x8B3B00/40 |
 
 deterministic fix の2案: (A) latch する setter の `DAT_016f5af0 = X` を NOP 化（suppress。ただし
 FUN_0089a010 等は load-bearing で要慎重・stable attract を壊す恐れ）。(B) DAT_016f5af0 を**毎フレーム 0 に
