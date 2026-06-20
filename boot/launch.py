@@ -36,6 +36,17 @@ PCPA_SERVER_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "keych
 _BOOT_DIR = os.path.dirname(os.path.abspath(__file__))
 _MANIFEST = os.path.join(_BOOT_DIR, "MANIFEST.json")
 
+def _patch_table_literal():
+    """Raw JSON text of boot/patches.json (the data-driven pure-byte patch table),
+    injected into the script as `var __PATCH_TABLE__ = [...]` right after lib/base.js
+    so lib/patch_table.js can apply it. Absent/empty file -> '[]'."""
+    p = os.path.join(_BOOT_DIR, "patches.json")
+    try:
+        with open(p, encoding="utf-8") as f:
+            return f.read().strip() or "[]"
+    except FileNotFoundError:
+        return "[]"
+
 def _load_boot_script():
     import json
     with open(_MANIFEST, encoding="utf-8") as f:
@@ -45,6 +56,10 @@ def _load_boot_script():
         mod_path = os.path.join(_BOOT_DIR, *entry["module"].split("/"))
         with open(mod_path, encoding="utf-8", newline="") as mf:
             parts.append(mf.read())
+        # Inject the patch table right after base.js (keeps base.js's 'use strict'
+        # first, and defines __PATCH_TABLE__ before lib/patch_table.js consumes it).
+        if entry["module"] == "lib/base.js":
+            parts.append("\nvar __PATCH_TABLE__ = " + _patch_table_literal() + ";\n")
     return "".join(parts)
 
 FRIDA_SCRIPT = _load_boot_script()

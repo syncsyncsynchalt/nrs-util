@@ -10,6 +10,14 @@
       "network_role": "local"
     },
     {
+      "module": "lib/patch_table.js",
+      "subsys": "lib",
+      "persistence": "persistent",
+      "va": [],
+      "ssot": "boot/CONVENTIONS.md",
+      "network_role": "local"
+    },
+    {
       "module": "amdebug/logcapture.js",
       "subsys": "amdebug",
       "persistence": "monitor",

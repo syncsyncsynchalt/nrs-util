@@ -116,9 +116,16 @@ def _assemble(boot_dir: str) -> str:
         mod_path = os.path.join(boot_dir, *entry["module"].split("/"))
         with open(mod_path, encoding="utf-8", newline="") as mf:
             parts.append(mf.read())
-    # If launch.py injects a patch table (data-driven patches), mirror that here
-    # so the captured effect-set includes table-applied patches. The table file
-    # is optional; absent before Phase 1.
+        # Mirror launch.py: inject the data-driven patch table right after base.js
+        # so captured effects include table-applied patches.
+        if entry["module"] == "lib/base.js":
+            tbl = os.path.join(boot_dir, "patches.json")
+            try:
+                with open(tbl, encoding="utf-8") as tf:
+                    lit = tf.read().strip() or "[]"
+            except FileNotFoundError:
+                lit = "[]"
+            parts.append("\nvar __PATCH_TABLE__ = " + lit + ";\n")
     parts.append(_EPILOGUE)
     return "".join(parts)
 
