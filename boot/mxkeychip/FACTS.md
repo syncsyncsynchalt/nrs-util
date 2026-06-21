@@ -95,15 +95,15 @@ errCode 4 を display struct へ snapshot）。**解法は TeknoParrot 同様チ
 ---
 
 
-### hookPcpa IIFE
+### hookPcpa（load-bearing は `client.js`、観測は `diag.js`）
 
-| RVA | Function |
-|---|---|
-| 0x58AEA0 | pcpaOpenClient(stream, ip, port, timeout_ms, unk) → logs orig; only forces ret→0 if orig<0 |
-| 0x58AB20 | pcpaSetSendPacket(stream, key, val) |
-| 0x58AB60 | pcpaAddSendPacket(stream, key, val) |
-| 0x58AF50 | pcpaSendRequest(stream, unk) |
-| 0x58AFF0 | pcpaRecvResponse(stream, unk) → log only; passes through（orig=1 は "still polling" で、ここで注入すると pcpa_server 応答前にバッファ破損するため注入しない） |
+| static_VA | module | Function |
+|---|---|---|
+| 0x98AEA0 | client.js | pcpaOpenClient(stream, ip, port, timeout_ms, unk) → logs orig; only forces ret→0 if orig<0 |
+| 0x98AB20 | diag.js | pcpaSetSendPacket(stream, key, val) — log only |
+| 0x98AB60 | diag.js | pcpaAddSendPacket(stream, key, val) — log only |
+| 0x98AF50 | diag.js | pcpaSendRequest(stream, unk) — log only |
+| 0x98AFF0 | diag.js | pcpaRecvResponse(stream, unk) → log only; passes through（orig=1 は "still polling" で、ここで注入すると pcpa_server 応答前にバッファ破損するため注入しない） |
 
 Response buffer offsets (stream struct): +0x258 and +0x1EC.
 pcpaOpenClient return value semantics [F]: orig=1 = "new connection established, socket handle stored"; orig=0 = "use cached existing connection"; negative = error. Forcing 0 when orig=1 causes pcpaSendRequest to fail (-4) on ports with no prior cached socket (40106, 40104).

@@ -5,26 +5,26 @@ confidence: [F]=Frida確認 [S]=静的解析 [I]=推論
 
 ---
 
-## Frida Hook RVAs
+## Frida Hook static_VA
 
-All are nrsBase.add() arguments. [F] unless noted.
+番地は static_VA（`va()` 経由で参照、ASLR 非依存）。[F] unless noted.
 
 
 ### bypassJvs IIFE (`boot/amjvs/state.js`) — patchCode + 初期 state write
 
 patchCode 永続 + ロード時の state 直接書き込みで構成する。
 
-| 種別 | RVA | 内容 |
+| 種別 | static_VA | 内容 |
 |---|---|---|
-| patchCode | 0x27AFA0 | FUN_0067afa0 (JVS reinit) → `ret`（memset+amJvspInit fail path を無効化。-4→errState=-101 を防ぐ） |
-| patchCode | 0x587590 | specCheck → `xor eax,eax; ret 8`（[[0xCCF54C]] guard が必ず成功） |
-| patchCode | 0x5883D3 | amJvspAckSwInput 内 `MOV EAX,EDI`(8B C7)→`XOR EAX,EAX`(33 C0)。GetReport(-11) failure path を 0 返しに＝JVS polling 維持（static_VA 0x9883D3） |
-| data write | 0x12B7858 | jvs_initialized_flag = 1 |
-| data write | 0x12B785C | jvs_node_count = 1 |
-| data write | 0x12B7860 | node[0].id = 1 |
-| data write | 0x12B8668 | jvs_p1_device_id = 1 |
-| data write | 0x12B7EA0 | node[0].poll_state=1（+0x12B7EA1 node_valid=1） |
-| data write | 0x8CF54C | [[RVA]][0]=1（sub1 ctx — specCheck guard 用、ロード時。static_VA 0xCCF54C） |
+| patchCode | 0x67AFA0 | FUN_0067afa0 (JVS reinit) → `ret`（memset+amJvspInit fail path を無効化。-4→errState=-101 を防ぐ） |
+| patchCode | 0x987590 | specCheck → `xor eax,eax; ret 8`（[[0xCCF54C]] guard が必ず成功） |
+| patchCode | 0x9883D3 | amJvspAckSwInput 内 `MOV EAX,EDI`(8B C7)→`XOR EAX,EAX`(33 C0)。GetReport(-11) failure path を 0 返しに＝JVS polling 維持 |
+| data write | 0x16B7858 | jvs_initialized_flag = 1 |
+| data write | 0x16B785C | jvs_node_count = 1 |
+| data write | 0x16B7860 | node[0].id = 1 |
+| data write | 0x16B8668 | jvs_p1_device_id = 1 |
+| data write | 0x16B7EA0 | node[0].poll_state=1（+0x16B7EA1 node_valid=1） |
+| data write | 0xCCF54C | [[ptr]][0]=1（sub1 ctx — specCheck guard 用、ロード時） |
 
 FUN_0067afa0 patchCode で nodeInfo version-check 経路に到達しないため、以下の node_info_buf 値は強制不要:
 +0x101=0x14 / +0x108=0x02 / +0x124=0x0d / +0x134=0x13 / +0x138=0x00

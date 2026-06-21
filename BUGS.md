@@ -43,15 +43,6 @@ latch コード（0xa board-table / 0x14 network 等）は
 
 ---
 
-## [RISK] amNet bind hook IP hardcoded to 192.168.1.209
-
-Risk: If teknoparrot.ini [Network]Ip changes, amNet query_nic_status must also return the new IP, AND the bind hook target constant must be updated.
-Location in boot/launch.py: `var TARGET_IP_LE = 0xD101A8C0;` (192.168.1.209 little-endian).
-pcpa_server.py returns `ip_address=192.168.1.209` in query_nic_status response.
-All three must match: teknoparrot.ini → pcpa_server.py → boot/launch.py bind hook.
-
----
-
 ## [ANTI-PATTERN] onLeave hook on crash-before-return function
 
 onLeave requires the function to return normally. If the function crashes or calls ExitProcess, onLeave never fires.

@@ -6,7 +6,7 @@
       "subsys": "lib",
       "persistence": "na",
       "va": [],
-      "ssot": "boot/CONVENTIONS.md",
+      "ssot": "CONVENTIONS.md",
       "network_role": "local"
     },
     {
@@ -14,7 +14,7 @@
       "subsys": "lib",
       "persistence": "persistent",
       "va": [],
-      "ssot": "boot/CONVENTIONS.md",
+      "ssot": "CONVENTIONS.md",
       "network_role": "local"
     },
     {

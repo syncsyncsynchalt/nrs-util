@@ -58,7 +58,8 @@ amNet 応答を `\r\n` 区切りにすると最初の `\r` でパースが止ま
   (0x45a000) で `(mask&ip)==(ref&mask)` を計算 → DAT_016019a6。`FUN_006fe040`(network 接続 SM)は
   DAT_016019a5(nic解決)&&DAT_016019a6(ip_match) が真のときだけ前進する。
 
-bind は INADDR_ANY 化（`boot/lib/base.js` の bind フック）で任意 NIC に bind 可。
+bind は現状 boot シムでは介入していない（bind フックは撤去済み＝`boot/lib/base.js` に socket フック無し）。
+※ native でどう成立するかは未再 RE。介入が必要になった場合のみ再調査する。
 
 ---
 

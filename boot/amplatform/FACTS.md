@@ -7,10 +7,10 @@ confidence: [F]=Frida確認 [S]=静的解析 [I]=推論
 
 ### hookAmPlatform IIFE
 
-| RVA | Function | Injected Value |
+| static_VA | Function | Injected Value |
 |---|---|---|
-| 0x581D60 | amPlatformGetOsVersion | "WindowsXP" |
-| 0x581FF0 | amPlatformGetPlatformId | "AAL" (ハードウェア board ID。比較先 "AAL"/"AAM"/"NEC" と一致させる。"RingEdge" は表示名で NG) |
+| 0x981D60 | amPlatformGetOsVersion | "WindowsXP" |
+| 0x981FF0 | amPlatformGetPlatformId | "AAL" (ハードウェア board ID。比較先 "AAL"/"AAM"/"NEC" と一致させる。"RingEdge" は表示名で NG) |
 
 Implementation: `Memory.patchCode`（`patchPlatformFunc` ヘルパー）で関数先頭を
 永続パッチ。`mov eax,[esp+4]; byte-by-byte write; xor eax,eax; ret 4`（stdcall, ret 4 確認済）。

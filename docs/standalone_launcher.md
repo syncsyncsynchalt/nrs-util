@@ -21,8 +21,8 @@ ram\, rom\          ← ゲームデータ
 | Auth Server IP | 未設定 | NAOMI Net 認証スキップ |
 
 > ⚠️ **ネットワーク IP は TP 値をそのまま流用しない。** TP プロファイルは `192.168.168.0/24`
-> (`Ip=192.168.168.103`)。本プロジェクトの amNet bind 先は `192.168.1.209`（現在は INADDR_ANY 化）で
-> **サブネットが異なる**。正は `boot/mxnetwork/FACTS.md` と `docs/teknoparrot.md` §3 の注記。
+> (`Ip=192.168.168.103`)。本プロジェクトの amNet query_nic_status 応答 IP は `192.168.1.209`（bind は
+> シム未介入＝フック撤去済み）で **サブネットが異なる**。正は `boot/mxnetwork/FACTS.md` と `docs/teknoparrot.md` §3 の注記。
 
 ## DLL 注入方式（OpenParrotLoader 系）
 

@@ -39,6 +39,7 @@ nrs.exe (NRS, x86-32, SEGA RingEdge) を Frida でパッチ・フックして
 | keychip/amDongle/PCP/KCF の要約（正は `C:\src\micetools\` 直読） | `docs/micetools.md` |
 | RingEdge 純正システムバイナリ（mxkeychip/mxsegaboot 等）・ブート手順・ringmaster鍵の要約（正は `C:\src\ringedge_system_63.01.10\` 実バイナリ） | `docs/ringedge_system.md` |
 | RingEdge セキュリティ/PCP/DS28CN01/billing/ALL.Net の散文解説 | `docs/bsnk_ringedge.md`（micetools 作者の裏取り。`/nu_alls/` keychip は非該当） |
+| SBVA(DVR-5001) ISO/SSD 抽出の背景（TrueCrypt 復号。正は `tools/iso/` の実出力） | `docs/iso_extraction.md` |
 | 解析ツール一覧 | `tools/README.md` |
 
 **横断的事実の正本（散在ビューは引用・編集はここを直す＝drift 防止）**:
