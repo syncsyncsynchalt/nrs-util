@@ -17,6 +17,9 @@ HARD チェック（失敗で exit 1）:
      定義する lib/base.js は除外。）
   4b. MANIFEST の 'subsys' がモジュール先頭ヘッダの `// subsys:` 行と一致する（命名 drift 検出）。
       ヘッダ（ディレクトリ名）を正とする。
+  4c. direction-B（index 完全性）: コード中の patch()/hook()/watch()/Interceptor/patchCode/
+      ループ表 {va:0x..} の literal TARGET 番地が全てヘッダ `// va:` に宣言されている
+      （宣言漏れ＝disasm 逆引きの穴を検出）。
   5. known_names.json のキーが static VA（>= ImageBase）。誤った RVA エントリを検出。
   6. ヘッダ `// va:` の値が妥当な static VA（>= ImageBase）。stale な RVA を検出。
 
@@ -42,10 +45,34 @@ HEX = re.compile(r"0x[0-9a-fA-F]{3,8}")
 RAW_BASE_ADD = re.compile(r"\b(?:nrsBase|nb)\.add\(")
 SUBSYS_HDR = re.compile(r"^//\s*subsys:\s*(\S+)", re.MULTILINE)
 VA_HDR = re.compile(r"^\s*//\s*va:\s*(.*)$", re.MULTILINE)
+# patch/hook の TARGET 番地検出（literal のみ。ループ表 {va:0x..} も拾う）。
+TARGET_PATS = [re.compile(p) for p in (
+    r"\bhook\(\s*(0x[0-9A-Fa-f]{3,8})",
+    r"\bwatch\(\s*(0x[0-9A-Fa-f]{3,8})",
+    r"\bpatch\(\s*(0x[0-9A-Fa-f]{3,8})",
+    r"Interceptor\.(?:attach|replace)\(\s*va\(\s*(0x[0-9A-Fa-f]{3,8})",
+    r"Memory\.patchCode\(\s*va\(\s*(0x[0-9A-Fa-f]{3,8})",
+    r"(?:^|[,{(]\s*)va:\s*(0x[0-9A-Fa-f]{3,8})",
+)]
 
 
 def hexset(text):
     return {int(t, 16) for t in HEX.findall(text)}
+
+
+def patch_hook_targets(text):
+    """コード本体（コメント行除く）から patch/hook の literal TARGET 番地を返す。"""
+    out = set()
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("//") or s.startswith("*") or s.startswith("/*"):
+            continue
+        for p in TARGET_PATS:
+            for g in p.findall(line):
+                tok = g if isinstance(g, str) else g[-1]
+                if isinstance(tok, str) and tok.startswith("0x"):
+                    out.add(int(tok, 16))
+    return out
 
 
 def header_va(text):
@@ -119,6 +146,11 @@ def main():
                 errors.append(f"{mod}: header va {tok} declared but not used in module body (stale)")
             elif addr not in facts_hex:
                 warns.append(f"{mod}: va {tok} not documented in any FACTS.md/ARCH.md")
+        # 4c. direction-B（index 完全性）: コードの patch/hook 先は全てヘッダ va に宣言されている。
+        # helper を定義する base.js は除外。
+        if mod != "lib/base.js":
+            for addr in sorted(patch_hook_targets(text) - set(vas)):
+                errors.append(f"{mod}: patches/hooks 0x{addr:X} but not in header // va: (index gap)")
         # 8. persistence の妥当性。生のプリミティブと base.js の helper イディオム
         # （hook()/watch()=runtime、patch()=persistent なバイト書き込み）の両方を認識し、
         # モジュールが宣言的になっても heuristic が機能しなくならないようにする。

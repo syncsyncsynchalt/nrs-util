@@ -1,6 +1,6 @@
 // subsys:      mxkeychip
 // persistence: runtime   // network_role=local
-// va: —
+// va: 0x6F0A80 (errCode-1 latcher hook)
 // ssot:        mxkeychip/FACTS.md
 // role:        keychipSM setup を駆動して補助（DAT_016014a2 ラッチ等を satisfy 維持）。runtime
 

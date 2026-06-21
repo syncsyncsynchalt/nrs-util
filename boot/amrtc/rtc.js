@@ -1,6 +1,6 @@
 // subsys:      amrtc
 // persistence: runtime   // network_role=local
-// va: —
+// va: 0x974040 (amRtcGetServerTime hook), 0x9742C0 (amRtcSetServerTime hook)
 // ssot:        amrtc/FACTS.md
 // role:        amRtc サーバ時刻→PC ローカル時刻 / SetServerTime 無視。
 

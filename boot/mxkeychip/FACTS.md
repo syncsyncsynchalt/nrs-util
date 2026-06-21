@@ -89,6 +89,12 @@ errCode 4 を display struct へ snapshot）。**解法は TeknoParrot 同様チ
 | 0x59109 (0x459109) | `MOV [0x016f5af0],4` → NOP10 | `FUN_00458fd0`（早期に走る本命 latcher） | `FUN_006c3730` |
 | 0x5A846 (0x45a846) | `MOV [0x016f5af0],4` → NOP10 | `FUN_0045a7f0` | `FUN_00643de0` |
 
+`region.js` の全 patch/hook サイト（ヘッダ `// va:` と一致）:
+- **patch**: 0x986A66/0x986A74/0x986A92（region SM の jne→Error 0x381/0x387/0x38D を NOP6）、
+  0x97588A/0x97595F/0x975A1F（isrelease SM の error-display 分岐 jl→jmp）、0x459109/0x45A846（上表 errCode=4 ストア NOP10）。
+- **hook**: 0x458FD0/0x45A7F0（amlib region check 2関数を force+log）、0x98A5F0（error-display を診断ログ）。
+- **data-write/watchdog**: 0x16014C4/0x1601744/0x1601989（region-index 整合・上表）。
+
 `DAT_016014c4=01`(PcbRegion) の data-write は anti-tamper `FUN_0048f9c0` の region-index 整合（01→0=JAPAN,
 他→3）のため**維持**（errCode 抑止用ではない）。実装 `boot/mxkeychip/region.js`。比較は `docs/teknoparrot.md`/`docs/micetools.md`。
 
@@ -107,3 +113,5 @@ errCode 4 を display struct へ snapshot）。**解法は TeknoParrot 同様チ
 
 Response buffer offsets (stream struct): +0x258 and +0x1EC.
 pcpaOpenClient return value semantics [F]: orig=1 = "new connection established, socket handle stored"; orig=0 = "use cached existing connection"; negative = error. Forcing 0 when orig=1 causes pcpaSendRequest to fail (-4) on ports with no prior cached socket (40106, 40104).
+
+keychip setup (`setup.js`): hook 0x6F0A80（`FUN_006f0a80` errCode-1 latcher）で keychipSM setup を駆動補助し、`DAT_016014a2` ラッチ等を satisfy 維持する。

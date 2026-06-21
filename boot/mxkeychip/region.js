@@ -1,6 +1,6 @@
 // subsys:      mxkeychip
 // persistence: runtime   // network_role=local
-// va: 0x459109 (errCode=4 store FUN_00458fd0), 0x45A846 (errCode=4 store FUN_0045a7f0), 0x16014C4, 0x1601744, 0x1601989
+// va: 0x986A66, 0x986A74, 0x986A92 (region SM jne NOP), 0x97588A, 0x97595F, 0x975A1F (isrelease jl->jmp), 0x459109, 0x45A846 (errCode=4 store NOP), 0x458FD0, 0x45A7F0 (region check hooks), 0x98A5F0 (error-display diag hook), 0x16014C4, 0x1601744, 0x1601989 (DAT/watchdog)
 // ssot:        mxkeychip/FACTS.md
 // role:        Error 0903(region) を TeknoParrot 方式=チェック無力化で恒久解消（amlib region setter の
 //              errCode=4 ストア2箇所を NOP）。PcbRegion=JAPAN(01) data-write は anti-tamper(FUN_0048f9c0)の
