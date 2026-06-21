@@ -46,7 +46,7 @@ powershell -File tools\ghidra_mcp\start_headless.ps1 -Stop
 > サーバー未起動時は MCP ツールが connection refused になる。その場合は上記 launcher を実行する。
 > launcher は冪等（既起動なら no-op）。`-preScript ApplyKnownNames.java` が起動時に
 > `data/known_names.json` を program へ適用する。`search_decompiled` は初回呼び出しで全関数を
-> 逆コンパイルしキャッシュ構築（数分）— "cache building" が返ったら再試行。
+> 逆コンパイルしキャッシュを構築する（数分）。"cache building" が返ったら再試行する。
 
 ## 再生成（upstream 更新時 / 別 Ghidra バージョン）
 

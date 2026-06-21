@@ -1,6 +1,5 @@
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Keychip setup ステートマシン診断 — amDongleSetupKeychip (FUN_0096d520)。観測のみ。
+// Keychip setup ステートマシン診断: amDongleSetupKeychip (FUN_0096d520)。観測のみ。
 //
 // PCPA client のステートマシン。keychip ctx が未設定だと errCode 1 → Error 0949 "Keychip Not Found"。
 //   ctx = *PTR_DAT_00ccf000   (static 0xCCF000 / RVA 0x8CF000 のポインタ)
@@ -11,7 +10,6 @@
 //   ctx+0x04, ctx+0x08 = 成功時のみ 1 に設定 (state 6, substate 8)。presence チェック
 //                        FUN_0096c5d0 が読む。
 // "keychip.appboot.systemflag" の後に "keychip.version" を送る。
-// ─────────────────────────────────────────────────────────────────────────────
 (function diagKeychipSetup() {
     var nrsBase = null;
     try { nrsBase = Process.getModuleByName('nrs.exe').base; }

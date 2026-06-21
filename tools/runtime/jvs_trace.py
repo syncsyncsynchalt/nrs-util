@@ -1,7 +1,7 @@
-"""JVS I/O 調査 — JVS プロトコルのトラフィックを見るため ReadFile/WriteFile をフックする。
+"""JVS I/O 調査。JVS プロトコルのトラフィックを見るため ReadFile/WriteFile をフックする。
 
 TeknoParrot は COM 関数向けに nrs.exe の IAT をパッチする。本スクリプトは
-その下層のカーネル関数 AND TeknoParrot の export インターフェースをフックして
+その下層のカーネル関数と、TeknoParrot の export インターフェースの両方をフックして
 JVS データを観測する。
 
 使い方:

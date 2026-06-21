@@ -16,7 +16,7 @@ seed_f=swap(SEED,1,8,12,15)
 key_f =swap(KEY,0,4,2,14)
 iv_f  =swap(IV,0,11,5,15)
 
-# AM_APPBOOT ヘッダ (SBVA / RingEdge / JPN) — 復号済み Boot ID + KCF DB 由来
+# AM_APPBOOT ヘッダ (SBVA / RingEdge / JPN)。復号済み Boot ID + KCF DB 由来
 hdr=bytearray(0x18)
 struct.pack_into('<I',hdr,0,0)            # m_Crc (micekeychip パスでは未使用)
 struct.pack_into('<I',hdr,4,1)            # m_Format: byte (micekeychip は %02X で送る); KeychipCheck

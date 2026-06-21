@@ -2,7 +2,7 @@
 // persistence: monitor
 // va: 0x96EEC0, 0x96F1A0, 0x96EFC0, 0x96F290 (am* getters) ; 0x457500/0x457810/0x457822/0x457910/0x978450/0x975E00 (SM)
 // ssot:        FACTS.md §hookAmDongleSM Monitor RVAs
-// role:        amDongle getter + dongle/keychip ステートマシンへのログ専用 Interceptor（無改変）。Persistent パッチは amdongle/patch.js にある。
+// role:        amDongle getter と dongle/keychip ステートマシンへのログ専用 Interceptor（無改変）。Persistent パッチは amdongle/patch.js にある。
 (function hookAmDongle() {
     var nrsBase = null;
     try { nrsBase = Process.getModuleByName('nrs.exe').base; }
@@ -40,7 +40,7 @@
     logMsg('INIT_AMDONGLE', 'amDongle getter hooks attached');
 })();
 
-// amDongle / keychip ステートマシンのモニタ（ログ専用; persistent パッチは
+// amDongle と keychip のステートマシンのモニタ（ログ専用; persistent パッチは
 // amdongle/patch.js [0x975E00, 0x457AF0] にある）。
 (function hookAmDongleSM() {
     var nrsBase = null;

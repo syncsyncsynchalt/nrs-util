@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""ワンショット: 稼働中の nrs.exe に attach し、Error-1000 シーンの descriptor をダンプする。
+"""稼働中の nrs.exe に attach し、Error-1000 シーンの descriptor をダンプする。
 
 エラー描画関数 FUN_006f2730 は次を読む:
   desc+0xc  = char* message（非 null のとき表示）

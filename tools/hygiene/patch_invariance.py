@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""patch_invariance.py — boot/ のリファクタが挙動保存であることを証明する。
+"""boot/ のリファクタが挙動保存であることを証明する。
 
 boot シムが nrs.exe に与える観測可能な効果の全ては、次の集合だけ:
-  * byte patches   — Memory.patchCode で書く (static_VA, [bytes])
-  * interceptions  — Interceptor.attach でフックする (static_VA)
+  * byte patches   : Memory.patchCode で書く (static_VA, [bytes])
+  * interceptions  : Interceptor.attach でフックする (static_VA)
 
 リファクタ（helper 抽出、データテーブル移行、ファイル分割、ディレクトリ改名）が
-*純粋な* リファクタなら、この集合は前後でビット単位まで一致する。本ツールは
+純粋なリファクタなら、この集合は前後でビット単位まで一致する。本ツールは
 それを決定論的に捕捉し、2 つの捕捉結果を diff する。
 
 捕捉のしかた（ゲームロジックは一切走らない）:
@@ -49,10 +49,10 @@ GAME_DIR = os.environ.get("NRS_GAME_DIR", r"C:\src\bbs")
 GAME_EXE = os.environ.get("NRS_EXE", os.path.join(GAME_DIR, "nrs.exe"))
 GAME_ARGS = ["-wsvga", "-full", "-img"]
 
-# ── 組み立てた boot スクリプトの周囲に注入する計測コード ─────────────────────
+# 組み立てた boot スクリプトの周囲に注入する計測コード
 # Frida の QuickJS では Memory.patchCode / Interceptor.attach は read-only かつ
-# non-configurable なプロパティで、直接は再代入できない。だが *グローバル束縛* の
-# `Memory` と `Interceptor` は writable — そこで各々を、本物を継承する（他のメンバは
+# non-configurable なプロパティで、直接は再代入できない。だがグローバル束縛の
+# `Memory` と `Interceptor` は writable。そこで各々を、本物を継承する（他のメンバは
 # prototype 経由で本物の receiver に束縛されて通る。native Frida 束縛はこれを要求する）
 # オブジェクトで shadow し、効果を生むメソッドだけを上書きする。モジュールは
 # グローバルを参照するので、その呼び出しは shadow に当たる。rtToVa()（直後に連結される
@@ -147,7 +147,7 @@ def _assemble(boot_dir: str) -> str:
 
 def _canonical(effects: dict) -> dict:
     """正規形。patches/hooks は集合（SET）として比較する（純粋なリファクタは、独立した
-    patch が *いつ* 適用されるかを並べ替えうる — 例: データテーブルの集約 — が、集合は
+    patch がいつ適用されるかを並べ替えうる。例えばデータテーブルの集約。だが集合は
     変えない）。ただし patch と hook の両方が当たる番地では、patch と hook の順序それ自体が
     挙動になる（'1 つの番地で patchCode + Interceptor を混在させない' というアンチパターン
     参照）。そのため、そうした衝突番地ごとに op 列を別途捕捉し、順序を含めて比較する。"""
@@ -195,7 +195,7 @@ def capture(boot_dir: str) -> dict:
         while "effects" not in captured and time.time() < deadline:
             time.sleep(0.05)
     finally:
-        # 決して resume しない — ゲームコードは走らない。後片付けのみ。
+        # 決して resume しない。ゲームコードは走らせず、後片付けのみ行う。
         subprocess.run(["taskkill", "/F", "/IM", "nrs.exe"], capture_output=True)
 
     if "effects" not in captured:

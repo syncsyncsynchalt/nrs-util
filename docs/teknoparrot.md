@@ -1,4 +1,4 @@
-# TeknoParrot リファレンス（BBS / nrs.exe）— 要約
+# TeknoParrot リファレンス要約（BBS / nrs.exe）
 
 **正（source of truth）は実機 TeknoParrot インストール `C:\src\TPBootstrapper\` と nrs.exe 原本 `C:\src\bbs\`。**
 本資料はその要約で陳腐化しうる。設定値・プロトコル・シーケンスを使う前に、上記の実ファイル、または
@@ -14,7 +14,7 @@
 
 TeknoParrot は SEGA 他のアーケード基板（RingEdge/RingWide/Lindbergh/Nu 等）を PC で起動させるローダ。
 ゲーム EXE に DLL を注入し、ドングル・keychip・JVS I/O・ネットワーク・ハード検査を肩代わりする。
-BBS では nrs.exe を**改変せず**注入で起動（本プロジェクトの Frida 方式と目的同じ・手段違い）。
+BBS では nrs.exe を**改変せず**注入で起動する（本プロジェクトの Frida 方式と目的は同じで手段が違う）。
 
 インストール構成（`C:\src\TPBootstrapper\`）の要点:
 | 要素 | ファイル | 役割 |

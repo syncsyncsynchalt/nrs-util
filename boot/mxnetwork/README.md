@@ -1,8 +1,8 @@
-# mxnetwork/ — ネットワーク層（ALL.Net 接続。現状は stub・将来本体の予約地）
+# mxnetwork/ ネットワーク層（ALL.Net 接続。現状は stub、将来本体の予約地）
 
 現状は ALL.Net 接続段を **satisfy（resolved 固定）/ billing offline** で通すだけ（`../patches.json`:
-0x72DCE0 connection / 0xA065C0 billing）。将来の**ネットワーク完全対応はこの層への追加だけで
-済む**ように予約してある（billing は `../ambilling/`、connection/network は本 `mxnetwork/` へ再帰属済）。
+0x72DCE0 connection / 0xA065C0 billing）。
+将来この層への追加だけでネットワーク完全対応を済ませられるよう予約してある（billing は `../ambilling/`、connection/network は本 `mxnetwork/` へ再帰属済）。
 
 ## 将来の実装計画（仕様 = `../../docs/bsnk_ringedge.md §4`）
 

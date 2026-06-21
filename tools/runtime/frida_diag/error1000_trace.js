@@ -1,6 +1,5 @@
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Error 1000 トリガ診断 — FUN_006f2730 (RVA 0x2f2730) をフック。観測のみ。
+// Error 1000 トリガ診断: FUN_006f2730 (RVA 0x2f2730) をフック。観測のみ。
 //
 // FUN_006f2730 = ゲームアプリのエラー描画関数:
 //   void FUN_006f2730(int param_1)   // cdecl、スタック引数 1 個
@@ -11,7 +10,6 @@
 //
 // 呼び出し元は間接 (fn ptr / handler table) で static xref なし。確定した
 // errNo + message + flags byte + fuzzy backtrace を取得してトリガ箇所を特定する。
-// ─────────────────────────────────────────────────────────────────────────────
 (function hookError1000() {
     var nrsBase = null;
     try { nrsBase = Process.getModuleByName('nrs.exe').base; }

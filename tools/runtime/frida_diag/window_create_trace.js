@@ -1,6 +1,5 @@
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CreateWindowEx — 全生成をログ + WS_POPUP → WS_OVERLAPPEDWINDOW にパッチ。
+// CreateWindowEx: 全生成をログ + WS_POPUP → WS_OVERLAPPEDWINDOW にパッチ。
 //
 // CreateWindowEx(A/W) の引数レイアウト (x86 stdcall):
 //   args[0] = dwExStyle
@@ -8,7 +7,6 @@
 //   args[2] = lpWindowName (タイトル文字列)
 //   args[3] = dwStyle          ← WS_POPUP はここ
 //   args[4..7] = x, y, w, h
-// ─────────────────────────────────────────────────────────────────────────────
 (function hookAllWindowCreate() {
     var WS_POPUP            = 0x80000000;
     var WS_OVERLAPPEDWINDOW = 0x00CF0000;
@@ -48,11 +46,9 @@
     logMsg('INIT_WIN', 'CreateWindowEx hooks (all styles, args[3]=dwStyle fix) installed');
 })();
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 例外 / クラッシュ検出 — fault アドレスの module+offset を解決し、
+// 例外 / クラッシュ検出: fault アドレスの module+offset を解決し、
 // fuzzy backtrace をダンプして、トリガと無害な first-chance を区別する
 // (D3D/shader-cache の例外が多い)。
-// ─────────────────────────────────────────────────────────────────────────────
 function _modOff(addr) {
     try {
         var m = Process.findModuleByAddress(addr);
@@ -78,7 +74,7 @@ Process.setExceptionHandler(function(details) {
     return false;
 });
 
-// ── RaiseException / RtlRaiseException — アプリが投げる (SEH) 例外を捕捉 ──────
+// RaiseException / RtlRaiseException: アプリが投げる (SEH) 例外を捕捉
 // dwExceptionCode + 発生元の呼び出し箇所を取得する (Process.setExceptionHandler は
 // 'system' についてこれを出せない)。
 //   void RaiseException(DWORD dwExceptionCode, DWORD dwExceptionFlags,

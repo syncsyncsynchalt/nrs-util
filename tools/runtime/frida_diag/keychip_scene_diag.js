@@ -1,6 +1,5 @@
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 診断: keychip 0949 scene — presence のタイミング + scene 起動元。観測のみ。
+// 診断: keychip 0949 scene。presence のタイミングと scene 起動元。観測のみ。
 //
 // "Error 0949 Keychip Not Found" = scene-type 0x66 → scene-ID 0x3b5 (=949)。
 // autoscene builder FUN_00489130 が生成する。keychip presence = FUN_0096c5d0() = (ctx+4 && ctx+8)。
@@ -8,7 +7,6 @@
 // ログ対象: (a) FUN_0096c5d0 の戻り値遷移 (presence が一瞬 0 になるか?)、
 // (b) keychip scene の autoscene 生成 (param_2+0x10 == 0x66) の最初の数回と
 // その backtrace → scene 起動元。
-// ─────────────────────────────────────────────────────────────────────────────
 (function diagKeychipScene() {
     var nrsBase = null;
     try { nrsBase = Process.getModuleByName('nrs.exe').base; }

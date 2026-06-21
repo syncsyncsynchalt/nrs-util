@@ -2,16 +2,14 @@
 // persistence: runtime   // network_role=local
 // va: —
 // ssot:        app/FACTS.md
-// role:        ウィンドウモード化（フルスクリーン抑止・窓スタイル）。
+// role:        ウィンドウモード化（フルスクリーン抑止と窓スタイル）。
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ウィンドウモード — ChangeDisplaySettings* をブロックし、ウィンドウから WS_POPUP を除去する
+// ウィンドウモード: ChangeDisplaySettings* をブロックし、ウィンドウから WS_POPUP を除去する
 //
 // TeknoParrot 相当: ChangeDisplaySettingsA + CreateWindowExA/W をフックし、フルスクリーンへの
 // モード切替を防いで overlapped（ウィンドウ）スタイルを強制する。
 // nrs.exe が使う D3D11 では ChangeDisplaySettings が発火しない場合があるが、CreateWindowExA/W
-// フックによってトップレベルウィンドウは必ずウィンドウモードで生成される。
-// ─────────────────────────────────────────────────────────────────────────────
+// フックがトップレベルウィンドウを必ずウィンドウモードで生成する。
 (function windowedMode() {
     ['ChangeDisplaySettingsA', 'ChangeDisplaySettingsW',
      'ChangeDisplaySettingsExA', 'ChangeDisplaySettingsExW'].forEach(function(fnName) {

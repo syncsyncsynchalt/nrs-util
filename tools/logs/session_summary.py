@@ -1,4 +1,4 @@
-"""session_summary.py — 最新の Frida セッションログを観点ごとに 1 行で要約する.
+"""最新の Frida セッションログを観点ごとに 1 行で要約する.
 
 Usage:
   python session_summary.py              # 最新の captures/frida-*.txt を要約

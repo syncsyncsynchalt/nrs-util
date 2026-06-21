@@ -1,11 +1,11 @@
-# amDongle — FACTS（co-located）
+# amDongle FACTS（co-located）
 
 このサブシステムの事実（アドレス/構造体/RVA）。横断定数は `../ARCH.md`、索引は repo ルート `FACTS.md`。
 confidence: [F]=Frida確認 [S]=静的解析 [I]=推論
 
 ---
 
-### bypassAmDongle IIFE (`boot/amdongle/patch.js`) — persistent
+### bypassAmDongle IIFE (`boot/amdongle/patch.js`)（persistent）
 
 | 種別 | static_VA | Function | 内容 |
 |---|---|---|---|

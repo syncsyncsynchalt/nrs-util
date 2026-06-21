@@ -1,4 +1,4 @@
-# amdebug — FACTS（co-located）
+# amdebug FACTS（co-located）
 
 nrs.exe 内蔵の amiDebug ロギング機構の事実。横断定数は `../ARCH.md`、索引は repo ルート `FACTS.md`。
 confidence: [F]=Frida確認 [S]=静的解析 [I]=推論
@@ -29,7 +29,7 @@ retail ビルドでは**どちらも既定で出力されない**。`boot/amdebu
 - 重大度 = `level & 7`
 - 既定 `logLevel = -1` で全抑止。`logLevel=0x7fffffff` かつ `logMask=0xffffffff` で全通過。
 
-### B. 無条件ログ（printf 風・level 無し） — retail で破棄 [S]
+### B. 無条件ログ（printf 風・level 無し。retail で破棄）[S]
 
 ```
 呼出元 30+ → amDebugOut(0x55C7E0) → amDebugOut_format(0x55C790)

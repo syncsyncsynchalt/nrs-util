@@ -1,4 +1,4 @@
-# amPlatform — FACTS（co-located）
+# amPlatform FACTS（co-located）
 
 このサブシステムの事実（アドレス/構造体/RVA）。横断定数は `../ARCH.md`、索引は repo ルート `FACTS.md`。
 confidence: [F]=Frida確認 [S]=静的解析 [I]=推論

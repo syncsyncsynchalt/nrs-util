@@ -4,9 +4,7 @@
 // ssot:        app/FACTS.md
 // role:        終了/exit 経路のフック。
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ExitProcess / TerminateProcess — clean exit と強制 kill を検出する
-// ─────────────────────────────────────────────────────────────────────────────
+// ExitProcess / TerminateProcess: clean exit と強制 kill を検出する
 (function hookExit() {
     // ExitProcess で Frida のメッセージキューが落ちる前に、終了情報をファイルへ書き出す。
     // logMsg が失われても捕捉できるよう生の NativeFunction を使う。
@@ -65,7 +63,7 @@
     try { hookFn('ExitProcess',       logExit('ExitProcess'),       null); } catch(e) {}
     try { hookFn('TerminateProcess',  logExit('TerminateProcess'),  null); } catch(e) {}
     try { hookFn('ExitThread',        logExit('ExitThread'),        null); } catch(e) {}
-    // NtTerminateProcess: kernel32 の ExitProcess フックを迂回する ntdll 直接呼び出し
+    // NtTerminateProcess: kernel32 の ExitProcess フックを迂回する ntdll の直接呼び出し
     try {
         var ntTermAddr = null;
         try { ntTermAddr = Module.getGlobalExportByName('NtTerminateProcess'); } catch(e) {}

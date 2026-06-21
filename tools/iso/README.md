@@ -1,7 +1,7 @@
-# tools/iso/ — SBVA (DVR-5001) ISO 抽出・検証ツール
+# tools/iso/：SBVA (DVR-5001) ISO 抽出と検証ツール
 
-SEGA RingEdge の TrueCrypt 暗号化 IS/ SSD からゲームファイルを取り出すための解析スクリプト。
-背景・到達点・未解決点は [`../../docs/iso_extraction.md`](../../docs/iso_extraction.md) が正典。
+SEGA RingEdge の TrueCrypt 暗号化 ISO/SSD からゲームファイルを取り出すための解析スクリプト。
+背景と到達点と未解決点は [`../../docs/iso_extraction.md`](../../docs/iso_extraction.md) が正典。
 ここは**実証済みの経路で使うスクリプトだけ**を置く（DVD 単体経路の行き止まり実験は削除済み。
 findings は doc に記録済み）。
 

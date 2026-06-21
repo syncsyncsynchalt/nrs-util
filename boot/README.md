@@ -1,4 +1,4 @@
-# boot/ — nrs.exe スタンドアロン起動シム（成果物）
+# boot/ nrs.exe スタンドアロン起動シム（成果物）
 
 `nrs.exe`(NRS, RingEdge) を物理ハードなしで起動させる実体。RingEdge の各サブシステムを
 emulate / patch する frida モジュール群 + keychip(PCP) サーバ。**解析ツールは `tools/`、これは成果物**。

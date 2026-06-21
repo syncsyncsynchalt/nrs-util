@@ -1,11 +1,11 @@
-# amGfetcher — FACTS（co-located）
+# amGfetcher FACTS（co-located）
 
 このサブシステムの事実（アドレス/構造体/RVA）。横断定数は `../ARCH.md`、索引は repo ルート `FACTS.md`。
 confidence: [F]=Frida確認 [S]=静的解析 [I]=推論
 
 ---
 
-### patchAmGfetcher IIFE — get_status recv completion fix [S]
+### patchAmGfetcher IIFE: get_status recv completion fix [S]
 
 番地は static_VA。load-bearing は `boot/mxgfetcher/getstatus.js`、純診断は `boot/mxgfetcher/diag.js`。
 

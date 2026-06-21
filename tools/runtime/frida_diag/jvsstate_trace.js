@@ -1,9 +1,9 @@
 
-// === TeknoParrot_JvsState 共有メモリ トレーサ（純観測・自己完結）===========
+// TeknoParrot_JvsState 共有メモリ トレーサ（観測専用、自己完結）
 // 目的: JvsState の (a) 発生源モジュール、(b) 8 バイトレイアウトを実測する。観測専用。
 // 自己完結: 00_base.js に依存せずローカルヘルパで動く（spawn 経路でも単体 --attach でも可）。
-//   ※ TP 管理下の nrs.exe へ frida_monitor 全体を attach すると patchCode が TP のフックと
-//      二重適用され破綻するため、観測時は本ファイル単体を使う。
+//   注意: TP 管理下の nrs.exe へ frida_monitor 全体を attach すると patchCode が TP のフックと
+//   二重適用され破綻するため、観測時はこのファイル単体を使う。
 (function () {
     'use strict';
     var TARGET = 'TeknoParrot_JvsState';

@@ -1,4 +1,4 @@
-# nrs-util — Claude 操作ガイド（ルーター）
+# nrs-util Claude 操作ガイド（ルーター）
 
 nrs.exe (NRS, x86-32, SEGA RingEdge) を Frida でパッチ・フックして
 スタンドアロン起動させる RE リポジトリ。**このファイルは索引。事実は単一ソースに置く。**

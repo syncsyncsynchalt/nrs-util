@@ -4,16 +4,14 @@
 // ssot:        mxkeychip/FACTS.md
 // role:        Error 0903(region) を TeknoParrot 方式=チェック無力化で恒久解消（amlib region setter の
 //              errCode=4 ストア2箇所を NOP）。PcbRegion=JAPAN(01) data-write は anti-tamper(FUN_0048f9c0)の
-//              region-index 整合用に維持。NOP/DAT書込=永続(patchCode/data) / watchdog・診断=runtime(他コード safety-net)
+//              region-index 整合用に維持。NOP/DAT書込=永続(patchCode/data) / watchdog と診断=runtime(他コード safety-net)
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Error 0903 (region) 修正 — TP 方式: 本物の keychip 証明書データを供給せず、region
+// Error 0903 (region) 修正。TP 方式: 本物の keychip 証明書データを供給せず、region
 // チェック自体を無力化する。4 層、全て永続（patchCode / data）:
 //   1. outer keychip-region SM から出る jne を NOP（0x986A66/74/92）。
 //   2. isrelease SM の error-display 分岐を jl→jmp（0x97588A/5F/A1F）。
 //   3. amlib region setter の errCode=4 ストアを NOP（0x459109/0x45A846）。
 //   4. data 書込で region=JAPAN を強制 + watchdog で master errCode をクリア。
-// ─────────────────────────────────────────────────────────────────────────────
 (function patchRegionCheck() {
     var nrsBase = null;
     try { nrsBase = Process.getModuleByName('nrs.exe').base; }
@@ -39,7 +37,7 @@
     });
     logMsg('INIT_REGION', 'region jump NOP patches installed (3 jumps)');
 
-    // ── isrelease SM sub-state の error display バイパス ─────────────────────
+    // isrelease SM sub-state の error display バイパス
     // isrelease SM（FUN_00975830 周辺）には、同期 PCPA 交換後に [0x1286FEC] >= 1 だと
     // error display を呼ぶ sub-state ハンドラが 3 つある:
     //   RVA 0x57588A: jl → Error 0x2EB (747, "Wrong Region" 系)
@@ -63,7 +61,7 @@
         } catch(ex) { logMsg('WARN', 'patchCode ' + e.name + ': ' + ex); }
     });
 
-    // ── amlib init region setter の errCode=4 ストアを NOP 化（TP 方式＝チェック無力化）──
+    // amlib init region setter の errCode=4 ストアを NOP 化（TP 方式＝チェック無力化）
     // region ゲートは FUN_00458fd0 / FUN_0045a7f0 の2関数:
     //   if ((DAT_016014c4 & (DAT_016014a2 ? DAT_01601989 : 0) & 5) == 0)
     //       if (DAT_016f5af0 == 0) DAT_016f5af0 = 4;   // → on-screen Error 0903
@@ -71,9 +69,9 @@
     //   → ゲート FAIL 不可避。下の forceRegion で 01 を data-write するが、458fd0 がその着弾より前に
     //   走ると errCode 4 を display struct(DAT_016f5a80)へ snapshot して固着しうる（timing-fragile）。
     //   そこでストア `MOV [0x016f5af0],4`（C7 05 + addr4 + imm4 = 10B）自体を NOP 化する。呼び出し元
-    //   (FUN_006c3730/FUN_00643de0) は戻り値を捨てるので、制御フロー・戻り値とも不変。patchCode=永続。
+    //   (FUN_006c3730/FUN_00643de0) は戻り値を捨てるので、制御フローと戻り値はどちらも不変。patchCode=永続。
     //   0x459109: FUN_00458fd0 の errCode=4 ストア（早期に走る本命の latcher）
-    //   0x45A846: FUN_0045a7f0 の errCode=4 ストア（同一 errCode・防御的に併せて潰す）
+    //   0x45A846: FUN_0045a7f0 の errCode=4 ストア（errCode は同一。防御的に併せて潰す）
     var nop10 = [0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90];
     [
         { name: '0x459109 errCode=4 store (FUN_00458fd0)', va: 0x459109 },
@@ -105,12 +103,12 @@
         logMsg('INIT_REGION', '0x98A5F0 (error display) hooked for diag');
     } catch(e) { logMsg('WARN', 'hook 0x58A5F0: ' + e); }
 
-    // ── forceRegion: region オペランドを JAPAN に data 書込 + diag フック ──────
+    // forceRegion: region オペランドを JAPAN に data 書込 + diag フック
     // 上の NOP10 の後ろ盾: gate オペランドを強制してチェックも通るようにする。
     // DAT_016014c4 (PcbRegion) はバイナリ内に writer が無い → 0 のまま; Frida の data
     // 書込は detach 後も残る。オペランド (static_VA):
-    //   0x16014C4 game/PCB region · 0x1601744 cached region · 0x1601989 dongle region
-    //   0x16014A2 gate            · 0x16F5AF0 master errCode
+    //   0x16014C4 game/PCB region、0x1601744 cached region、0x1601989 dongle region
+    //   0x16014A2 gate、0x16F5AF0 master errCode
     function forceRegion() {
         try {
             va(0x16014C4).writeU8(0x01);   // DAT_016014c4 = JAPAN (game/PCB region)
@@ -154,7 +152,7 @@
         logMsg('INIT_REGION', '0x45A7F0 (amlib region check 2) hooked: force+log');
     } catch(e) { logMsg('WARN', 'hook 0x45A7F0: ' + e); }
 
-    // ── Watchdog: region を強制保持 + master errCode DAT_016f5af0 をクリア ──────────
+    // Watchdog: region を強制保持 + master errCode DAT_016f5af0 をクリア
     // 上で無力化していない errCode setter（0xa board-table / 0x14 network 等）の
     // safety-net + forceRegion を適用し続ける。DAT_016f5af0 は amlib init の errCode
     //（struct DAT_016f5a80 のフィールド、init は FUN_006c35c0）; init チェックは

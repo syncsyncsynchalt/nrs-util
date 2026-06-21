@@ -1,6 +1,5 @@
 
-// ─────────────────────────────────────────────────────────────────────────────
-// amDongleUpdate 診断 (FUN_00970fc0, RVA 0x570fc0) — FUN_00459460 から毎フレーム
+// amDongleUpdate 診断 (FUN_00970fc0, RVA 0x570fc0)。FUN_00459460 から毎フレーム
 // 呼ばれる keychip 再検証。観測のみ。ctx+8 か戻り値が変わるたびに
 // ステートマシンをログする。
 //
@@ -9,7 +8,6 @@
 // verify は (ctx+0x4c==0 && ctx+0x18==0) のときだけ走る。keychip command
 // (FUN_0096c6c0/c8d0/c920/dbc0/…) が非ゼロを返すと ctx+0x4c!=0 → verify は SKIP される
 // (意図した DS28CN01 バイパス)。
-// ─────────────────────────────────────────────────────────────────────────────
 (function diagDongleUpdate() {
     var nrsBase = null;
     try { nrsBase = Process.getModuleByName('nrs.exe').base; }

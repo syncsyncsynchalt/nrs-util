@@ -1,4 +1,4 @@
-# amJvs / amJvsp — FACTS（co-located）
+# amJvs / amJvsp FACTS（co-located）
 
 このサブシステムの事実（アドレス/構造体/RVA）。横断定数は `../ARCH.md`、索引は repo ルート `FACTS.md`。
 confidence: [F]=Frida確認 [S]=静的解析 [I]=推論
@@ -10,7 +10,7 @@ confidence: [F]=Frida確認 [S]=静的解析 [I]=推論
 番地は static_VA（`va()` 経由で参照、ASLR 非依存）。[F] unless noted.
 
 
-### bypassJvs IIFE (`boot/amjvs/state.js`) — patchCode + 初期 state write
+### bypassJvs IIFE (`boot/amjvs/state.js`)（patchCode + 初期 state write）
 
 patchCode 永続 + ロード時の state 直接書き込みで構成する。
 

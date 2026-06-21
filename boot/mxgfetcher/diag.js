@@ -21,7 +21,7 @@
     tap(0x975320, 'DIAG_975320', 10, 100, 'ret');        // TCP sub-state 4 パーサ
     tap(0x974560, 'DIAG_974560', 10, 200, 'ret');        // pause done チェック（0x975830 から呼ばれる）
 
-    // 0x975700 — TCP SM step（busy=1 経路）。sub-state [0x1286FF4] も読む。
+    // 0x975700: TCP SM step（busy=1 経路）。sub-state [0x1286FF4] も読む。
     var n7 = 0;
     hook(0x975700, { onLeave: function (ret) {
         n7++;
@@ -30,7 +30,7 @@
             logMsg('DIAG_975700', '#' + n7 + ' subState=' + subState + ' ret=' + ret.toInt32());
     } }, 'DIAG_975700');
 
-    // 0x975830 — state-9 pause request SM。arg + stream ptr/busy をログする。
+    // 0x975830: state-9 pause request SM。arg + stream ptr/busy をログする。
     var n8 = 0;
     hook(0x975830, {
         onEnter: function (args) {

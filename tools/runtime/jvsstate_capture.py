@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-JvsState / TeknoParrot 観測キャプチャ（純観測・TeknoParrot 注入下用）.
+JvsState / TeknoParrot 観測キャプチャ（純観測。TeknoParrot 注入下で使う）.
 
 モード:
-  (1) デフォルト: jvsstate_trace.js のみ — TeknoParrot_JvsState 共有メモリの
+  (1) デフォルト: jvsstate_trace.js のみロードし、TeknoParrot_JvsState 共有メモリの
       発生源コールスタックと 8 バイト変化を記録する。
-  (2) --trace-tp:  jvsstate_trace.js + tp_trace.js を同時ロード —
-      VirtualProtect/GetProcAddress/LoadLibrary/Socket も追跡し、TP が nrs.exe に
+  (2) --trace-tp:  jvsstate_trace.js と tp_trace.js を同時ロードし、
+      VirtualProtect/GetProcAddress/LoadLibrary/Socket も追跡して、TP が nrs.exe に
       当てるパッチの RVA と TP の実行時 API 解決を観測する（docs/teknoparrot.md §5 参照）。
 
-★ boot/launch.py は boot/*.js を全連結し 08/09/10/13 等の patchCode を適用するため、
+注意: boot/launch.py は boot/*.js を全連結し 08/09/10/13 等の patchCode を適用するため、
    TP 管理下の nrs.exe に attach すると二重適用で破綻する。観測時は必ず本スクリプトを使うこと。
 
 使い方:

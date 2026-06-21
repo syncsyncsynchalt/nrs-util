@@ -4,8 +4,7 @@
 // ssot:        mxdrivers/FACTS.md
 // role:        mxsram/mxsuperio/mxhwreset/jvs_pipe/mxsmbus を CreateFile/NtCreateFile/DeviceIoControl フックでダミー成功。mxsram(micetools mxsram.c) + mxsmbus(AT24C64AN eeprom, SetupAPI 発見) は micetools 準拠で data/nvram/{sram,eeprom}.bin に永続。runtime
 
-// ─────────────────────────────────────────────────────────────────────────────
-// RingEdge デバイスエミュレーション — mxhwreset / mxsuperio / mxsram / jvs_pipe
+// RingEdge デバイスエミュレーション: mxhwreset / mxsuperio / mxsram / jvs_pipe
 //
 // TeknoParrot はこの4デバイスをエミュレートする。エミュレートしないと CreateFile が
 // INVALID_HANDLE_VALUE を返し、ゲームは無効ハンドルへの DeviceIoControl で
@@ -15,12 +14,11 @@
 // ゲームはデバイスパスにこれを使う）をフックする。一致するパスにはダミーの event
 // ハンドルを返して記録する。ダミーハンドルへの DeviceIoControl はすべてフックし、
 // 出力バッファをゼロ埋めして成功を返す。
-// ─────────────────────────────────────────────────────────────────────────────
 (function emulateRingEdgeDevices() {
     var NULL_PTR = ptr(0);
 
     // ダミーの event ハンドルを4つ作る（無名の auto-reset event）。
-    // 実 OS ハンドルを使うと、未知のハンドル型に対するカーネルの苦情を避けられる。
+    // 実 OS ハンドルを使うと、カーネルが未知のハンドル型を拒むのを避けられる。
     var CreateEventA;
     try { CreateEventA = new NativeFunction(
         Module.getGlobalExportByName('CreateEventA'),
@@ -53,7 +51,7 @@
         return null;
     }
 
-    // ── Win32 CreateFileA フック（追加の attach。既存の hookFn が先にログ出力する） ──
+    // Win32 CreateFileA フック（追加の attach。既存の hookFn が先にログ出力する）
     var cfaAddr;
     try { cfaAddr = Module.getGlobalExportByName('CreateFileA'); } catch(e) {}
     if (cfaAddr) {
@@ -70,7 +68,7 @@
         });
     }
 
-    // ── Win32 CreateFileW フック ──
+    // Win32 CreateFileW フック
     var cfwAddr;
     try { cfwAddr = Module.getGlobalExportByName('CreateFileW'); } catch(e) {}
     if (cfwAddr) {
@@ -87,7 +85,7 @@
         });
     }
 
-    // ── NtCreateFile フック — 診断 + エミュレーション ──
+    // NtCreateFile フック: 診断 + エミュレーション
     // ゲームは一部のデバイスパスで NtCreateFile（ntdll）を直接使い、他のフックが捕える
     // Win32 CreateFile 層をバイパスする。
     var ntcfAddr;
@@ -133,13 +131,13 @@
         logMsg('RINGEDGE', 'NtCreateFile hook installed (diagnostic + emulation)');
     }
 
-    // ── SetupAPI フック: MXSMBUS_GUID デバイスを発見可能にする（amEeprom 用） ───────
+    // SetupAPI フック: MXSMBUS_GUID デバイスを発見可能にする（amEeprom 用）
     // amEepromCreateDeviceFile（nrs FUN_00984910）は SetupDi* でインタフェース GUID から
     // SMBUS デバイスを探し、CreateFileA(DevicePath) を呼ぶ。実デバイスは無いので、DevicePath が
     // "\\.\mxsmbus"（上の CreateFile フックが捕える）の fake インタフェースを1つだけ広告する。
     // 介入するのは MXSMBUS_GUID / 自前の fake HDEVINFO のときだけで、他の SetupDi* 呼び出しは
     // 素通しする（USB/入力の列挙は無傷）。
-    // GUID {5C49E1FE-3FEC-4B8D-A4B5-76BE7025D842} — 実 mxsmbus.sys で確認済み。
+    // GUID {5C49E1FE-3FEC-4B8D-A4B5-76BE7025D842}（実 mxsmbus.sys で確認済み）。
     //
     // ENABLE_EEPROM ゲート: true のとき下の eeprom エミュレーションが有効になり（amEepromInit
     // が成功、amBackup eeprom レコードの read/write/persist、is broken=0）、MXSMBUS デバイスが
@@ -186,7 +184,7 @@
                 try { if (this.ifd && !this.ifd.isNull()) this.ifd.add(20).writeU32(1); } catch (e) {}
                 ret.replace(1);  // TRUE
             } else {
-                ret.replace(0);  // FALSE — これ以上インタフェースは無い（ERROR_NO_MORE_ITEMS）
+                ret.replace(0);  // FALSE。これ以上インタフェースは無い（ERROR_NO_MORE_ITEMS）
             }
         });
 
@@ -211,7 +209,7 @@
         function (args) { this.isMx = fakeDevInfoSet[args[0].toString()] === true; },
         function (ret) { if (this.isMx) ret.replace(1); });
 
-    // ── mxsram のファイルバックな SRAM バッファ（micetools dll/drivers/mxsram.c: 1024×2084, 0xFF 初期化）──
+    // mxsram のファイルバックな SRAM バッファ（micetools dll/drivers/mxsram.c: 1024×2084, 0xFF 初期化）
     // micetools は SRAM_PATH を open_mapped_file で map する（永続）。それを踏襲し、data/nvram/sram.bin
     // から読み込み・書き戻す 2 MB の RAM バッファを使う（mmap 相当の自動同期）。
     var SRAM_SIZE = 1024 * 2084;  // 2,134,016 バイト
@@ -225,7 +223,7 @@
     function sramPtrGet(h)    { var k = h.toString(); return sramPtrs[k] || 0; }
     function sramPtrSet(h, v) { sramPtrs[h.toString()] = v; }
 
-    // ── #1 永続化: バッキングファイルへの native CreateFileW/ReadFile/WriteFile/SetFilePointer ─
+    // #1 永続化: バッキングファイルへの native CreateFileW/ReadFile/WriteFile/SetFilePointer
     // Win32 NativeFunctions（kernel32）。エラー時は volatile + WARN に縮退し、micetools の
     // "SRAM will be memory-backed and not syncronised!" フォールバックに合わせる。
     var GENERIC_RW = 0xC0000000, OPEN_ALWAYS = 4, FILE_ATTR_NORMAL = 0x80, FILE_BEGIN = 0, FILE_END = 2;
@@ -283,7 +281,7 @@
     }
     sramBackOpen();
 
-    // ── AT24C64AN EEPROM ストア（micetools smb_at24c64an.c: 8 KB, 0xFF 初期化, ファイルバック）──
+    // AT24C64AN EEPROM ストア（micetools smb_at24c64an.c: 8 KB, 0xFF 初期化, ファイルバック）
     // amBackup の STATIC/CREDIT/NETWORK/HISTORY レコード用の amEeprom（SMBUS vaddr 0x57）バッキング。
     var EEPROM_SIZE = 0x2000;  // 8 KB（64 kbit）
     var EEPROM_PATH = 'C:\\src\\nrs-util\\data\\nvram\\eeprom.bin';
@@ -363,7 +361,7 @@
     // mxsuperio hwmon エミュレーション用の W83791D bank 状態
     var w83791dBank = 0;
 
-    // ── DeviceIoControl フック（追加の attach） ──
+    // DeviceIoControl フック（追加の attach）
     // micetools 参照実装に沿った正式な IOCTL ディスパッチ（単なるゼロ埋めではない）。
     var fakeDicCounts = {};
     Object.keys(FAKE).forEach(function(k) { fakeDicCounts[k] = 0; });
@@ -391,7 +389,7 @@
                 var dev = this.devName, ioctl = this.ioctl;
                 var out = this.outBuf, outLen = this.outLen;
 
-                // ── mxsram: micetools mxsram_DeviceIoControl に忠実 ──────────────
+                // mxsram: micetools mxsram_DeviceIoControl に忠実
                 // 成功するのは PING / GET_SECTOR_SIZE / GET_DRIVE_GEOMETRY のみ。それ以外
                 //（IOCTL_DISK_GET_LENGTH_INFO 含む）は FALSE を返す。lpBytesReturned は
                 // 設定する。出力バッファをゼロ埋めするのは GEOMETRY だけ。
@@ -434,7 +432,7 @@
                     return;
                 }
 
-                // ── mxsmbus: SMBUS I2C/REQUEST 経由の amEeprom（AT24C64AN @0x57） ───────
+                // mxsmbus: SMBUS I2C/REQUEST 経由の amEeprom（AT24C64AN @0x57）
                 // micetools mxsmbus.c + smb_at24c64an.c。METHOD_BUFFERED: in/out パケット。
                 if (dev === 'mxsmbus') {
                     var okSmb = true, nretSmb = 0, dbg = '';
@@ -474,7 +472,7 @@
                     return;
                 }
 
-                // ── 他の fake デバイス（mxsuperio 等）: 汎用のゼロ埋め + 成功 ──
+                // 他の fake デバイス（mxsuperio 等）: 汎用のゼロ埋め + 成功
                 if (out && !out.isNull() && outLen > 0 && outLen <= 4096) {
                     try { out.writeByteArray(new Array(outLen).fill(0)); } catch(e) {}
                 }
@@ -535,7 +533,7 @@
         });
     }
 
-    // ── mxsram の SetFilePointer / ReadFile / WriteFile フック ──
+    // mxsram の SetFilePointer / ReadFile / WriteFile フック
     // ゲームは fake ハンドルへのファイル操作で SRAM にアクセスする（micetools のパターン）。
     var sfpAddr;
     try { sfpAddr = Module.getGlobalExportByName('SetFilePointer'); } catch(e) {}

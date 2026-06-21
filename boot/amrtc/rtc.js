@@ -4,8 +4,7 @@
 // ssot:        amrtc/FACTS.md
 // role:        amRtc サーバ時刻→PC ローカル時刻 / SetServerTime 無視。
 
-// ─────────────────────────────────────────────────────────────────────────────
-// amRtcGetServerTime (0x974040) bypass — RingEdge RTC ではなく PC のローカルシステム時刻を返す。
+// amRtcGetServerTime (0x974040) bypass: RingEdge RTC ではなく PC のローカルシステム時刻を返す。
 // RTC サーバが無いとこの関数は -3（ドライバ無し）を返す。onLeave フックで、失敗時に GetLocalTime を
 // 呼んで outPtr の amRtcTime 構造体へ詰め、ret を 0 に強制する。
 //
@@ -16,7 +15,6 @@
 //   +0x04  BYTE  hour  (0-23)
 //   +0x05  BYTE  minute(0-59)
 //   +0x06  BYTE  second(0-59)
-// ─────────────────────────────────────────────────────────────────────────────
 (function hookAmRtc() {
     try {
         var nrsBase = Module.findBaseAddress('nrs.exe');

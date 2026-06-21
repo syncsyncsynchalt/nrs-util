@@ -5,7 +5,7 @@
 // role:        共通ヘルパ(logMsg, str/hex リーダ, hookFn, parseSockAddr) + script-global getStatusRecvDone。必ず最初にロードする(他の全モジュールが依存)。
 'use strict';
 
-// ── 番地解決 ────────────────────────────────────────────────────────────────
+// 番地解決
 // RVA 演算が存在する唯一の境界。各モジュールは nrs.exe を Ghidra static_VA
 // (ImageBase 0x400000) で参照し、va() がそれを ASLR でずれた runtime 番地へ
 // 写像する。
@@ -64,7 +64,7 @@ function parseSockAddr(sa) {
 // セットし、amgfetcher/getstatus.js (0x98ADC0 hook) が読んでクリアする。
 var getStatusRecvDone = false;
 
-// ── 宣言的 patch/hook/watch ヘルパ ───────────────────────────────────────────
+// 宣言的 patch/hook/watch ヘルパ
 // boot patch を表現する標準手段。モジュールは Ghidra static_VA を渡す。va()
 // (上記) が唯一の RVA 境界なので、モジュールは nrsBase に触れない。CONVENTIONS.md
 // 参照: 単純なバイト stub は patches.json の行として置き、hook/timer ロジックを

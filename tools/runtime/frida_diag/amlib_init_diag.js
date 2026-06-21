@@ -1,5 +1,4 @@
 
-// ─────────────────────────────────────────────────────────────────────────────
 // 診断: amlib init ステートマシン FUN_0089a010 (RVA 0x49a010) の state トレーサ。観測のみ。
 //
 // FUN_0089a010(param_1): param_1+4 = state、param_1+8 = substate。
@@ -10,7 +9,6 @@
 //   state 9 = エラー (DAT_016f5af0 に errCode を設定。scene system が errNo+msg にマップ)
 //
 // state 9 で errCode + bitmask + backtrace を取得し、失敗した device を特定する。
-// ─────────────────────────────────────────────────────────────────────────────
 (function diagAmlibInit() {
     var nrsBase = null;
     try { nrsBase = Process.getModuleByName('nrs.exe').base; }

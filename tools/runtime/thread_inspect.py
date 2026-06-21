@@ -1,4 +1,4 @@
-"""スレッド PC インスペクタ — 稼働中の nrs.exe に attach し全スレッドの状態を表示する。"""
+"""スレッド PC インスペクタ。稼働中の nrs.exe に attach し全スレッドの状態を表示する。"""
 import frida, sys, time
 
 SCRIPT = r"""

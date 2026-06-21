@@ -1,4 +1,4 @@
-# app（ゲーム窓/プロセス）— FACTS（co-located）
+# app（ゲーム窓/プロセス）FACTS（co-located）
 
 横断定数 `../ARCH.md` / 索引 repo ルート `FACTS.md`。
 

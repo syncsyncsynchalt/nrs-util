@@ -1,4 +1,4 @@
-# micetools — SEGA Ring series 参照実装（keychip / amDongle / PCP）— 要約
+# micetools 要約（SEGA Ring series 参照実装。keychip / amDongle / PCP）
 
 **正（source of truth）はローカルの C ソース `C:\src\micetools\`。本資料はその要約。**
 keychip 認証・amDongle・billing・PCP の値/フォーマット/シーケンス/構造体オフセットを使う前に、必ず該当
@@ -11,7 +11,7 @@ keychip 認証・amDongle・billing・PCP の値/フォーマット/シーケン
 
 ---
 
-## 1. これが効く理由 — nrs-util の Frida スクリプトとの対応
+## 1. これが効く理由（nrs-util の Frida スクリプトとの対応）
 
 micetools は SEGA の `am*` ライブラリ（amDongle/amEeprom/amBackup/…）と keychip サーバを
 クリーンルーム再実装している。nrs.exe は同じ `am*` ライブラリをリンクしているので、
@@ -34,7 +34,7 @@ micetools は SEGA の `am*` ライブラリ（amDongle/amEeprom/amBackup/…）
 
 ---
 
-## 2. アーキテクチャ — keychip は2層
+## 2. アーキテクチャ（keychip は2層）
 
 物理 keychip と、ゲームが話す相手は **別物**。間に keychip サーバプロセスが挟まる。
 
@@ -203,7 +203,7 @@ typedef struct AM_APPBOOT {
 
 ---
 
-## 7. デフォルト設定値（`micekeychip/config.def`）— そのまま使える正準値
+## 7. デフォルト設定値（`micekeychip/config.def`。そのまま使える正準値）
 
 ```
 billing.keyid    = "A69E-01A8888"        # keychip ID 形式 XXXX-XXXXXXX
@@ -221,7 +221,7 @@ keychip ID → serial id 変換（`lib/am/amSerialId.c`）:
 
 ---
 
-## 8. バイナリパッチ手法 — nrs-util の patchCode に直輸入できる
+## 8. バイナリパッチ手法（nrs-util の patchCode に直輸入できる）
 
 `src/patches/*.patch` は **`*<VA>: <before> > <after> # 注釈`** 形式の単純メモリ書換。
 中身はほぼ **am ライブラリの `*DebugLevel` グローバルを 0→1 にしてログ全開にする**もの。

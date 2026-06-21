@@ -6,7 +6,7 @@
 //
 // 0x975E00 amDongleBusy: 戻り 0 = 「init op 完了 / not busy」（TP keychip ドライバと同等）。nrs の PCPA 非同期層は
 //   init 完了を自発設定しないため自然な戻りは 1（busy）。amDongle outerSM の偶数 state（2/4/6）は 0 でないと前進しない。
-//   ⚠ この番地は amdongle/diag.js が hook 観測する衝突番地 → load 順は diag.js の後を維持（順序依存）。
+//   注意: この番地は amdongle/diag.js が hook 観測する衝突番地。load 順は diag.js の後を維持する（順序依存）。
 // 0x457AF0 keychipSM state4 helper: auth 経路（[esi+0x10]!=0）で DLL 内クラッシュ→onLeave 不発。entry→ret 0 で回避。
 // 詳細・経緯は amdongle/FACTS.md。
 (function bypassAmDongle() {

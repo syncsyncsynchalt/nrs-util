@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""nrs.exe 静的解析 — STATIC VA 方言（Ghidra MCP と一致）。
+"""nrs.exe 静的解析。STATIC VA 方言（Ghidra MCP と一致）。
 
 番地引数は全て Ghidra の static VA（ImageBase 0x400000）で、常に hex。
-RVA モードは無し — 単一方言・変換なし。RVA は runtime の va() helper の
+RVA モードは無く、単一方言で変換もしない。RVA は runtime の va() helper の
 内部にのみ存在し、ツール境界には一切出ない。
 
 使い方:
@@ -60,7 +60,7 @@ def to_rva(va):
     return va - IMAGE_BASE
 
 
-# ── MANIFEST patch-site の相互参照 ───────────────────────────────────────────
+# MANIFEST patch-site の相互参照
 def manifest_sites():
     """MANIFEST の 'va' 配列から {static_VA: [module, ...]} を返す（best-effort）。"""
     out = {}
@@ -78,7 +78,7 @@ def manifest_sites():
     return out
 
 
-# ── disassemble ──────────────────────────────────────────────────────────────
+# disassemble
 def do_disasm(va, count, as_json=False):
     pe = get_pe()
     data = pe.get_data(to_rva(va), max(count * 15, 64))

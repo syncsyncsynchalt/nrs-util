@@ -4,11 +4,9 @@
 // ssot:        amplatform/FACTS.md
 // role:        amPlatform GetOsVersion/PlatformId を WindowsXP/AAL に patchCode（platform gate FUN_0045a6f0 回避）。永続
 
-// ─────────────────────────────────────────────────────────────────────────────
-// amPlatform identity — 文字列 getter を patchCode で置き換え、platform gate
+// amPlatform identity: 文字列 getter を patchCode で置き換え、platform gate
 // FUN_0045a6f0（PlatformId + OsVersion を読み、不一致なら errCode 2/3 を latch）に
 // 実機 RingEdge が返す値を見せる。永続（detach 後も有効）。
-// ─────────────────────────────────────────────────────────────────────────────
 (function hookAmPlatform() {
     var nrsBase = null;
     try { nrsBase = Process.getModuleByName('nrs.exe').base; }

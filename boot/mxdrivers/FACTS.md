@@ -1,4 +1,4 @@
-# mx ドライバ層 — FACTS（co-located）
+# mx ドライバ層 FACTS（co-located）
 
 横断定数 `../ARCH.md` / 索引 repo ルート `FACTS.md`。
 

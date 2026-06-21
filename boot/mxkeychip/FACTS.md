@@ -1,4 +1,4 @@
-# keychip / PCP — FACTS（co-located）
+# keychip / PCP FACTS（co-located）
 
 このサブシステムの事実（アドレス/構造体/RVA）。横断定数は `../ARCH.md`、索引は repo ルート `FACTS.md`。
 confidence: [F]=Frida確認 [S]=静的解析 [I]=推論
@@ -29,16 +29,16 @@ supported" → skips cryptographic verification. This is the bypass for ds.compu
 Other keychip commands: `appboot.platformid`/`networkaddr`, `encrypt`/`decrypt` (AES, data channel),
 `setiv`, `billing.playcount`/`nearfull`/`keyid`, `tracedata.*`.
 
-### PCP キー全集合 — 実機 mxkeychip.exe で裏取り [S]
+### PCP キー全集合（実機 mxkeychip.exe で裏取り）[S]
 
 純正 keychip デーモン `C:\src\ringedge_system_63.01.10\system\mxkeychip.exe`（**非パック**＝静的解析可。
 entropy 6.68 / 完全 import 表 / 5768 文字列。CrackProof=Htsysm は runtime kernel ドライバで on-disk PE は
 素のまま）から PCP キー全集合と内部ハンドラ名を確認。nrs.exe(client/libpcp) 側にも同一文字列が存在（両側一致）。
 
 - `keychip.appboot.{gameid, systemflag, region, platformid, modeltype, formattype, networkaddr, dvdflag}`
-  — server/client 両側に実在（nrs `list_strings` 一致）。
+  server/client 両側に実在する（nrs `list_strings` 一致）。
 - `keychip.billing.{keyid, mainid, playcount, playlimit, nearfull, signaturepubkey, cacertification}`
-  — **`signaturepubkey`/`cacertification` は現行 pcpa_server 未対応**だが attract 非ブロッカー（billing 専用）:
+  **`signaturepubkey`/`cacertification` は現行 pcpa_server 未対応**だが attract 非ブロッカー（billing 専用）:
   - `amDongleBillingGetSignaturePubKey` = nrs static_VA **0x96FE50**（caller 0x45419F）→ PCP
     `keychip.billing.signaturepubkey&cache=...` を送る。**応答は ringmaster billing 公開鍵**
     （= `system\ringmaster_pub.pem`, RSA-1024）。
@@ -63,7 +63,7 @@ entropy 6.68 / 完全 import 表 / 5768 文字列。CrackProof=Htsysm は runtim
 
 ## amlib region gate (Error 0903 "Wrong Region") [S]
 
-region ゲートは2関数にあり、両方とも同じ判定式 — **NOP/jl→jmp の対象**:
+region ゲートは2関数にあり、両方とも同じ判定式（**NOP/jl→jmp の対象**）:
 
 ```c
 bVar = DAT_016014a2 ? DAT_01601989 : 0;            // gate付き dongleRegion

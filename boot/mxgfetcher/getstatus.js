@@ -4,13 +4,11 @@
 // ssot:        mxgfetcher/FACTS.md
 // role:        HLSM state7→8 force (0x457FE0 onEnter) + result/parser patchCodes + 0x98ADC0 recv-completion fix。load-bearing のみ（純診断は diag.js）。runtime; detach で revert。Pairs with mxgfetcher/recv.js。
 
-// ─────────────────────────────────────────────────────────────────────────────
 // amGfetcher get_status SM の強制（HLSM ドライバ）。load-bearing なパッチのみ。
 //
 // NOTE: 0x97718E / 0x9771CB は FUN_00977050（amInstall チャネル）内の strcmp 途中バイトで、
-// [0x1287038] の init-flag CMP ではない — フックしない（0x97718E は命令途中で intercept
+// [0x1287038] の init-flag CMP ではない。フックしない（0x97718E は命令途中で intercept
 // 不可、0x9771CB は xref が無い）。ATTRACT 到達に init-flag の強制は不要。
-// ─────────────────────────────────────────────────────────────────────────────
 (function patchAmGfetcher() {
     var nrsBase = null;
     try { nrsBase = Process.getModuleByName('nrs.exe').base; }
@@ -20,7 +18,7 @@
     // FUN_6FF980 パッチが「boot」（return 1）から「attract」（return 0）へ切り替えるのに使う。
     var bootDone = 0;
 
-    // ── 診断: FUN_00457FE0（high-level SM） ──────────────────────────────
+    // 診断: FUN_00457FE0（high-level SM）
     // state 遷移ごと、加えて heartbeat として 500 tick ごとにログする。
     var hlsmCount = 0;
     var hlsmLastState = -1;
@@ -79,7 +77,7 @@
         logMsg('INIT_DIAG', 'FUN_00457FE0 (high-level SM) hooked');
     } catch(e) { logMsg('WARN', 'FUN_00457FE0 hook: ' + e); }
 
-    // ── patchCode: レスポンスパーサ群 → 常に return 0（永続。Frida detach 後も有効） ─
+    // patchCode: レスポンスパーサ群 → 常に return 0（永続。Frida detach 後も有効）
     // これらのパーサは PCPA レスポンスバッファ内のフィールドを探すのに FUN_58AAE0 を呼ぶ。
     // エミュレートしたレスポンスでは FUN_58AAE0 が null を返す → パーサが -5（エラー）を返し
     // pcpaSetSendPacket が 0 を返す → [0x1286FEC] チェック → attract モードで Error 0903
@@ -108,7 +106,7 @@
     // keychip が無ければ FUN_004573E0 は自然に 0 を返す → path-B → game mode。正しい。
     logMsg('PATCH', 'FUN_004573E0 not patched: natural 0 = state4 path-B = game mode');
 
-    // ── patchCode: FUN_006FF980（HLSM state-0 ゲート） → 常に return 1（永続） ─
+    // patchCode: FUN_006FF980（HLSM state-0 ゲート） → 常に return 1（永続）
     // hlsm_region_check() は DAT_0210aed0/aed2/aed4 フラグを見る（ハードウェアが無いと 0）。
     // 初回 boot で state=0 の condition-A を発火させる（ctx.next=1）には 1 を返す必要がある。
     // 0x458271 の NOP（GETSTATUS_FIX で state=5→6 時に適用）が ctx.next=1 の書き込みを
@@ -123,10 +121,10 @@
     } catch(e) { logMsg('WARN', '0x6FF980 patchCode: ' + e); }
 
     // NOTE: state7→8 は 0x457FE0 onEnter の直接書き込み（case=7 が走る前に next=8）で駆動する。
-    // FUN_006FF650（0x6FF650）は意図的にパッチしない — attach 中は冗長（detach 前に boot が
+    // FUN_006FF650（0x6FF650）は意図的にパッチしない。attach 中は冗長（detach 前に boot が
     // ATTRACT へ到達する）。
 
-    // ── FUN_009744F0（TCP SM done チェック） → patchCode（永続・hang-safe） ─
+    // FUN_009744F0（TCP SM done チェック） → patchCode（永続・hang-safe）
     // sub-state 8 のクリーンアップがストリームを閉じる（[0x1286FF0]=0）と、native 9744F0 は
     // [0x1286FF0]=0 を見て [0x1287000]=0 ではなく -3 を返し、[ebp+4]=result を -3 に壊す。
     // result=-3 だと 0x45829C の間接テーブルが error-counter 経路（0x45805F）にマップし、
@@ -174,7 +172,7 @@
         logMsg('PATCH', '0x9744F0 patchCode (persistent hang-safe, ' + code.length + 'b): stream==0→ret0; else r!=0→ret1; r==0→reset+ret0');
     } catch(e) { logMsg('WARN', '0x9744F0 patchCode: ' + e); }
 
-    // ── FUN_00975830 pause SM の strBusy スタック ─────────────────────────────
+    // FUN_00975830 pause SM の strBusy スタック
     // HLSM 前の init で呼ばれる 975830(arg=0) はフルの同期 pause 交換を行い [0x1286FF4]=1 を
     // 残す。state=9 ハンドラは 975830(arg=1) を呼び、strBusy=1 を見て永久に 1（busy）を返す。
     // 0x975857 のバイト列: B8 01 00 00 00 (mov eax,1) C2 04 00 (ret 4) → busy 経路。
@@ -188,7 +186,7 @@
         logMsg('PATCH', '0x975857 patched: bypass strBusy check in pause SM');
     } catch(e) { logMsg('WARN', '0x975857 patch: ' + e); }
 
-    // ── 0x98ADC0（PCPA recv poll） → get_status recv 後に ret=1 を強制 ──
+    // 0x98ADC0（PCPA recv poll） → get_status recv 後に ret=1 を強制
     // ポート 40113 は raw winsock recv() を使う。raw recv 経路では 0x98DAB0 が 1 を返さない
     // → 0x98ADC0 が常に 0 を返す → [stream+0x21C] が 0 のまま → 0x98B260 が 0 を返す
     // → 0x574510 の pending 経路が発火 → SM が永久に再送する。

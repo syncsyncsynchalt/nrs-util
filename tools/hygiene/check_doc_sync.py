@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""check_doc_sync.py — boot/MANIFEST.json <-> boot モジュール <-> FACTS の整合 + dialect guard。
+"""boot/MANIFEST.json と boot モジュールと FACTS の整合、および dialect guard を検査する。
 
 単一番地方言: 人間/ツールが番地を触るところは全て STATIC VA（Ghidra ImageBase 0x400000）。
 RVA は lib/base.js の va() helper の内部にのみ存在する。
@@ -8,8 +8,8 @@ HARD チェック（失敗で exit 1）:
   1. load_order[0] == "lib/base.js"（全モジュールが使う va()/logMsg を定義）。
   2. 各モジュールファイルが存在する。
   3. 各 MANIFEST 'va'（static VA）が当該モジュールファイルに逐語で現れる（drift 検出）。
-  4. DIALECT GUARD: 生のモジュール base で nrs.exe を番地参照しない — つまり
-     `nrsBase.add(` / `nb.add(` 呼び出しが無い。番地参照は全て va() 経由。（helper を
+  4. DIALECT GUARD: 生のモジュール base で nrs.exe を番地参照しない。すなわち
+     `nrsBase.add(` や `nb.add(` の呼び出しが無い。番地参照は全て va() 経由。（helper を
      定義する lib/base.js は除外。）
   5. known_names.json のキーが static VA（>= ImageBase）。誤った RVA エントリを検出。
   6. MANIFEST 'va' の値が妥当な static VA（>= ImageBase）。stale な RVA を検出。
@@ -85,7 +85,7 @@ def main():
             # 6. 妥当性
             if addr < IMAGE_BASE:
                 errors.append(f"{mod}: MANIFEST va {tok} < ImageBase (stale RVA?)")
-            # 3. モジュール内に存在（厳密な static VA — 単一方言・許容なし）
+            # 3. モジュール内に存在（厳密な static VA、単一方言で許容なし）
             if addr not in fhex:
                 errors.append(f"{mod}: MANIFEST va {tok} not found in module file (drift)")
             elif addr not in facts_hex:
@@ -114,7 +114,7 @@ def main():
     except FileNotFoundError:
         warns.append("known_names.json not found")
 
-    # 9. patches.json（データ駆動の純バイト patch テーブル）— 各行の va が static VA で
+    # 9. patches.json（データ駆動の純バイト patch テーブル）。各行の va が static VA で
     # 一意であり、bytes 指定が解決可能（mnemonic | {retImm/retN} | hex）かを検証する。
     patches_path = os.path.join(BOOT, "patches.json")
     n_patches = 0

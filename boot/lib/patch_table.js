@@ -1,6 +1,6 @@
 // subsys:      lib
 // persistence: persistent
-// va:          (data-driven — addresses live in boot/patches.json, not here)
+// va:          (data-driven: addresses live in boot/patches.json, not here)
 // ssot:        boot/CONVENTIONS.md (patches.json 規約) ; 各行の ssot フィールド
 // role:        データ駆動 pure-byte patch 表(patches.json)を適用。表は launch.py が __PATCH_TABLE__ として注入。
 (function applyPatchTable() {

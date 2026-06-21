@@ -4,7 +4,7 @@
 // ssot:        mxkeychip/FACTS.md
 // role:        pcpaOpenClient 戻り値回復: orig<0 のときだけ ret→0（40106/40104 のキャッシュ無接続で SendRequest -4 を防ぐ）。runtime
 //
-// pcpaOpenClient は各ポート(40102/40104/40106/40110)へ接続する。orig=1=「新規接続確立・socket 格納」は
+// pcpaOpenClient は各ポート(40102/40104/40106/40110)へ接続する。orig=1=「新規接続を確立して socket を格納」は
 // pass-through 必須（pcpaSendRequest が有効 socket を見つけられる）。キャッシュ socket の無いポート(40106/40104)で
 // 0 を強制すると SendRequest が即 -4。よって genuine error(orig<0) のときだけ 0 に回復する。
 // 送受信の観測フック(pcpaSet/Add/Send/Recv)は diag.js に分離。

@@ -2,7 +2,7 @@
 
 目的: AI が grep なしで場所を引け、1 ディレクトリ閉で作業でき、トークンを最小化できる構造を保つ。
 
-## 0. 書き方の標準（helper / データ表） — token 最小・AI 編集容易
+## 0. 書き方の標準（helper / データ表。token 最小・AI 編集容易）
 - **単純な固定バイト patch**（無条件・固定値・`Memory.patchCode` だけ）は **`boot/patches.json`** に 1 行追加で表現する。
   `{ "va":"0xSTATIC", "bytes":<spec>, "subsys":"...", "ssot":"<subsys>/FACTS.md", "note":"..." }`。
   `bytes` は `"RET0"`(xor eax,eax;ret) / `"RET1"`(mov eax,1;ret) / `{"retImm":n}` / `{"retN":n}` / `"31 C0 C3"`(hex)。
@@ -14,14 +14,14 @@
 - **`<subsys>/diag.js`** = log-only(`monitor`) 専用の命名。起動修正時に AI が「読まなくてよい」と即判別できる。
 - 根本原因 prose は **FACTS.md** が単一ソース（`.js` には 5 行ヘッダ＋呼出のみ。複雑系のみ簡潔な inline 可）。
 
-## 1. 配置 — ディレクトリ = RingEdge 実行ファイル/サブシステム
+## 1. 配置: ディレクトリ = RingEdge 実行ファイル/サブシステム
 - 新しい patch/hook は、それが触る**実機コンポーネント**のディレクトリに置く（`mxkeychip/` `mxsegaboot/`
   `mxnetwork/` `mxgfetcher/` `amjvs/` `amdongle/` `amplatform/` `ambilling/` `amrtc/` `mxdrivers/`
   `mxstorage/` `devices/` `app/`）。対応表は `README.md`。
 - 該当が無い実機サブシステムなら新ディレクトリを作る（実機の SEGA 名＝`mx*.exe`/`am*` を使う）。
 - 単純固定バイト patch は §0 のとおり `patches.json` 行（ファイル配置不要）。
 
-## 2. 命名 — 名詞のみ、動詞禁止
+## 2. 命名: 名詞のみ、動詞禁止
 - ディレクトリ = 実機コンポーネント名（`amjvs`）。ファイル = 機能名詞（`state.js`
   `region.js` `diag.js` `recv.js` `setup.js`）。
 - `hook/patch/bypass/emulate/satisfy/inject` 等の**動詞をファイル名に使わない**（役割は dir＋ヘッダが表す）。

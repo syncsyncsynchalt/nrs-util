@@ -1,16 +1,16 @@
 
-// === TeknoParrot.dll 動的解析トレーサ（純観測・自己完結）========================
+// TeknoParrot.dll 動的解析トレーサ（観測専用、自己完結）
 // 目的: TeknoParrot が nrs.exe に対して行う操作を API 境界で観測する。
 //
 // 観測対象:
-//   VirtualProtect  — nrs.exe への保護変更 → TP パッチの RVA
-//   GetProcAddress  — TP が実行時解決する API（IAT は VMProtect で剥離済み）
-//   LoadLibraryW/A  — TP が追加ロードする DLL
-//   connect         — TP の接続先（PCPA/ALL.Net 等）
-//   WSASend/WSARecv — TP の PCPA 通信内容
-//   WriteProcessMemory — クロスプロセス書き込み
+//   VirtualProtect  : nrs.exe への保護変更 → TP パッチの RVA
+//   GetProcAddress  : TP が実行時解決する API（IAT は VMProtect で剥離済み）
+//   LoadLibraryW/A  : TP が追加ロードする DLL
+//   connect         : TP の接続先（PCPA/ALL.Net 等）
+//   WSASend/WSARecv : TP の PCPA 通信内容
+//   WriteProcessMemory : クロスプロセス書き込み
 //
-// ★ frida_monitor.py（spawn 経路）とは併用しない。TP 管理下の nrs.exe 専用。
+// 注意: frida_monitor.py（spawn 経路）とは併用しない。TP 管理下の nrs.exe 専用。
 (function () {
     'use strict';
 
@@ -40,7 +40,7 @@
         return addr.compare(nrsBase) >= 0 && addr.compare(nrsBase.add(NRS_SIZE)) < 0;
     }
 
-    // ── VirtualProtect: nrs.exe 範囲への保護変更を追跡 ───────────────────────
+    // VirtualProtect: nrs.exe 範囲への保護変更を追跡
     //   VP_WRITE (prot & 0xCC != 0): 書き込み許可化 → bytes = パッチ前オリジナル
     //   VP_EXEC  (prot & 0xCC == 0): 実行専用に復元 → bytes = TP パッチ済み（E9.. = JMP フック）
     var vpFn = Module.getGlobalExportByName('VirtualProtect');
@@ -70,7 +70,7 @@
         _log('TP_TRACE', 'VirtualProtect hook OK (nrs.exe range filter)');
     }
 
-    // ── GetProcAddress: TP が実行時に解決する API ─────────────────────────────
+    // GetProcAddress: TP が実行時に解決する API
     // IAT が VMProtect で剥離されているため、実際の API はここで動的解決される。
     var gpaFn = Module.getGlobalExportByName('GetProcAddress');
     if (gpaFn) {
@@ -99,7 +99,7 @@
         _log('TP_TRACE', 'GetProcAddress hook OK');
     }
 
-    // ── LoadLibraryW/A: TP が追加ロードする DLL ─────────────────────────────
+    // LoadLibraryW/A: TP が追加ロードする DLL
     var llwFn = Module.getGlobalExportByName('LoadLibraryW');
     if (llwFn) {
         Interceptor.attach(llwFn, {
@@ -116,7 +116,7 @@
     }
     _log('TP_TRACE', 'LoadLibraryW/A hooks OK');
 
-    // ── connect: TP のネットワーク接続先 ─────────────────────────────────────
+    // connect: TP のネットワーク接続先
     var connFn = Module.getGlobalExportByName('connect');
     if (connFn) {
         Interceptor.attach(connFn, {
@@ -137,7 +137,7 @@
         _log('TP_TRACE', 'connect hook OK');
     }
 
-    // ── WSASend / WSARecv: PCPA 通信内容 ─────────────────────────────────────
+    // WSASend / WSARecv: PCPA 通信内容
     function _readWsaBuf(args) {
         try {
             var wsabuf = args[1];
@@ -167,7 +167,7 @@
     }
     _log('TP_TRACE', 'WSASend/WSARecv hooks OK');
 
-    // ── WriteProcessMemory: クロスプロセス書き込み（念のため）────────────────
+    // WriteProcessMemory: クロスプロセス書き込み（念のため）
     var wpmFn = Module.getGlobalExportByName('WriteProcessMemory');
     if (wpmFn) {
         Interceptor.attach(wpmFn, {

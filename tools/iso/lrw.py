@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TrueCrypt LRW mode (GfMul128Basic 準拠) — 公式テストベクタで検証。
+"""TrueCrypt LRW mode (GfMul128Basic 準拠)。公式テストベクタで検証する。
 出典: TrueCrypt 7.1a Common/GfMul.c, Volume/EncryptionModeLRW.cpp, Volume/EncryptionTest.cpp"""
 import binascii
 from Crypto.Cipher import AES
