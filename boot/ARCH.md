@@ -30,7 +30,7 @@ rtToVa(runtimePtr)  = (runtimePtr - nrsBase) + 0x400000  // runtime addr → sta
 - Ghidra MCP / `tools/static/disasm.py` / boot シム / `MANIFEST.json` `va[]` / `known_names.json` キー /
   FACTS / BUGS — 全て static_VA。
 - 生 `nrsBase.add(...)` は `tools/hygiene/check_doc_sync.py` が禁止（va() 経由を強制）。
-- ⚠️ 旧 dialect 注意: 既存の **散文コメント・FACTS 本文には RVA 表記が残る**（reference 扱い・非実行）。
+- ⚠️ RVA 表記注意: **散文コメント・FACTS 本文に RVA 表記が現れることがある**（reference 扱い・非実行）。
   値が要るときは Ghidra MCP / disasm.py（static_VA）で取り直す。
 
 ---

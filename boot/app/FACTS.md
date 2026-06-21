@@ -18,5 +18,5 @@
 | 0x644D40 | メインループ。DAT_016f5aa0!=0 で抜けて ExitProcess |
 | 0x16F5AA0 | shutdown flag。0x16F5A9C = shutdown state |
 
-経緯: amBackup/eeprom 成功でゲームが実機運用パスに進むと FUN_0089e880 が true→shutdown。
-詳細は `no_selfshutdown.js` ヘッダ／`mxdrivers/FACTS.md` の ENABLE_EEPROM 節。
+amBackup/eeprom 成功でゲームが実機運用パスに進むと FUN_0089e880 が true→shutdown となるため、
+0x6C3F20 の `je`→`jmp` patch で無力化する。詳細は `no_selfshutdown.js` ヘッダ／`mxdrivers/FACTS.md` の ENABLE_EEPROM 節。

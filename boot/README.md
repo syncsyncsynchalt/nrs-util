@@ -13,7 +13,7 @@ dir = RingEdge 実行ファイル(`mx*.exe`)/ ライブラリ(`am*`)。単純固
 | `lib/` | — | 共有ヘルパ + `patch()/hook()/watch()` + データ表 applier。**先頭ロード必須** |
 | `amdongle/` | amDongle 1.12 | ドングル busy 固定 + SM 監視 |
 | `mxnetwork/` | mxnetwork.exe / amNet | DHCP/NIC SM、LAN type(state4)、ALL.Net 接続(state6) |
-| `amjvs/` | amJvs/amJvsp | JVS 初期化/入力注入/状態 watchdog |
+| `amjvs/` | amJvs/amJvsp | JVS 初期化/状態（`state.js`） |
 | `amplatform/` | amPlatform | board/OS identity、HW 検出(Error 0901) |
 | `mxgfetcher/` | mxgfetcher.exe / amGfetcher | get_status recv 完了、boot SM 前進 |
 | `ambilling/` | ALL.Net Plus Billing (alpbEx) | billing offline idle（実装 `patches.json` 0xA065C0） |
@@ -48,11 +48,11 @@ $py="$env:LOCALAPPDATA\Programs\Python\Python313\python.exe"
 サスペンド起動 → MANIFEST 順に全モジュールをロード → `frida.resume`** → capture。
 attract 到達後 detach しても persistent モジュールは有効。
 
-**サスペンド起動（2026-06-13〜）**: 旧来は `subprocess.Popen`（非サスペンド）→ 後追い attach だったため、
-nrs.exe 最初期の init（amlib/amSram/amEeprom/amBackup のデバイス init）が**フック設置前に走り切り**、
-emulate デバイスを開けず失敗していた（amBackup が -3 を返す真因）。`frida.spawn` サスペンド化で全フックを
-ゲームコードより先に効かせ、amSramInit が mxsram emulation を正しく掴む（amBackup の SRAM 系が
-`data/nvram/sram.bin` に永続）。ATTRACT 経路に回帰なしを実機確認。
+**サスペンド起動**: `frida.spawn` でサスペンド起動することで、nrs.exe 最初期の init
+（amlib/amSram/amEeprom/amBackup のデバイス init）より前に全フックを効かせる。これにより
+emulate デバイスが開けるようになり、amSramInit が mxsram emulation を正しく掴む（amBackup の
+SRAM 系が `data/nvram/sram.bin` に永続）。後追い attach では最初期 init がフック設置前に走り切り、
+emulate デバイスを開けず失敗する（amBackup が -3 を返す）。
 
 ## 整合チェック
 ```powershell

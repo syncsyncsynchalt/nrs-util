@@ -1,7 +1,7 @@
 // subsys:      mxgfetcher
 // persistence: monitor
 // va:          0x974B00, 0x974820, 0x975A70, 0x975320, 0x975700, 0x975830, 0x974560
-// ssot:        mxgfetcher/FACTS.md ; BUGS.md [FIXED] get_status recv
+// ssot:        mxgfetcher/FACTS.md
 // role:        get_status/TCP SM の log-only 観測フック群（boot 修正には不要。load-bearing は getstatus.js）。
 //
 // getstatus.js から分離した純診断 Interceptor。状態を変えず ret/subState を間引きログするのみ。

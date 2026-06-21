@@ -22,13 +22,13 @@
 - 単純固定バイト patch は §0 のとおり `patches.json` 行（ファイル配置不要）。
 
 ## 2. 命名 — 名詞のみ、動詞禁止
-- ディレクトリ = 実機コンポーネント名（`amjvs`）。ファイル = 機能名詞（`state.js` `input.js`
-  `region.js` `diag.js` `recv.js`）。
+- ディレクトリ = 実機コンポーネント名（`amjvs`）。ファイル = 機能名詞（`state.js`
+  `region.js` `diag.js` `recv.js` `setup.js`）。
 - `hook/patch/bypass/emulate/satisfy/inject` 等の**動詞をファイル名に使わない**（役割は dir＋ヘッダが表す）。
 
 ## 3. 1 ファイル = 単一 persistence
 - patchCode/data-write だけのファイル → `persistent`。Interceptor/timer を含むファイル → `runtime`。
-  混在させない（混在したら分割。例: 旧 `13` → `state.js`(persistent)＋`input.js`/`watchdog.js`(runtime)）。
+  混在させない（混在したら persistent な patchCode/data-write と runtime な Interceptor/timer を別ファイルに分割）。
 - 番地は **static_VA** を `va(0xSTATIC)`（`lib/base.js`）で参照する。生 `nrsBase.add(...)` は禁止
   （checker が落とす）。runtime addr をログするときは `rtToVa(ptr)` で static_VA に戻す。
 
@@ -37,11 +37,11 @@
 // subsys:      amjvs
 // persistence: persistent   // persistent | runtime | monitor | served | na
 // va:          0x67AFA0, 0x987590, 0x9883D3   // static_VA（Ghidra の番地そのもの）
-// ssot:        ./FACTS.md ; BUGS.md [FIXED] ...
+// ssot:        ./FACTS.md
 // role:        1 行で何をするか
 ```
 - `va` は**そのファイルが実際に触る** static_VA（`MANIFEST.json` の `va[]` と一致させる）。
-- `ssot` は事実の所在（同階層 `FACTS.md` と該当 BUGS エントリ）。
+- `ssot` は事実の所在（同階層 `FACTS.md`）。
 
 ## 5. MANIFEST.json が構成の単一ソース
 - モジュールの追加/削除/分割/persistence 変更は **`MANIFEST.json` の同コミット更新が必須**。

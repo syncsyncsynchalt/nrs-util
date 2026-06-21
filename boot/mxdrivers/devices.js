@@ -143,13 +143,12 @@
     // every other SetupDi* call passes through untouched (USB/input enumeration intact).
     // GUID {5C49E1FE-3FEC-4B8D-A4B5-76BE7025D842} — confirmed in the real mxsmbus.sys.
     //
-    // ENABLE_EEPROM gate (default OFF): the eeprom emulation below is COMPLETE and proven
-    // (amEepromInit succeeds, amBackup eeprom records read/write/persist, is broken=0). BUT
-    // making eeprom succeed advances the game into the full "real cabinet" operation path,
-    // whose main loop then cleanly shuts down (sets DAT_016f5aa0) before ATTRACT — a separate
-    // app-controller/services blocker not yet resolved. Until that is fixed, keep this OFF so
-    // amEepromInit fails (records -3, harmless) and the game reaches ATTRACT as before. Flip to
-    // true to re-enable the eeprom device (for continued shutdown debugging).
+    // ENABLE_EEPROM gate: when true the eeprom emulation below is active (amEepromInit
+    // succeeds, amBackup eeprom records read/write/persist, is broken=0) and the MXSMBUS
+    // device is discoverable. When false the device stays undiscoverable, amEepromInit
+    // fails (records -3, harmless). Making eeprom succeed advances the game into the full
+    // "real cabinet" operation path; its self-shutdown before ATTRACT is disarmed by
+    // app/no_selfshutdown.js.
     var ENABLE_EEPROM = true;
     var MXSMBUS_GUID = [0xFE,0xE1,0x49,0x5C, 0xEC,0x3F, 0x8D,0x4B,
                         0xA4,0xB5,0x76,0xBE,0x70,0x25,0xD8,0x42];

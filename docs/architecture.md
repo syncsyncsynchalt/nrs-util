@@ -1,6 +1,6 @@
 # nrs-util アーキテクチャ方針（北極星とロードマップ）
 
-承認済みの設計方針（2026-06-12）。「どうあるべきか」の単一ソース。現状・実装詳細は `../STATUS.md`/`../boot/`。
+承認済みの設計方針。「どうあるべきか」の単一ソース。現状・実装詳細は `../STATUS.md`/`../boot/`。
 
 ## 北極星（最終形）
 
@@ -20,9 +20,9 @@
 3. **構成の単一ソースは MANIFEST**。ロード順は元の数値順を厳守（[load-order 知見]）。
 
 ### [load-order 知見] ブートはロード順に敏感
-`boot/MANIFEST.json` の `load_order` をサブシステム順に並べ替えたら keychip 初期化前で停止（白画面）した
-（2026-06-12, `BUGS.md` 該当エントリ）。原因は in-process patch がロード順・同一番地競合に依存するため。
-→ load_order は元の数値順(00..32)に固定。根本対策は原理1（serve 化で patch を減らす）。
+in-process patch はロード順・同一番地競合に依存する。`load_order` をサブシステム順に並べ替えると
+keychip 初期化前で停止（白画面）しうる。→ load_order は数値順(00..32)に固定。根本対策は原理1（serve 化で
+patch を減らす）。
 
 ### [race 知見] device-presence エラーは runtime satisfy のレース
 アトラクト未到達時に Error 1000/0903/8006 が**実行ごとに異なる**のは、Interceptor/watchdog ベースの
@@ -34,8 +34,8 @@ satisfy がゲームのチェックとレースし、勝った側のエラーが
 - **P0 — 安定アトラクトの回復**（足場）。再ブートループ/device-satisfy レースを安定化。クリーン環境で
   `boot/launch.py --spawn` が確実にアトラクト到達することを実写確認できる状態にする。
 - **P1 — 実行時 Frida 依存の根絶**（差分①②）。MANIFEST の `persistence=runtime` 群を撤廃:
-  - **JVS を TeknoParrot 方式の named pipe `\\.\pipe\teknoparrot_jvs` + 共有メモリ `TeknoParrot_JvsState`**
-    に置換（`amjvs/watchdog.js` の正しい代替。SHM は `pcpa_server` が既に生成）。
+  - **JVS 入力を TeknoParrot 方式の named pipe `\\.\pipe\teknoparrot_jvs` + 共有メモリ `TeknoParrot_JvsState`**
+    で実装（現状 boot は JVS 入力を持たない。SHM は `pcpa_server` が既に生成）。
   - 残り runtime フックはネイティブ・ローダ常駐スレッド or 正しいサーバ応答で代替。
   - → ここで「Frida 無し起動」達成、patchCode 群はローダが当てるだけになる。
 - **P2 — keychip/PCPA サーバを micetools 級に**（差分④⑤）。`pcpa_server.py` を keyword 別

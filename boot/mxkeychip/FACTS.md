@@ -21,7 +21,7 @@ confidence: [F]=Frida確認 [S]=静的解析 [I]=推論
 | `keychip.ssd.proof=<hex>` | `code=54` | 40110 | SSD auth bypass |
 | `keychip.ssd.hostproof=<hex>` | `code=54` | 40110 | |
 | `keychip.appboot.gameid=?` | `keychip.appboot.gameid=SBXX` | any | |
-| `keychip.appboot.region=?` | `keychip.appboot.region=01` | any | 01=JAPAN (JAPAN build, FUN_0048f9c0: 01=JP/02=US/08=EXP). 02 fails region check — see BUGS [FIXED] amlib Region error |
+| `keychip.appboot.region=?` | `keychip.appboot.region=01` | any | 01=JAPAN (JAPAN build, FUN_0048f9c0: 01=JP/02=US/08=EXP). 02 fails the region check |
 | `keychip.billing.playlimit=?` | `keychip.billing.playlimit=FFFFFFFF` | any | FreePlay |
 
 **code=54 = ERR_COMMAND** (sega.bsnk.me/ringedge/security/): keychip lib treats it as "command not
@@ -29,7 +29,7 @@ supported" → skips cryptographic verification. This is the bypass for ds.compu
 Other keychip commands: `appboot.platformid`/`networkaddr`, `encrypt`/`decrypt` (AES, data channel),
 `setiv`, `billing.playcount`/`nearfull`/`keyid`, `tracedata.*`.
 
-### PCP キー全集合 — 実機 mxkeychip.exe で裏取り [S] 確定 2026-06-13
+### PCP キー全集合 — 実機 mxkeychip.exe で裏取り [S]
 
 純正 keychip デーモン `C:\src\ringedge_system_63.01.10\system\mxkeychip.exe`（**非パック**＝静的解析可。
 entropy 6.68 / 完全 import 表 / 5768 文字列。CrackProof=Htsysm は runtime kernel ドライバで on-disk PE は
@@ -58,7 +58,7 @@ separate `count=0` line (returning only `code=0` → game exits ~2s). `foregroun
 
 ---
 
-## amlib region gate (Error 0903 "Wrong Region") [S] 確定 2026-06-13
+## amlib region gate (Error 0903 "Wrong Region") [S]
 
 region ゲートは2関数にあり、両方とも同じ判定式 — **NOP/jl→jmp の対象**:
 
@@ -100,7 +100,7 @@ errCode 4 を display struct へ snapshot）。**解法は TeknoParrot 同様チ
 | 0x58AB20 | pcpaSetSendPacket(stream, key, val) |
 | 0x58AB60 | pcpaAddSendPacket(stream, key, val) |
 | 0x58AF50 | pcpaSendRequest(stream, unk) |
-| 0x58AFF0 | pcpaRecvResponse(stream, unk) → log only; passes through (fake injection 廃止: orig=1 は "still polling" で注入すると pcpa_server 応答前にバッファ破損) |
+| 0x58AFF0 | pcpaRecvResponse(stream, unk) → log only; passes through（orig=1 は "still polling" で、ここで注入すると pcpa_server 応答前にバッファ破損するため注入しない） |
 
 Response buffer offsets (stream struct): +0x258 and +0x1EC.
 pcpaOpenClient return value semantics [F]: orig=1 = "new connection established, socket handle stored"; orig=0 = "use cached existing connection"; negative = error. Forcing 0 when orig=1 causes pcpaSendRequest to fail (-4) on ports with no prior cached socket (40106, 40104).

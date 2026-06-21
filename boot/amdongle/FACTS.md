@@ -9,11 +9,10 @@ confidence: [F]=Frida確認 [S]=静的解析 [I]=推論
 
 | 種別 | RVA | Function | 内容 |
 |---|---|---|---|
-| patchCode | 0x575E00 | amDongleBusy | `xor eax,eax; ret`（永続。"not busy" 固定。outerSM even-state 前進に必須。commit 7f69740 で onLeave→patchCode 化） |
+| patchCode | 0x575E00 | amDongleBusy | `xor eax,eax; ret`（永続。"not busy" 固定。outerSM even-state 前進に必須） |
 
-Phase A (2026-06-12) 確定: keychip が pcpa_server.py で genuine satisfy 済みのため 5 SM action 関数
-(0x578590/0x5784F0/0x5788A0/0x578640/0x5786F0) の force-0 は冗長と実機ラン2回で確定し削除済。
-amDongleBusy のみ維持（PCPA async layer の recv-completion gap を埋める TP 相当の assert）。
+keychip が pcpa_server.py で genuine satisfy するため、amDongleBusy のみ維持する
+（PCPA async layer の recv-completion gap を埋める TP 相当の assert）。
 
 
 ## hookAmDongleSM Monitor RVAs (log only, no modification)

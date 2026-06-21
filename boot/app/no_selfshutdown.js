@@ -1,7 +1,7 @@
 // subsys:      app
 // persistence: persistent
 // va:          0x6C3F20
-// ssot:        app/FACTS.md ; mxdrivers/FACTS.md (eeprom が露見させた経緯)
+// ssot:        app/FACTS.md ; mxdrivers/FACTS.md (eeprom 関連)
 // role:        ルートシステムシーンの self-shutdown を無力化（0x6C3F20 je→jmp）。amBackup/eeprom を成功させると
 //              FUN_0089e880 の制御フラグ判定が true になり ATTRACT 前に clean 終了するのを防ぐ。詳細 app/FACTS.md。
 //

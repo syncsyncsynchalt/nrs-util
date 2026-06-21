@@ -11,23 +11,19 @@ confidence: [F]=Frida確認 [S]=静的解析 [I]=推論
 |---|---|---|
 | 0x581D60 | amPlatformGetOsVersion | "WindowsXP" |
 | 0x581FF0 | amPlatformGetPlatformId | "AAL" (ハードウェア board ID。比較先 "AAL"/"AAM"/"NEC" と一致させる。"RingEdge" は表示名で NG) |
-| 0x582C50 | amPlatformGetBoardType | integer 0 (DWORD* out へ書く board type index。文字列を書くと 0x676E6952 に化けジャンプ表破損) |
 
-Implementation: `Memory.patchCode`（`patchPlatformFunc` / `patchBoardTypeFunc` ヘルパー）で関数先頭を
+Implementation: `Memory.patchCode`（`patchPlatformFunc` ヘルパー）で関数先頭を
 永続パッチ。`mov eax,[esp+4]; byte-by-byte write; xor eax,eax; ret 4`（stdcall, ret 4 確認済）。
 Interceptor ではないため Frida detach 後も有効。`args[1]` (bufLen) はスタックゴミ（観測値 1,3）なので読まない。
 
-### HW type dispatcher 0x891B20 — Error 0901 SEH bypass [S+F]
+platform gate `FUN_0045a6f0`（不一致で errCode 2/3 を latch）が読むのは **PlatformId と OsVersion のみ**。
+Error 0901/AAL latch の真因もこの `FUN_0045a6f0`。
 
-| static_VA | Function | Patch | 効果 |
-|---|---|---|---|
-| 0x891B20 | HW type dispatcher（hw types 0-7 のジャンプ表）| `mov eax,1; ret 4`（`B8 01 00 00 00 C2 04 00`）| SEH 例外回避 → Error 0901 抑止 |
-
-Root cause chain: `0x30292B → 0x4927F0`(hw enum, types 0-7) `→ 0x492710`(per-type wrapper, SEH 設置) `→ 0x891B20`
-(dispatcher) `→ 0x5F0600 ほか`(hw 固有 fn, -1=no hardware)。hw fn が -1 を返すと dispatcher が C++ 例外を投げ、
-`0x491AA9` の SEH が捕捉 → Error 0901 "Wrong Platform"。Fix: dispatcher を `ret 1` 化すると `0x492710` が
-je→`xor al,al` 経路で al=0(success) を返し、`0x4927F0` が全 8 type をクリーンに抜ける（例外なし）。呼び元
-`0x30292B` は戻り値を無視するため副作用なし。実装は **`patches.json`**（旧 `amplatform/hwdetect.js`）。
+### patch しない関数（誤 patch 防止の注記）
+- **amPlatformGetBoardType (0x982C50)**: patch 不要。AAL gate `FUN_0045a6f0` は BoardType を参照しない
+  （消費先は `amBackup_getAreaDescriptor` 0x982f40 のみで attract 非 gate）。
+- **HW type dispatcher 0x891B20**: patch 不要。packet recv 経路の dispatcher で SYSTEM STARTUP SM にも
+  errCode latch にも到達しない＝**Error 0901 とは無関係**（0901 の真因は上記 `FUN_0045a6f0`）。
 
 ### RINGEDGE2 レジストリは nrs.exe 非依存（純正イメージとのクロスチェック）[S]
 

@@ -25,7 +25,7 @@ Fix: `getStatusRecvDone` flag (set in recv hook) → 0x58ADC0 onLeave forces ret
 | 0x58B260 | PCPA recv checker | calls 0x58DAB0→0x58ADC0; writes [stream+0x21C]=ret; returns 1 iff 0x58ADC0=1 |
 | 0x58DAB0 | PCPA recv state reader | reads recv buffer state; returns 1 iff recv complete |
 | 0x58ADC0 | PCPA recv poll (jump table) | input=1 → ret 1; **hooked: getStatusRecvDone flag → force ret=1** |
-| 0x575140 | result= field checker | patched → always return 0 (was: always -5 → blocked get_status parser) |
+| 0x575140 | result= field checker | patched → always return 0 (unpatched returns -5, which blocks the get_status parser) |
 | 0x574B00 | get_status result parser | parses status= field; called only after 0x575140 patch |
 
 Stream struct offsets (ptr at RVA 0xE87004):

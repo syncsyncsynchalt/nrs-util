@@ -1,7 +1,7 @@
 // subsys:      amjvs
 // persistence: persistent   // network_role=local
 // va: 0x67AFA0, 0x987590, 0x9883D3, 0x16B7858, 0x16B785C, 0x16B7860, 0x16B8668, 0x16B7EA0, 0xCCF54C
-// ssot:        amjvs/FACTS.md ; BUGS.md [FIXED] keychipSM state4 / JVS polling
+// ssot:        amjvs/FACTS.md
 // role:        JVS init/state forced + FUN_0067afa0/specCheck/amJvspAckSwInput-return patched so amJvspAckSwInput polling stays alive. Persistent (survives detach).
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -20,7 +20,7 @@
 //   - jvs_per_node_output: poll_state=0 → calls specCheck; specCheck reads sub1Ptr[0];
 //     sub1Ptr[0]=1 → passes naturally (or specCheck returns -3, caller ignores return)
 //
-// All hooks eliminated: FUN_0067afa0 + specCheck both patchCode (persistent)
+// FUN_0067afa0 + specCheck are both patchCode (persistent).
 // ─────────────────────────────────────────────────────────────────────────────
 (function bypassJvs() {
     // ── Initial JVS state write ───────────────────────────────────────────────
@@ -47,11 +47,11 @@
     patch(0x67AFA0, [0xC3], 'FUN_0067afa0 JVS reinit -> ret');
     // specCheck(0x987590) stdcall 2args → xor eax,eax; ret 8（[[0xCCF54C]] guard を常に成功に。5B で原命令に収まる）。
     patch(0x987590, [0x31, 0xC0, 0xC2, 0x08, 0x00], 'specCheck -> xor eax,eax; ret 8');
-    logMsg('INIT_JVS', 'bypassJvs done — amJvspInit/statusFn/nodeInfoFn/specCheck hooks eliminated');
+    logMsg('INIT_JVS', 'bypassJvs done — amJvspInit/statusFn/nodeInfoFn/specCheck handled by patchCode');
 })();
 
 // amJvspAckSwInput GetReport(-11) failure path → return 0 (not -11) so errCnt stays 0.
-// 0x9883D3: MOV EAX,EDI (8B C7) → XOR EAX,EAX (33 C0). Persistent; pairs with amjvs/input.js.
+// 0x9883D3: MOV EAX,EDI (8B C7) → XOR EAX,EAX (33 C0). Persistent; keeps JVS polling alive.
 (function jvsAckReturnFix() {
     patch(0x9883D3, [0x33, 0xC0], 'amJvspAckSwInput -11 path -> xor eax,eax (errCnt stays 0)');
 })();

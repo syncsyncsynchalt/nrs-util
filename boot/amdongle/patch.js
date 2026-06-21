@@ -1,7 +1,7 @@
 // subsys:      amdongle
 // persistence: persistent
 // va:          0x975E00, 0x457AF0
-// ssot:        amdongle/FACTS.md ; BUGS.md [FIXED] keychipSM state4 crash
+// ssot:        amdongle/FACTS.md
 // role:        amDongleBusy→not-busy(outerSM 前進) + keychipSM state4 DLL-crash helper→ret 0。Persistent。
 //
 // 0x975E00 amDongleBusy: 戻り 0 = 「init op 完了 / not busy」(TP keychip driver 同等)。nrs の PCPA async 層は

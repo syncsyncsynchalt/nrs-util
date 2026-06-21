@@ -10,7 +10,7 @@ micetools 対応: `dll/drivers/`。
 ## mxsram = micetools `mxsram.c` 準拠（amBackup のバッキング） [F]
 
 amBackup→amSram→mxsram の SRAM デバイス。micetools `src/micetools/dll/drivers/mxsram.c` を正として
-以下を厳密準拠（2026-06-13）:
+以下を厳密準拠する:
 
 - **サイズ/初期値**: `1024*2084`=2,134,016B、新規は 0xFF 埋め。
 - **永続化**: `data/nvram/sram.bin` にファイルバック（mmap 相当）。init 時に `CreateFileW(OPEN_ALWAYS)`
@@ -21,7 +21,6 @@ amBackup→amSram→mxsram の SRAM デバイス。micetools `src/micetools/dll/
   **未対応（GET_LENGTH_INFO 等）は FALSE**。`lpBytesReturned`(args[6]) を 4/4/24 で設定。
 - **Read/Write/SetFilePointer**: ハンドル毎の file pointer（`ctx->m_Pointer` 相当）。Read/Write は
   micetools 同様 **常に TRUE** を返し、bytesRead/Written は実コピー数。
-- 注: mxsuperio/mxhwreset/jvs_pipe の挙動は従来どおり（変更なし）。
 
 ## mxsmbus = amEeprom(AT24C64AN) のバッキング [S/F]
 
@@ -46,17 +45,15 @@ amEeprom は STATIC/CREDIT/NETWORK/HISTORY/ALPB レコードの backing（amBack
 
 注: DeviceIoControl ログに実 cmd/addr/code を出すので、micetools 値との差異は実機ログで即検証・補正できる。
 
-### `ENABLE_EEPROM`（既定 ON）— 完全動作・実機検証済み
+### `ENABLE_EEPROM`（既定 ON）
 
-サスペンド起動下で **mxsmbus/AT24C64AN emulation は完全動作**。amEepromInit 成功、amBackup の eeprom 系
+サスペンド起動下で **mxsmbus/AT24C64AN emulation が動作**する。amEepromInit 成功、amBackup の eeprom 系
 レコード STATIC/CREDIT/NETWORK/HISTORY/BACKUP が read/write・`is broken=0`・`error(-3)=0`、
-`eeprom.bin`/`sram.bin` に永続（2回目起動で読み戻し確認）、**clean ATTRACT 到達・維持（#2000+）・実写確認**。
-STATIC は blank だと region/serial チェックで停止するため新規時に
+`eeprom.bin`/`sram.bin` に永続する。STATIC は blank だと region/serial チェックで停止するため新規時に
 `region=01, serial="SBVA…", 正CRC(amiCrc32R=標準CRC32)` で seed する。
 
-経緯メモ: eeprom を成功させると amlib storage init が通り、ゲームが実機運用パスへ進む。その結果ルート
+eeprom が成功すると amlib storage init が通り、ゲームが実機運用パスへ進む。その結果ルート
 システムシーン callback(0x6C3F10)→`FUN_0089e880`(amApp_shouldShutdown)→`FUN_0089df40`(amApp_shutdown_now)
-が `DAT_016f5aa0`(shutdown flag) を立て ATTRACT 前に clean ExitProcess していた（amBackup 自体は正常）。
-これは `boot/app/no_selfshutdown.js` が 0x6C3F20 の `je`→`jmp` patch で無力化（boot の checkニュートラ方式）。
-詳細は `app/FACTS.md` の「ルートシーン self-shutdown」。`ENABLE_EEPROM=false` にすると eeprom を発見不可にし
-従来の degraded パス（records -3）へ戻せる。
+が `DAT_016f5aa0`(shutdown flag) を立て ATTRACT 前に ExitProcess するため、`boot/app/no_selfshutdown.js` が
+0x6C3F20 の `je`→`jmp` patch で無力化する。詳細は `app/FACTS.md` の「ルートシーン self-shutdown」。
+`ENABLE_EEPROM=false` にすると eeprom を発見不可にし degraded パス（records -3）へ戻せる。

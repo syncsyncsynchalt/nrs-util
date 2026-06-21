@@ -51,7 +51,7 @@ XOR EAX,EAX ; RET          ; ← 整形結果を書き出さず破棄
 
 ---
 
-## Frida Hook（`boot/amdebug/diag.js`） [F] 実機確認 2026-06-13（frida-20260613-211406.txt）
+## Frida Hook（`boot/amdebug/diag.js`） [F]
 
 | 種別 | static_VA | 内容 |
 |---|---|---|

@@ -1,7 +1,7 @@
 // subsys:      mxgfetcher
 // persistence: runtime
 // va: recv (winsock export)
-// ssot:        FACTS.md §patchAmGfetcher ; BUGS.md [FIXED] get_status recv completion
+// ssot:        mxgfetcher/FACTS.md
 // role:        recv() hook sets the script-global getStatusRecvDone when a "response=get_status"
 //              packet arrives (port 40113 uses raw winsock, not pcpaRecvResponse). Pairs with
 //              amgfetcher/getstatus.js 0x98ADC0 completion fix. Interceptor → reverts on detach.

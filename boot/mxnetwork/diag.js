@@ -3,15 +3,14 @@
 // va: 0x9814E0
 // ssot:        mxnetwork/FACTS.md
 // role:        amNet 応答抽出 0x5814E0 (amNetworkResponseCheck) の native 成否を観測する診断専用
-//              (log-only, no force)。8006 (Network timeout DHCP) は pcpa_server.py の amNet 応答を
-//              '&' 区切りに修正したことで native 解決するため、旧 force-patch は撤去した。
-//              ret<0 が出たら pcpa amNet 応答フォーマット回帰の疑い。
+//              (log-only, no force)。8006 (Network timeout DHCP) は pcpa_server.py の amNet 応答が
+//              '&' 区切りなら native 解決する。ret<0 が出たら pcpa amNet 応答フォーマット回帰の疑い。
 //
-// 根本原因（2026-06-13 確定）: PCP パーサ pcppChangeRequest (FUN_0098bb30 / static 0x98bb30) は '&' を
-//   フィールド区切りとし、'\r' または '\n' を見た時点でパースを打ち切る。pcpa_server の amNet 応答だけ
-//   '\r\n' 区切りだったため先頭 response ペアのみ登録され、抽出器 amNetworkResponseCheck (static 0x9814E0)
-//   が 'result' を見つけられず -1 を返し SM がループ → 8006。'&' 区切りに直して native 成功
-//   (ret=0, dhcp_status=3, nic_ready=1) を実機実証（force OFF で 8006 ログ 0 件・HLSM ATTRACT 到達）。
+// PCP パーサ pcppChangeRequest (FUN_0098bb30 / static 0x98bb30) は '&' をフィールド区切りとし、
+//   '\r' または '\n' を見た時点でパースを打ち切る。amNet 応答が '\r\n' 区切りだと先頭 response ペア
+//   のみ登録され、抽出器 amNetworkResponseCheck (static 0x9814E0) が 'result' を見つけられず -1 を返し
+//   SM がループ → 8006。'&' 区切りであれば native 成功（ret=0, dhcp_status=3, nic_ready=1）し HLSM が
+//   ATTRACT に到達する。
 (function monitorAmNet() {
     var nrsBase = null;
     try { nrsBase = Process.getModuleByName('nrs.exe').base; }
