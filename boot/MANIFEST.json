@@ -49,6 +49,19 @@
       "network_role": "serve"
     },
     {
+      "module": "mxkeychip/diag.js",
+      "subsys": "mxkeychip",
+      "persistence": "monitor",
+      "va": [
+        "0x98AB20",
+        "0x98AB60",
+        "0x98AF50",
+        "0x98AFF0"
+      ],
+      "ssot": "mxkeychip/FACTS.md",
+      "network_role": "serve"
+    },
+    {
       "module": "mxnetwork/diag.js",
       "subsys": "amnet",
       "persistence": "monitor",
