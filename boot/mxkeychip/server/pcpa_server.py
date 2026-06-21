@@ -153,10 +153,10 @@ def handle_request(kv, port):
     if 'keychip.appboot.gameid' in kv:
         return f'keychip.appboot.gameid={ID["gameid"]}'
     if 'keychip.appboot.region' in kv:
-        # JAPAN=0x01 (was 02=USA). nrs.exe is a JAPAN build: region check
+        # region=01=JAPAN. nrs.exe is a JAPAN build: region check
         # FUN_00458fd0/FUN_0045a7f0 require (game_region & dongle_region & 5) != 0.
-        # game_region (DAT_016014c4) has bit0 set (JAPAN); 0x02 & 5 == 0 → always Region error.
-        # FUN_0048f9c0 decodes region byte as 0x01=JAPAN/0x02=USA/0x08=EXPORT.
+        # game_region (DAT_016014c4) has bit0 set (JAPAN), so 0x02(USA) & 5 == 0 → Region error.
+        # FUN_0048f9c0 decodes the byte as 0x01=JAPAN/0x02=USA/0x08=EXPORT.
         # Matches TeknoParrot profile DongleRegion/PcbRegion=JAPAN.
         return f'keychip.appboot.region={ID["region"]}'        # cabinet identity.region (01=JAPAN)
     if 'keychip.appboot.platformid' in kv:
@@ -168,10 +168,9 @@ def handle_request(kv, port):
     if 'keychip.appboot.networkaddr' in kv:
         # amDongleGetNetworkAddress (req 9). この値は amNet の ip_match_check (0x45a000) が
         #   (mask & nic_ip) == (networkaddr & mask)
-        # で nic IP と同一 /24 にあるか検査する参照アドレスになる。不一致だと network 接続 SM
-        # FUN_006fe040 が「接続済み」へ進めず Error 8001 (Network address error)。旧ハードコード
-        # 192.168.0.1 は nic IP(=NET["ip"]=192.168.1.x) と別サブネットで 8001 を誘発していた。
-        # cabinet network と整合させる（同一 /24 の任意ホストで可）。
+        # で nic IP と同一 /24 にあるか検査する参照アドレス。不一致だと network 接続 SM
+        # FUN_006fe040 が「接続済み」へ進めず Error 8001 (Network address error)。よって nic IP
+        # (NET["ip"]) と同一 /24 にする（cabinet network と整合; 同一 /24 の任意ホストで可）。
         return f'keychip.appboot.networkaddr={NET["gateway"]}'
     if 'keychip.appboot.dvdflag' in kv:
         return 'keychip.appboot.dvdflag=00'

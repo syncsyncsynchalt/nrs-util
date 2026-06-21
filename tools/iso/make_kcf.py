@@ -19,9 +19,8 @@ iv_f  =swap(IV,0,11,5,15)
 # AM_APPBOOT header (SBVA / RingEdge / JPN) from decrypted Boot ID + KCF DB
 hdr=bytearray(0x18)
 struct.pack_into('<I',hdr,0,0)            # m_Crc (unused by micekeychip path)
-struct.pack_into('<I',hdr,4,1)            # m_Format: byte value (micekeychip sends %02X) &
-                                          # KeychipCheck requires formattype==1. (was 0x00010000,
-                                          # >0xFF -> overflowed micekeychip 3-byte buf -> fast-fail crash)
+struct.pack_into('<I',hdr,4,1)            # m_Format: byte (micekeychip sends %02X); KeychipCheck
+                                          # requires formattype==1. Must be <=0xFF (3-byte buf)
 hdr[8:12]=b'SBVA'                          # m_GameId
 hdr[0xc]=0x01                              # m_Region: 1=JPN
 hdr[0xd]=0x02                              # m_ModelType (ST/SV; 2 ~ RingEdge2)

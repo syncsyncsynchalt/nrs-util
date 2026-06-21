@@ -39,7 +39,6 @@ var out = {
   fe040_gate_DAT0210aed0: u8(0x1d0aed0),
   fe040_state_DAT0210aee0: u32(0x1d0aee0),
   net_connected_DAT0210b508: u32(0x1d0b508),
-  // amNet ctx nic fields (ctx ptr at 0x8CF448 -> ctx)
   // errCode master + display struct
   master_errcode_DAT016f5af0: hex(u32(0x12f5af0)),
   disp_errcode_p00: hex(u32(0x12f5a80)),

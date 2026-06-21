@@ -7,28 +7,23 @@
 //              region-index 整合用に維持。NOP/DAT書込=永続(patchCode/data) / watchdog・診断=runtime(他コード safety-net)
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Error 0903 fix: patchCode region check functions to return 0 (success).
-//
-// After hw detection bypass, the game reaches keychip region validation:
-//   0x986A5F: call 0x587CA0 (check 1) → Error 0x381 if non-zero
-//   0x986A6D: call 0x588810 (check 2) → Error 0x387 (0903 "Wrong Region") if non-zero
-//   0x986A8B: call 0x589020 (check 3) → Error at 0x986BAD if non-zero
-// Each function validates keychip region data vs expected region.
-// Without a real keychip, region cert data is invalid → all three fail, so each
-// must return 0.
+// Error 0903 (region) fix — TP-style: neutralize the region checks rather than
+// supply real keychip cert data. Four layers, all persistent (patchCode / data):
+//   1. NOP the jne jumps out of the outer keychip-region SM (0x986A66/74/92).
+//   2. jl→jmp the isrelease SM error-display branches (0x97588A/5F/A1F).
+//   3. NOP the amlib region setter's errCode=4 store (0x459109/0x45A846).
+//   4. Force region=JAPAN via data write + watchdog clearing master errCode.
 // ─────────────────────────────────────────────────────────────────────────────
 (function patchRegionCheck() {
     var nrsBase = null;
     try { nrsBase = Process.getModuleByName('nrs.exe').base; }
     catch(e) { logMsg('WARN', 'patchRegionCheck: nrs.exe not found'); return; }
 
-    // NOP out the jne/jnz jumps that lead to Error 09xx from the outer SM function.
-    // More reliable than patching callee functions: directly kills the jump regardless
-    // of what the check returns.
+    // NOP the jne jumps to Error 09xx from the outer keychip-region SM (kills the jump
+    // regardless of what the check returns):
     //   0x986A66: 0F 85 E3 00 00 00  jne 0x986B4F  -> Error 0x381
     //   0x986A74: 0F 85 04 01 00 00  jne 0x986B7E  -> Error 0x387 (0903 Wrong Region)
     //   0x986A92: 0F 85 15 01 00 00  jne 0x986BAD  -> Error 0x38D
-    //   0x986AD8: 74 C6              je  0x986AA0  -> re-poll loop (turn into unconditional fall)
     var nop6 = [0x90,0x90,0x90,0x90,0x90,0x90];
     [
         { name: '0x986A66 jne->0x381',  va: 0x986A66, code: nop6 },
@@ -68,24 +63,17 @@
         } catch(ex) { logMsg('WARN', 'patchCode ' + e.name + ': ' + ex); }
     });
 
-    // ── TeknoParrot 方式 = チェック無力化: amlib init region setter を直接潰す ──────────
-    // region ゲートは2関数 FUN_00458fd0 / FUN_0045a7f0 にあり、両方とも
-    //   bVar = DAT_016014a2 ? DAT_01601989 : 0;            // dongleRegion (gate付き)
-    //   if ((DAT_016014c4 & bVar & 5) == 0) { ...; if (DAT_016f5af0==0) DAT_016f5af0 = 4; }
-    //   ＝ JAPAN(01) を通すには PcbRegion(DAT_016014c4) & dongleRegion(DAT_01601989) 両方に bit0 必要。
-    //   dongleRegion は pcpa appboot.region=01 で満たせるが、PcbRegion(DAT_016014c4) は
-    //   **バイナリ内に writer が無い**（全 xref READ）。本来 game.bat の mxGetHwInfo/基板コンフィグが
-    //   供給する基板値で、その検査ごとバイパスした本構成では 0 のまま → ゲート FAIL は不可避。
-    //   data-write で 01 を強制しても、FUN_00458fd0 が amlib init 初期に forceRegion 着弾より前に走ると
-    //   errCode 4 を display struct(DAT_016f5a80)へ snapshot し、watchdog が master をクリアしても画面に
-    //   Error 0903 が固着しうる（timing-fragile）。
-    // そこで TeknoParrot と同じく「データを正す」のでなく「チェックを無力化」する。errCode 4 の
-    //   `MOV dword ptr [0x016f5af0],4`（C7 05 + addr4 + imm4 = 10B）を NOP 化。両 setter とも先行の
-    //   `if (DAT_016f5af0==0)` ガード直後の単純ストアで、呼び出し元 FUN_00643de0(45a7f0)/FUN_006c3730(458fd0)
-    //   は戻り値を捨てる（xref/decompile 確認済）ため、ストアを消すだけで region error は二度と latch せず
-    //   制御フロー・戻り値も不変。patchCode なので detach 後も永続。
-    //   0x059109: FUN_00458fd0 の errCode=4 ストア（早期に走る本命の latcher）
-    //   0x05A846: FUN_0045a7f0 の errCode=4 ストア（同一 errCode・防御的に併せて潰す）
+    // ── amlib init region setter の errCode=4 ストアを NOP 化（TP 方式＝チェック無力化）──
+    // region ゲートは FUN_00458fd0 / FUN_0045a7f0 の2関数:
+    //   if ((DAT_016014c4 & (DAT_016014a2 ? DAT_01601989 : 0) & 5) == 0)
+    //       if (DAT_016f5af0 == 0) DAT_016f5af0 = 4;   // → on-screen Error 0903
+    //   PcbRegion(DAT_016014c4) はバイナリ内に writer が無く（全 xref READ）、本構成では 0 のまま
+    //   → ゲート FAIL 不可避。下の forceRegion で 01 を data-write するが、458fd0 がその着弾より前に
+    //   走ると errCode 4 を display struct(DAT_016f5a80)へ snapshot して固着しうる（timing-fragile）。
+    //   そこでストア `MOV [0x016f5af0],4`（C7 05 + addr4 + imm4 = 10B）自体を NOP 化する。呼び出し元
+    //   (FUN_006c3730/FUN_00643de0) は戻り値を捨てるので、制御フロー・戻り値とも不変。patchCode=永続。
+    //   0x459109: FUN_00458fd0 の errCode=4 ストア（早期に走る本命の latcher）
+    //   0x45A846: FUN_0045a7f0 の errCode=4 ストア（同一 errCode・防御的に併せて潰す）
     var nop10 = [0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90];
     [
         { name: '0x459109 errCode=4 store (FUN_00458fd0)', va: 0x459109 },
@@ -100,8 +88,8 @@
         } catch(ex) { logMsg('WARN', 'patchCode region setter ' + e.name + ': ' + ex); }
     });
 
-    // Hook error display function 0x58A5F0 to log every call with error code + backtrace.
-    // This tells us the REAL call site even if our patches miss it.
+    // Log-only: error display 0x98A5F0, with errCode + backtrace (reveals any call site
+    // the patches above miss).
     try {
         Interceptor.attach(va(0x98A5F0), {
             onEnter: function(args) {
@@ -114,23 +102,15 @@
                 logMsg('ERR_DISPLAY', 'errCode=0x' + errCode.toString(16) + '(' + errCode + ') bt=' + bt);
             }
         });
-        logMsg('INIT_REGION', '0x58A5F0 (error display) hooked for diag');
+        logMsg('INIT_REGION', '0x98A5F0 (error display) hooked for diag');
     } catch(e) { logMsg('WARN', 'hook 0x58A5F0: ' + e); }
 
-    // ── FIX + diag: amlib region check (FUN_00458fd0 / FUN_0045a7f0) ────────────
-    // Region check: (DAT_016014c4 & dongleRegion & 5) == 0 → "Region error" →
-    // DAT_016f5af0=4 (master errCode → on-screen Error 0903). NOT covered by the
-    // NOP/jmp patches above. The failing operand:
-    //   game=DAT_016014c4=0x00  dongle=DAT_01601989=0x01(JAPAN, our pcpa region=01)
-    //   gate=DAT_016014a2=1   → (0 & 1 & 5)=0 → FAIL regardless of dongle value.
-    // DAT_016014c4 (PcbRegion; TeknoParrot=JAPAN) has NO writer in the binary — it
-    // stays 0, so force it to 0x01 (JAPAN). A Frida DATA write persists after detach
-    // (only Interceptor hooks revert), so this is a permanent fix.
-    //   DAT_016014c4 (game/PCB region) static 0x16014C4 → RVA 0x12014C4
-    //   DAT_01601744 (cached region)   static 0x1601744 → RVA 0x1201744
-    //   DAT_01601989 (dongle region)   static 0x1601989 → RVA 0x1201989
-    //   DAT_016014a2 (gate)            static 0x16014A2 → RVA 0x12014A2
-    //   DAT_016f5af0 (master errCode)  static 0x16F5AF0 → RVA 0x12F5AF0
+    // ── forceRegion: data-write the region operands to JAPAN, + diag hooks ──────
+    // Backstop for the NOP10 above: force the gate operands so the check also passes.
+    // DAT_016014c4 (PcbRegion) has no writer in the binary → stays 0; a Frida data
+    // write persists post-detach. Operands (static_VA):
+    //   0x16014C4 game/PCB region · 0x1601744 cached region · 0x1601989 dongle region
+    //   0x16014A2 gate            · 0x16F5AF0 master errCode
     function forceRegion() {
         try {
             va(0x16014C4).writeU8(0x01);   // DAT_016014c4 = JAPAN (game/PCB region)
@@ -163,32 +143,28 @@
             onEnter: function() { forceRegion(); },
             onLeave: function() { if (diag458fd0++ < 3) logRegion('458fd0#' + diag458fd0); }
         });
-        logMsg('INIT_REGION', '0x58FD0 (amlib region check 1) hooked: force+log');
-    } catch(e) { logMsg('WARN', 'hook 0x58FD0: ' + e); }
+        logMsg('INIT_REGION', '0x458FD0 (amlib region check 1) hooked: force+log');
+    } catch(e) { logMsg('WARN', 'hook 0x458FD0: ' + e); }
     var diag45a7f0 = 0;
     try {
         Interceptor.attach(va(0x45A7F0), {
             onEnter: function() { forceRegion(); },
             onLeave: function() { if (diag45a7f0++ < 5) logRegion('45a7f0#' + diag45a7f0); }
         });
-        logMsg('INIT_REGION', '0x5A7F0 (amlib region check 2) hooked: force+log');
-    } catch(e) { logMsg('WARN', 'hook 0x5A7F0: ' + e); }
+        logMsg('INIT_REGION', '0x45A7F0 (amlib region check 2) hooked: force+log');
+    } catch(e) { logMsg('WARN', 'hook 0x45A7F0: ' + e); }
 
-    // ── Watchdog: keep region forced + CLEAR amlib error state DAT_016f5af0 ──────
-    // region(errCode 4) は上の setter NOP（TP 方式）で扱う。この watchdog は、check-neutralization
-    //   化していない他コード（0xa board-table / 0x14 network 等）の master errCode を毎 tick クリアする
-    //   safety-net + forceRegion 維持用。これら setter を個別に NOP 化すれば watchdog 依存を外せるが、
-    //   FUN_0089a010 等は load-bearing なので要慎重。
-    // DAT_016f5af0 is the amlib init error code (field of struct DAT_016f5a80, init
-    // by FUN_006c35c0). MANY init checks set it on hardware/platform absence:
+    // ── Watchdog: keep region forced + CLEAR master errCode DAT_016f5af0 ──────────
+    // Safety-net for the errCode setters NOT neutralized above (0xa board-table /
+    // 0x14 network etc.) + keeps forceRegion applied. DAT_016f5af0 is the amlib init
+    // errCode (field of struct DAT_016f5a80, init FUN_006c35c0); init checks set it on
+    // hw/platform absence:
     //   2/3/7=platform(amPlatformGetPlatformId!="AAL"), 4=region, 6=amStorage,
     //   10=board-table, 0xb/0xd/0xe/0x14-0x18=other device/config checks.
-    // On real RingEdge all pass → stays 0. In our pure-Frida bypass several fail
-    // (we return "RingEdge" not "AAL", no real board table, etc.), so the first
-    // failing check latches a code → on-screen Error 09xx after detach.
-    // The display reads the code via the DAT_016f5a80 struct pointer (not visible as
-    // DAT_016f5af0 in decompiled C, so it can't be patched by name). Fix: clear the
-    // code each tick (data write → persists post-detach). Log each distinct code.
+    // Several fail in the pure-Frida bypass (we return "RingEdge" not "AAL", no real
+    // board table) → first failure latches a code → on-screen Error 09xx. The display
+    // reads it via the struct pointer (not patchable by name), so clear it each tick
+    // (data write persists post-detach). Log each distinct code.
     var lastErrCode = 0;
     setInterval(function() {
         forceRegion();

@@ -5,14 +5,11 @@
 // role:        amRtc サーバ時刻→PC ローカル時刻 / SetServerTime 無視。
 
 // ─────────────────────────────────────────────────────────────────────────────
-// amRtcGetServerTime bypass — return local system time instead of RingEdge RTC
+// amRtcGetServerTime (0x974040) bypass — return local system time instead of RingEdge
+// RTC. Without an RTC server the function returns -3 (no driver). Hook onLeave: on
+// failure call GetLocalTime, pack it into the amRtcTime struct at outPtr, force ret→0.
 //
-// RVA 0x574040. Without a RingEdge RTC server the function returns -3 (no
-// driver). TeknoParrot replaces it with PC local time. We hook onLeave: on
-// failure we call GetLocalTime, pack it into the amRtcTime struct at args[1],
-// and force ret→0.
-//
-// amRtcTime struct layout (observed from function body at 0x573FC0):
+// amRtcTime struct layout (from function body at 0x973FC0):
 //   +0x00  WORD  year
 //   +0x02  BYTE  month (1-12)
 //   +0x03  BYTE  day   (1-31)
@@ -58,14 +55,14 @@
                     } catch(e) { logMsg('RTC', 'hook err: ' + e); }
                 }
             });
-        } catch(e) { logMsg('RTC', '0x574040 attach err: ' + e); }
+        } catch(e) { logMsg('RTC', '0x974040 attach err: ' + e); }
 
         try {
             Interceptor.attach(va(0x9742C0), {
                 onLeave: function(ret) { ret.replace(0); }
             });
-        } catch(e) { logMsg('RTC', '0x5742C0 attach err: ' + e); }
+        } catch(e) { logMsg('RTC', '0x9742C0 attach err: ' + e); }
 
-        logMsg('RTC', 'amRtcGetServerTime(0x574040) + amRtcSetServerTime(0x5742C0) installed');
+        logMsg('RTC', 'amRtcGetServerTime(0x974040) + amRtcSetServerTime(0x9742C0) installed');
     } catch(e) { logMsg('RTC', 'hookAmRtc setup err: ' + e); }
 })();

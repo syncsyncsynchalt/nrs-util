@@ -119,7 +119,7 @@
         });
         var ok980 = va(0x6FF980).readU8() === 0xB8;
         logMsg('PATCH', 'FUN_006FF980 → patchCode(mov eax,1; ret) persistent, verify=' + ok980);
-    } catch(e) { logMsg('WARN', '0x2FF980 patchCode: ' + e); }
+    } catch(e) { logMsg('WARN', '0x6FF980 patchCode: ' + e); }
 
     // NOTE: state7→8 is driven by the 0x457FE0 onEnter direct-write (next=8 before case=7
     // runs). FUN_006FF650 (0x6FF650) is intentionally NOT patched — it is redundant while

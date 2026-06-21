@@ -2,9 +2,8 @@
 """nrs.exe static analysis — STATIC VA dialect (matches Ghidra MCP).
 
 EVERY address argument is a Ghidra static VA (ImageBase 0x400000), always hex.
-There is no RVA mode: the boot shims address by static VA via va() and Ghidra MCP
-speaks static VA, so this tool does too — one dialect, no conversion, no guessing.
-(RVA exists only inside the runtime va() helper; it never appears at a tool boundary.)
+No RVA mode — one dialect, no conversion. RVA exists only inside the runtime
+va() helper and never appears at a tool boundary.
 
 Usage:
   disasm.py <VA>                     disassemble 20 instructions

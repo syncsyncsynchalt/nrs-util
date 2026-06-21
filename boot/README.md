@@ -17,10 +17,9 @@ dir = RingEdge 実行ファイル(`mx*.exe`)/ ライブラリ(`am*`)。単純固
 | `amplatform/` | amPlatform | board/OS identity、HW 検出(Error 0901) |
 | `mxgfetcher/` | mxgfetcher.exe / amGfetcher | get_status recv 完了、boot SM 前進 |
 | `ambilling/` | ALL.Net Plus Billing (alpbEx) | billing offline idle（実装 `patches.json` 0xA065C0） |
-| `ambackup/` | amBackup | amBackupWrite クラッシュ stub |
 | `amrtc/` | amRtc | ローカル時刻 |
-| `mxkeychip/` | mxkeychip.exe / keychip / PCP | client 回復、setup、region、`server/`=PCPA サーバ |
-| `mxdrivers/` | mx ドライバ | mxsram/mxsuperio/mxhwreset/jvs pipe デバイス偽装 |
+| `mxkeychip/` | mxkeychip.exe / keychip / PCP | client 回復、setup、region、`server/`=PCPA サーバ（mxmaster port 40100 含む） |
+| `mxdrivers/` | mx ドライバ / amBackup 層 | mxsram/mxsuperio/mxhwreset/jvs pipe デバイス偽装 ＋ amBackup 層スタック |
 | `mxsegaboot/` | mxsegaboot.exe / SYSTEM STARTUP | extend image(state5)/p-ras(state7)（実装 `patches.json`） |
 | `mxstorage/` | mxstorage.exe | storage presence（実装 `patches.json` 0x4FDA50） |
 | `devices/` | 周辺デバイス presence 連鎖 | IC Card R/W・Touch Panel・USB I/O（実装 `patches.json`） |

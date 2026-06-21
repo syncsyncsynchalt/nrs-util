@@ -133,7 +133,7 @@ if (wfFn) Interceptor.attach(wfFn, {
     });
 });
 
-// Hook CreateNamedPipeA/W (maybe TeknoParrot creates the pipe from within?)
+// CreateNamedPipeA/W
 var cnpa = Module.getGlobalExportByName('CreateNamedPipeA');
 if (cnpa) Interceptor.attach(cnpa, {
     onEnter: function(args) { logMsg('CreateNamedPipeA', '"' + args[0].readAnsiString() + '"'); }
@@ -147,7 +147,7 @@ if (cnpw) Interceptor.attach(cnpw, {
 var np = Module.getGlobalExportByName('ConnectNamedPipe');
 if (np) Interceptor.attach(np, { onEnter: function(args) { logMsg('ConnectNamedPipe', 'h=0x' + args[0].toUInt32().toString(16)); } });
 
-// Hook OpenMutexA/W (TeknoParrot_JvsState uses mutex?)
+// OpenMutexA
 var oma = Module.getGlobalExportByName('OpenMutexA');
 if (oma) Interceptor.attach(oma, {
     onEnter: function(args) { logMsg('OpenMutexA', '"' + args[2].readAnsiString() + '"'); }

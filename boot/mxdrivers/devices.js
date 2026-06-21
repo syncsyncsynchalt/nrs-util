@@ -15,8 +15,6 @@
 // (native API — the game uses this for device paths). For matching paths, return
 // a dummy event handle and record it. Any DeviceIoControl on a dummy handle is
 // intercepted and made to return success with a zeroed output buffer.
-//
-// NtCreateFile is also used to diagnose what h=0x6e8/h=0x9e0 actually are.
 // ─────────────────────────────────────────────────────────────────────────────
 (function emulateRingEdgeDevices() {
     var NULL_PTR = ptr(0);

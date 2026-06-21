@@ -5,8 +5,7 @@ The error renderer FUN_006f2730 reads:
   desc+0xc  = char* message (shown when non-null)
   desc+0x10 = uint16 error number
   desc+0x16 = byte flags (&4 -> "Caution")
-This dumps the descriptor bytes + the message string it points to, so we can see
-what (if anything) the constructor stored, grounding the root-cause analysis.
+Dumps the descriptor bytes + the message string it points to.
 
 Usage:  python tools/static/dump_err_desc.py <pid> <desc_addr_hex>
 Example: python tools/static/dump_err_desc.py 1044 0x1e28ce50

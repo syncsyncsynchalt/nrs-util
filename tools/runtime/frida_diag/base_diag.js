@@ -1,13 +1,9 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 汎用 Win32 API 観測フック（診断専用 — 本番ランには含まれない）
+// 汎用 Win32 API 観測フック（診断専用・観測のみ）
 //
-// 使い方: 単体で --pid アタッチ時に読み込む。
-//   python frida_monitor.py --pid <PID>  # このファイルは diag/ なので本番ランに混入しない
-//
-// 依存: logMsg / readWStr / readAStr / hexBuf / hookFn / parseSockAddr は
-//       00_base.js（本番スクリプト）で定義される。diag/ 単体実行時は先頭に
-//       00_base.js を連結するか、同等のヘルパーを用意すること。
+// 依存: logMsg / readWStr / readAStr / hexBuf / hookFn / parseSockAddr は 00_base.js が定義。
+//       単体実行時は先頭に 00_base.js を連結するか同等ヘルパーを用意する。
 // ─────────────────────────────────────────────────────────────────────────────
 
 // --- File I/O ---
@@ -156,7 +152,7 @@ hookFn('SetWindowTextW',
     function(ret)  { logMsg('SetWindowTextW', '"' + this.t + '"'); }
 );
 
-// --- DeviceIoControl (moved from 00_base.js) ---
+// --- DeviceIoControl ---
 hookFn('DeviceIoControl',
     function(args) {
         this.h = args[0].toString(16); this.ioctl = args[1].toUInt32();

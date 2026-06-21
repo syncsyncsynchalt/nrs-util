@@ -1,15 +1,13 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DIAGNOSTIC: keychip 0949 scene — presence timing + scene-activation source.
+// DIAGNOSTIC: keychip 0949 scene — presence timing + scene-activation source. Logging only.
 //
-// Screenshot proved the live screen shows "Error 0949 Keychip Not Found" even with all
-// device/scene satisfies active and FUN_006f2730(scene renderer)/FUN_0098A5F0(ERR_DISPLAY)
-// never firing. The keychip error is scene-type 0x66 → scene-ID 0x3b5 (=949), built by the
+// "Error 0949 Keychip Not Found" = scene-type 0x66 → scene-ID 0x3b5 (=949), built by
 // autoscene builder FUN_00489130. keychip presence = FUN_0096c5d0() = (ctx+4 && ctx+8).
 //
-// This logs (a) FUN_0096c5d0 return over time — does keychip presence FLICKER to 0? and
-// (b) the first few times the autoscene builds the keychip scene (param_2+0x10 == 0x66),
-// with a backtrace → the scene-activation source. Logging only.
+// Logs (a) FUN_0096c5d0 return transitions (does presence flicker to 0?) and
+// (b) first few autoscene builds of the keychip scene (param_2+0x10 == 0x66) with
+// backtrace → scene-activation source.
 // ─────────────────────────────────────────────────────────────────────────────
 (function diagKeychipScene() {
     var nrsBase = null;

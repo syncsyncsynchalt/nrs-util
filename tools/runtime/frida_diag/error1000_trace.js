@@ -1,20 +1,16 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Error 1000 trigger diagnostic — hook FUN_006f2730 (RVA 0x2f2730)
+// Error 1000 trigger diagnostic — hook FUN_006f2730 (RVA 0x2f2730). Logging only.
 //
-// FUN_006f2730 is the game-application error renderer. Decompile (confirmed):
+// FUN_006f2730 = game-application error renderer:
 //   void FUN_006f2730(int param_1)   // cdecl, single stack arg
 //     msgPtr = *(param_1 + 0xc);     // char* message; NULL → default path
 //     errNo  = *(param_1 + 0x10);    // uint16 error number (read only if msgPtr!=0)
 //     flags  = *(param_1 + 0x16);    // byte; (&4)!=0 → "Caution" else "Error"
-//   When msgPtr==0 → prints "Error 1000\n\nUnknown Application Error" (the symptom).
+//   msgPtr==0 → "Error 1000\n\nUnknown Application Error".
 //
-// The caller is INDIRECT (fn ptr / handler table) so there is no static xref.
-// This hook captures, the moment the error screen is rendered:
-//   - the resolved errNo + message (or the NULL→default 1000 case)
-//   - the descriptor's flags byte
-//   - a fuzzy backtrace → identify the true trigger site / error-raising path
-// Logging only (no behavior change), so it is safe to leave attached.
+// Caller is INDIRECT (fn ptr / handler table) → no static xref. Captures resolved
+// errNo + message + flags byte + fuzzy backtrace to identify the trigger site.
 // ─────────────────────────────────────────────────────────────────────────────
 (function hookError1000() {
     var nrsBase = null;

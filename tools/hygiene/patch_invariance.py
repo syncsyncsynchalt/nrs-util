@@ -52,11 +52,12 @@ GAME_ARGS = ["-wsvga", "-full", "-img"]
 # ── Instrumentation injected around the assembled boot script ────────────────
 # Memory.patchCode / Interceptor.attach are read-only, non-configurable props in
 # Frida's QuickJS, so they can't be reassigned directly. BUT the *global bindings*
-# `Memory` and `Interceptor` are writable — so we shadow each with a Proxy that
-# intercepts the effect-producing method and forwards every other member (bound to
-# the real receiver, which native Frida bindings require). Modules reference the
-# globals, so their calls hit the proxies. rtToVa() (from lib/base.js, concatenated
-# right after) is resolved at CALL time, by when it is defined.
+# `Memory` and `Interceptor` are writable — so we shadow each with an object that
+# inherits from the real one (other members pass through the prototype, bound to the
+# real receiver, which native Frida bindings require) and overrides only the
+# effect-producing method. Modules reference the globals, so their calls hit the
+# shadows. rtToVa() (from lib/base.js, concatenated right after) is resolved at CALL
+# time, by when it is defined.
 _PROLOGUE = r"""
 'use strict';
 var __INV = { patches: [], hooks: [], seq: [] };

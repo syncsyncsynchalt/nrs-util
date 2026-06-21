@@ -1,4 +1,5 @@
-"""Frida 17.x API monitor for nrs.exe + TeknoParrot.dll.
+"""Standalone boot launcher for nrs.exe: spawns the game suspended, installs the boot
+hooks (assembled from MANIFEST.json), resumes, and auto-starts pcpa_server.py.
 
 Usage:
   python boot/launch.py --spawn              # 起動+アタッチ（推奨）
@@ -6,10 +7,6 @@ Usage:
   python boot/launch.py --pid 1234           # 実行中プロセスにアタッチ
 
 Log: captures\frida-YYYYMMDD-HHMMSS.txt に自動保存
-
-Frida 17.x の重要な変更:
-  Module.findExportByName() → 廃止
-  Module.getGlobalExportByName() → 正しい API（全モジュール横断検索）
 """
 import frida, sys, time, os, argparse, subprocess, threading
 
@@ -255,7 +252,7 @@ if __name__ == "__main__":
         pass
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--pid',      type=int,  help='attach to existing PID')
-    p.add_argument('--spawn',    action='store_true', help='spawn nrs.exe via OpenParrotLoader')
+    p.add_argument('--spawn',    action='store_true', help='spawn nrs.exe suspended via frida.spawn (recommended)')
     p.add_argument('--duration', type=int,  help='capture duration in seconds (default: until Ctrl+C)')
     a = p.parse_args()
     run(pid=a.pid, spawn=a.spawn, duration=a.duration)

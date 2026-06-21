@@ -15,9 +15,11 @@ confidence 凡例: [F]=Frida確認 [S]=静的解析 [I]=推論
 | keychip / PCP | [boot/mxkeychip/FACTS.md](boot/mxkeychip/FACTS.md) | `boot/mxkeychip/` |
 | amJvs / amJvsp | [boot/amjvs/FACTS.md](boot/amjvs/FACTS.md) | `boot/amjvs/` |
 | amDongle | [boot/amdongle/FACTS.md](boot/amdongle/FACTS.md) | `boot/amdongle/` |
-| amBackup | [boot/ambackup/FACTS.md](boot/ambackup/FACTS.md) | `boot/ambackup/` |
+| mx ドライバ層 / amBackup 層（mxsram/mxsmbus + am 層スタック） | [boot/mxdrivers/FACTS.md](boot/mxdrivers/FACTS.md) | `boot/mxdrivers/` |
 | amPlatform | [boot/amplatform/FACTS.md](boot/amplatform/FACTS.md) | `boot/amplatform/` |
 | amGfetcher | [boot/mxgfetcher/FACTS.md](boot/mxgfetcher/FACTS.md) | `boot/mxgfetcher/` |
+| ALL.Net Plus Billing（alpbEx, `patches.json` 0xA065C0） | [boot/ambilling/FACTS.md](boot/ambilling/FACTS.md) | `boot/ambilling/` |
+| storage presence（`patches.json` 0x4FDA50） | [boot/mxstorage/FACTS.md](boot/mxstorage/FACTS.md) | `boot/mxstorage/` |
 | 周辺デバイス presence 連鎖 | [boot/devices/FACTS.md](boot/devices/FACTS.md) | `boot/devices/` |
 | amlib SYSTEM STARTUP | [boot/mxsegaboot/FACTS.md](boot/mxsegaboot/FACTS.md) | `boot/mxsegaboot/` |
 

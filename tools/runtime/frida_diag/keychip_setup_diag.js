@@ -1,21 +1,16 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Keychip setup SM diagnostic — amDongleSetupKeychip read SM (FUN_0096d520)
+// Keychip setup SM diagnostic — amDongleSetupKeychip (FUN_0096d520). Logging only.
 //
-// TP-aligned investigation (NOT a patch): find why the keychip context stays
-// unpopulated, which causes errCode 1 → Error 0949 "Keychip Not Found" and (after
-// billing) the on-screen error. amDongleSetupKeychip is a PCPA client SM:
+// PCPA client SM; unpopulated keychip ctx → errCode 1 → Error 0949 "Keychip Not Found".
 //   ctx = *PTR_DAT_00ccf000   (pointer at static 0xCCF000 / RVA 0x8CF000)
 //   ctx+0x30 = SM state (1 open → 2 recv-wait → 3 send → 4 recvresp → 5 parse →
 //              6 finalize → 7 error/retry → 8 done → 9 give-up)
 //   ctx+0x34 = saved next-state, ctx+0x38 = retry counter (≥3 → state 9 = fail)
-//   ctx+0x56 = PCPA keychip port (u16) it pcpaOpenClient()s to on 127.0.0.1
-//   ctx+0x04, ctx+0x08 = set to 1 only on success (state 6, substate 8) → these are
-//                        exactly what the presence check FUN_0096c5d0 reads.
-// It sends "keychip.appboot.systemflag" then "keychip.version"; pcpa_server already
-// defines both responses, so we need to see WHERE the SM stops succeeding (wrong
-// port? timeout→state7→retry→state9? never runs?).
-// Logging only; safe to leave attached.
+//   ctx+0x56 = PCPA keychip port (u16); pcpaOpenClient() to 127.0.0.1
+//   ctx+0x04, ctx+0x08 = set to 1 only on success (state 6, substate 8); read by
+//                        presence check FUN_0096c5d0.
+// Sends "keychip.appboot.systemflag" then "keychip.version".
 // ─────────────────────────────────────────────────────────────────────────────
 (function diagKeychipSetup() {
     var nrsBase = null;
@@ -57,8 +52,7 @@
         logMsg('INIT_KCSETUP', 'amDongleSetupKeychip (FUN_0096d520) state-machine diagnostic hooked');
     } catch(e) { logMsg('WARN', 'diagKeychipSetup attach 0x56D520: ' + e); }
 
-    // FUN_0096d520 never fired in run6 → FUN_00459220 (its caller) bails before it.
-    // Hook the gate chain to find WHERE: FUN_00459220 (keychip init), FUN_0096c480
+    // Gate chain leading to FUN_0096d520: FUN_00459220 (keychip init), FUN_0096c480
     // (amDongleInit: ctx + ports + winsock), FUN_0096dad0 (file/"toolmode" check).
     try {
         Interceptor.attach(nrsBase.add(0x59220), {   // FUN_00459220 keychip init

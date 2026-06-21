@@ -19,7 +19,7 @@
     tap(0x974820, 'DIAG_974820', 10, 200, 'statusInt');  // status string→int
     tap(0x975A70, 'DIAG_975A70', 5,  200, 'ret');        // get_status sender
     tap(0x975320, 'DIAG_975320', 10, 100, 'ret');        // TCP sub-state 4 parser
-    tap(0x974560, 'DIAG_574560', 10, 200, 'ret');        // pause done-check (called from 0x975830)
+    tap(0x974560, 'DIAG_974560', 10, 200, 'ret');        // pause done-check (called from 0x975830)
 
     // 0x975700 — TCP SM step (busy=1 path); also reads sub-state [0x1286FF4].
     var n7 = 0;
@@ -27,8 +27,8 @@
         n7++;
         var subState = va(0x1286FF4).readU32();
         if (n7 <= 10 || n7 % 500 === 0)
-            logMsg('DIAG_575700', '#' + n7 + ' subState=' + subState + ' ret=' + ret.toInt32());
-    } }, 'DIAG_575700');
+            logMsg('DIAG_975700', '#' + n7 + ' subState=' + subState + ' ret=' + ret.toInt32());
+    } }, 'DIAG_975700');
 
     // 0x975830 — state-9 pause request SM; logs arg + stream ptr/busy.
     var n8 = 0;
@@ -43,7 +43,7 @@
         onLeave: function (ret) {
             n8++;
             if (n8 <= 10 || n8 % 200 === 0)
-                logMsg('DIAG_575830', '#' + n8 + ' arg=' + this.arg0 + this.streamInfo + ' ret=' + ret.toInt32());
+                logMsg('DIAG_975830', '#' + n8 + ' arg=' + this.arg0 + this.streamInfo + ' ret=' + ret.toInt32());
         }
-    }, 'DIAG_575830');
+    }, 'DIAG_975830');
 })();

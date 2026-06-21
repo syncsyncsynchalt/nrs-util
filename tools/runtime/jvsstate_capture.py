@@ -3,9 +3,9 @@
 JvsState / TeknoParrot 観測キャプチャ（純観測・TeknoParrot 注入下用）.
 
 モード:
-  (1) デフォルト: 30_traceJvsState.js のみ — TeknoParrot_JvsState 共有メモリの
+  (1) デフォルト: jvsstate_trace.js のみ — TeknoParrot_JvsState 共有メモリの
       発生源コールスタックと 8 バイト変化を記録する。
-  (2) --trace-tp:  30_traceJvsState.js + 35_traceTP.js を同時ロード —
+  (2) --trace-tp:  jvsstate_trace.js + tp_trace.js を同時ロード —
       VirtualProtect/GetProcAddress/LoadLibrary/Socket も追跡し、TP が nrs.exe に
       当てるパッチの RVA と TP の実行時 API 解決を観測する（docs/teknoparrot.md §5 参照）。
 
@@ -52,7 +52,7 @@ def main():
     ap.add_argument("--duration", type=int, default=90)
     ap.add_argument("--wait", type=int, default=60, help="seconds to wait for nrs.exe")
     ap.add_argument("--trace-tp", action="store_true",
-                    help="also load 35_traceTP.js to observe TeknoParrot.dll behavior "
+                    help="also load tp_trace.js to observe TeknoParrot.dll behavior "
                          "(VirtualProtect/GetProcAddress/LoadLibrary/Socket hooks)")
     args = ap.parse_args()
 
@@ -76,7 +76,7 @@ def main():
             print(f"[!] --trace-tp: {SCRIPT_TRACE_TP} not found")
             return 1
         scripts.append(SCRIPT_TRACE_TP)
-        print(f"[*] Loading: 30_traceJvsState.js + 35_traceTP.js")
+        print(f"[*] Loading: jvsstate_trace.js + tp_trace.js")
 
     src_parts = []
     for sp in scripts:

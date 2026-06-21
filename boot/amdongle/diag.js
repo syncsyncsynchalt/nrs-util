@@ -2,7 +2,7 @@
 // persistence: monitor
 // va: 0x96EEC0, 0x96F1A0, 0x96EFC0, 0x96F290 (am* getters) ; 0x457500/0x457810/0x457822/0x457910/0x978450/0x975E00 (SM)
 // ssot:        FACTS.md §hookAmDongleSM Monitor RVAs
-// role:        Log-only Interceptors over amDongle getters + dongle/keychip state machines (no modification). Persistent patches live in amdongle/patch.js + ambackup/stub.js.
+// role:        Log-only Interceptors over amDongle getters + dongle/keychip state machines (no modification). Persistent patches live in amdongle/patch.js.
 (function hookAmDongle() {
     var nrsBase = null;
     try { nrsBase = Process.getModuleByName('nrs.exe').base; }
@@ -41,7 +41,7 @@
 })();
 
 // amDongle / keychip state-machine monitors (log-only; persistent patches live in
-// amdongle/patch.js [0x457AF0] and ambackup/stub.js [0x5858D0/0x5858E1]).
+// amdongle/patch.js [0x975E00, 0x457AF0]).
 (function hookAmDongleSM() {
     var nrsBase = null;
     try { nrsBase = Process.getModuleByName('nrs.exe').base; }

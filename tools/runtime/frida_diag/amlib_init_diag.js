@@ -1,20 +1,15 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DIAGNOSTIC: amlib init SM FUN_0089a010 (RVA 0x49a010) state tracer.
-//
-// Goal: after IC Card R/W (state 2) is satisfied, find WHICH state/device now drives
-// the SM to error state 9 and creates the next device "Not Found" scene (USB=951, etc.).
+// DIAGNOSTIC: amlib init SM FUN_0089a010 (RVA 0x49a010) state tracer. Logging only.
 //
 // FUN_0089a010(param_1): param_1+4 = state, param_1+8 = substate.
-//   state 2 = IC CARD R/W (FUN_004f6330)            → fixed by 23
-//   state 3 = (FUN_008b3b00/b40)  → errCode 0x16
+//   state 2 = IC CARD R/W (FUN_004f6330)
+//   state 3 = FUN_008b3b00/b40  → errCode 0x16
 //   state 4 = device (FUN_0072dce0/deviceMgr type-0x20) → errCode 0x14 + bitmask _DAT_016f5af4
 //   state 6 = network servers (LOCAL/ALL.NET GAME SERVER/UPLOAD/AUTH)
 //   state 9 = ERROR (sets DAT_016f5af0 errCode; scene system maps → errNo+msg)
 //
-// Logs every state change, and on entry to state 9 captures errCode + bitmask + backtrace
-// so we can pinpoint the failing device and satisfy it (TP-style) like the IC card.
-// Logging only — no behaviour change.
+// On state 9 captures errCode + bitmask + backtrace to pinpoint the failing device.
 // ─────────────────────────────────────────────────────────────────────────────
 (function diagAmlibInit() {
     var nrsBase = null;
@@ -55,20 +50,17 @@
                 calls++;
                 var st = -1, sub = -1;
                 try { st = this.p1.add(4).readU32(); sub = this.p1.add(8).readU32(); } catch(e) { return; }
-                // Log on any state OR substate change (state machine progress).
                 if (st !== lastState || sub !== lastSub) {
                     var ec = 0, em = 0;
                     try { ec = errCodeAddr.readU32(); em = errMaskAddr.readU32(); } catch(e) {}
                     logMsg('AMLIBINIT', '#' + calls + ' state ' + lastState + '->' + st +
                            ' sub=' + sub + ' errCode=' + ec + '(0x' + ec.toString(16) + ')' +
                            ' mask=0x' + em.toString(16));
-                    // At the network state (6), dump the comm device-manager statuses so we
-                    // can see which server/check sets deviceMgr+0x1ec bits 2-4 (=0x1c → 8005).
+                    // Network states: dump comm device-manager statuses (deviceMgr+0x1ec bits 2-4 =0x1c → 8005).
                     if ((st === 6 || st === 7 || st === 8) && loggedS6 < 8) {
                         loggedS6++;
                         logMsg('AMLIBINIT', 'NET state' + st + ' ' + dumpDevMgr());
                     }
-                    // On reaching error state 9, capture once-per-occurrence with backtrace.
                     if (st === 9 && loggedErr9 < 6) {
                         loggedErr9++;
                         var bt = '';

@@ -49,13 +49,9 @@
 })();
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Exception / crash detector
-//
-// Error 1000 investigation: a single 'system' exception fires during graphics
-// init just before the error-1000 scene becomes the active rendered scene. We
-// need the raising module + a backtrace to decide whether it is the trigger or a
-// benign first-chance (D3D/shader-cache exceptions are common). Enhanced to resolve
-// the module+offset of the fault address and dump a fuzzy backtrace.
+// Exception / crash detector — resolves module+offset of the fault address and
+// dumps a fuzzy backtrace to distinguish a trigger from a benign first-chance
+// (D3D/shader-cache exceptions are common).
 // ─────────────────────────────────────────────────────────────────────────────
 function _modOff(addr) {
     try {
@@ -83,9 +79,8 @@ Process.setExceptionHandler(function(details) {
 });
 
 // ── RaiseException / RtlRaiseException — catch app-raised (SEH) exceptions ──────
-// If the game's fatal-error path raises a custom exception that its own SEH then
-// turns into the error-1000 scene, this captures the exact dwExceptionCode and the
-// raising call site (which Process.setExceptionHandler cannot expose for 'system').
+// Captures dwExceptionCode + raising call site (which Process.setExceptionHandler
+// cannot expose for 'system').
 //   void RaiseException(DWORD dwExceptionCode, DWORD dwExceptionFlags,
 //                       DWORD nNumberOfArguments, const ULONG_PTR* lpArguments)
 ['RaiseException', 'RtlRaiseException'].forEach(function(fn) {

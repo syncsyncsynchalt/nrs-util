@@ -3,18 +3,14 @@
 // 目的: TeknoParrot が nrs.exe に対して行う操作を API 境界で観測する。
 //
 // 観測対象:
-//   VirtualProtect  — nrs.exe メモリ範囲への書き込み許可変更 → TP が当てるパッチの RVA が判明
-//   GetProcAddress  — TP が実行時に解決する API 一覧（IAT は VMProtect で剥離済みのため）
+//   VirtualProtect  — nrs.exe への保護変更 → TP パッチの RVA
+//   GetProcAddress  — TP が実行時解決する API（IAT は VMProtect で剥離済み）
 //   LoadLibraryW/A  — TP が追加ロードする DLL
-//   connect         — TP のネットワーク接続先（PCPA/ALL.Net 等）
+//   connect         — TP の接続先（PCPA/ALL.Net 等）
 //   WSASend/WSARecv — TP の PCPA 通信内容
-//   WriteProcessMemory — クロスプロセス書き込み（念のため）
-//
-// 使い方: jvsstate_capture.py --trace-tp でアタッチ（TP 起動後に attach）
-//   python tools/jvsstate_capture.py --trace-tp --wait 60 --duration 120
+//   WriteProcessMemory — クロスプロセス書き込み
 //
 // ★ frida_monitor.py（spawn 経路）とは併用しない。TP 管理下の nrs.exe 専用。
-//    VirtualProtect ログで "VP_EXEC rva=0xXXXXX bytes=[E9...]" が TP パッチ。
 (function () {
     'use strict';
 
@@ -45,10 +41,8 @@
     }
 
     // ── VirtualProtect: nrs.exe 範囲への保護変更を追跡 ───────────────────────
-    // 解釈:
-    //   VP_WRITE (prot & 0xCC != 0): 書き込み許可化 → bytes = TP パッチ前のオリジナル
-    //   VP_EXEC  (prot & 0xCC == 0): 実行専用に復元 → bytes = TP が書いた後のパッチ済み
-    //   → "VP_EXEC" の bytes=[E9 xx...] = JMP インラインフック が TP の隠しパッチ
+    //   VP_WRITE (prot & 0xCC != 0): 書き込み許可化 → bytes = パッチ前オリジナル
+    //   VP_EXEC  (prot & 0xCC == 0): 実行専用に復元 → bytes = TP パッチ済み（E9.. = JMP フック）
     var vpFn = Module.getGlobalExportByName('VirtualProtect');
     if (vpFn) {
         Interceptor.attach(vpFn, {

@@ -8,8 +8,8 @@
 // JVS bypass — patchCode (persistent) + startup state write
 //
 // Strategy:
-//   1. Write JVS initial state directly at script load time (ASLR-safe via nrsBase)
-//   2. patchCode FUN_0067afa0 (RVA 0x27afa0) → ret
+//   1. Write JVS initial state directly at script load time (ASLR-safe via va())
+//   2. patchCode FUN_0067afa0 (0x67AFA0) → ret
 //      Prevents: _memset(&jvs_initialized_flag, 0, 0xe20) + amJvspInit() fail path
 //      (amJvspInit returns -4: no named pipe / COM device → errState=-101 without patch)
 //

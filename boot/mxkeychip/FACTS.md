@@ -53,8 +53,11 @@ entropy 6.68 / 完全 import 表 / 5768 文字列。CrackProof=Htsysm は runtim
   `mxkDsKeychip{ComputeMac,ReadEeprom,Busy}`/`mxkGetKeychipIdFromN2`(DS28CN01/1-Wire)。
   詳細は `docs/ringedge_system.md`。
 
-**mxmaster (port 40100)** [F]: `mxmaster.foreground.getcount=N` → must echo `getcount=N` AND a
-separate `count=0` line (returning only `code=0` → game exits ~2s). `foreground.active=?`/`current=?` → `=0`.
+**mxmaster (port 40100, foreground process manager)** [F]: in-game モジュールを持たず、サーバ側
+`server/pcpa_server.py` が応答する（micetools `micemaster/callbacks/foreground.c` 相当）。応答仕様:
+- `mxmaster.foreground.getcount=N` → `getcount=N` ＋**別行 `count=0`**（`code=0` のみだとゲームが ~2 秒で終了）。
+- `foreground.active=?` / `current=?` → `=1`（実機 mxmaster は非 develop モードで `m_current=1` 開始）。
+- `foreground.next=N` → `next=N`（ack）、`foreground.fault=?` → `fault=0`、`foreground.setcount=N` → `setcount=N` ＋`count=N`。
 
 ---
 

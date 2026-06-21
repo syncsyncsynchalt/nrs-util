@@ -1,17 +1,14 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
-// amDongleUpdate diagnostic — the ongoing keychip auth that flickers a2 to 0.
+// amDongleUpdate diagnostic (FUN_00970fc0, RVA 0x570fc0) — per-frame keychip
+// re-validation called by FUN_00459460. Logging only; logs the SM each time ctx+8
+// or the return value changes.
 //
-// Finding (run8/9): the keychip context is fully populated early (ctx+4/+8/+0x10=1,
-// a2=1), but later a2 → 0. Culprit: FUN_00970fc0 (amDongleUpdate, RVA 0x570fc0), the
-// per-frame keychip re-validation called by FUN_00459460. It returns non-zero when
-//   ctx+4==0 || ctx+8==0  → -0xc       (keychip data lost)
-// and its case-8 MAC/SSD verify clears ctx+8=0 on mismatch ("Verify MAC/SSD NG!!!").
-// The verify only runs when (ctx+0x4c==0 && ctx+0x18==0); if a keychip command
+// Returns non-zero when ctx+4==0 || ctx+8==0 → -0xc (keychip data lost).
+// case-8 MAC/SSD verify clears ctx+8=0 on mismatch ("Verify MAC/SSD NG!!!").
+// Verify runs only when (ctx+0x4c==0 && ctx+0x18==0); if a keychip command
 // (FUN_0096c6c0/c8d0/c920/dbc0/…) returns non-zero, ctx+0x4c!=0 → verify SKIPPED
-// (the intended DS28CN01 bypass). So we need to see which case fails and whether the
-// verify runs. This logs the SM each time ctx+8 or the return value changes.
-// Logging only.
+// (the intended DS28CN01 bypass).
 // ─────────────────────────────────────────────────────────────────────────────
 (function diagDongleUpdate() {
     var nrsBase = null;
@@ -45,7 +42,7 @@
                 var f8 = -1, err = 0;
                 try { f8 = c.add(0x8).readU32(); err = c.add(0x44).readS32(); } catch(e) { return; }
                 var r = ret.toInt32();
-                // Log first 20 calls, and any time f8 / ret / err changes (the failure event).
+                // Log first 20 calls, and any time f8 / ret / err changes.
                 if (calls <= 20 || f8 !== lastF8 || r !== lastRet || err !== lastErr) {
                     logMsg('DONGLEUPD', '#' + calls + ' ret=' + r + ' [' + snap(c) + ']');
                     lastF8 = f8; lastRet = r; lastErr = err;
@@ -54,7 +51,4 @@
         });
         logMsg('INIT_DONGLEUPD', 'amDongleUpdate (FUN_00970fc0) diagnostic hooked');
     } catch(e) { logMsg('WARN', 'diagDongleUpdate attach 0x570FC0: ' + e); }
-
-    // Also flag the exact "Verify NG" path by watching ctx+8 transition 1→0.
-    // (Covered by the snap above; the case-8 verify is the only writer of ctx+8=0.)
 })();

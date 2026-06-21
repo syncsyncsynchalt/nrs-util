@@ -5,29 +5,20 @@
 // role:        amPlatform GetOsVersion/PlatformId を WindowsXP/AAL に patchCode（platform gate FUN_0045a6f0 回避）。永続
 
 // ─────────────────────────────────────────────────────────────────────────────
-// amPlatform hooks — TeknoParrot inline-patches these with JMP to its own code
-// We hook BEFORE the JMP to capture what nrs.exe originally requested,
-// and AFTER (onLeave) to capture what TeknoParrot returned.
-// RVAs confirmed by VirtualProtect capture (size 1+4 inline patch pattern)
+// amPlatform identity — patchCode-replace the string getters so the platform gate
+// FUN_0045a6f0 (reads PlatformId + OsVersion; latches errCode 2/3 on mismatch) sees
+// the values a real RingEdge would report. Persistent (survives detach).
 // ─────────────────────────────────────────────────────────────────────────────
 (function hookAmPlatform() {
     var nrsBase = null;
     try { nrsBase = Process.getModuleByName('nrs.exe').base; }
     catch(e) { logMsg('WARN', 'amPlatform hook: nrs.exe not found'); return; }
 
-    // amPlatformGetOsVersion(buf, bufLen)  — stdcall(char* buf) → writes OS version string
-    // amPlatformGetPlatformId(buf, bufLen) — stdcall(char* buf) → writes platform ID string
-    // amPlatformGetBoardType(DWORD* out)   — stdcall(DWORD* out) → writes board type index 0-3
-    //
-    // IMPORTANT: amPlatformGetPlatformId must return "AAL" (real RingEdge board ID), NOT
-    // "RingEdge" (a display name). Multiple callers compare it against "AAL"/"AAM"/"NEC"
-    // hardware IDs (e.g. at RVA 0x582CD8, 0x583034, 0x5A743). Returning "RingEdge" fails
-    // all comparisons and triggers Error 0901 "Wrong Platform" via 0x491ACE after SM exit.
-    //
-    // amPlatformGetBoardType (0x582C50) uses a DIFFERENT calling convention: it takes a
-    // DWORD* output pointer (not char* buf), and callers read it as an integer index 0-3
-    // for a jump table (at 0x982F61). Writing a string ("RingEdge") into that DWORD corrupts
-    // it to 0x676E6952 (>"3"), causing the caller at 0x582F40 to return NULL.
+    // amPlatformGetOsVersion(buf,bufLen) / amPlatformGetPlatformId(buf,bufLen): stdcall,
+    // write a string into char* buf. patchCode-replaced below.
+    // PlatformId MUST be "AAL" (real RingEdge board ID), not the display name "RingEdge":
+    // callers compare it against "AAL"/"AAM"/"NEC", so "RingEdge" fails all → Error 0901
+    // "Wrong Platform" (via 0x491ACE) after SM exit.
     var APF = {
         amPlatformGetOsVersion:  0x981D60,
         amPlatformGetPlatformId: 0x981FF0,
@@ -61,9 +52,11 @@
         } catch(e) { logMsg('WARN', 'amPlatform patchCode ' + name + ': ' + e); }
     }
 
-    // NOTE: amPlatformGetBoardType (0x982C50) is intentionally NOT patched. The platform
-    // gate FUN_0045a6f0 (latches errCode 2/3 on mismatch) reads only PlatformId + OsVersion,
-    // never BoardType; its sole consumer amBackup_getAreaDescriptor (0x982f40) does not gate attract.
+    // NOTE: amPlatformGetBoardType (0x982C50) is intentionally NOT patched — and must not be:
+    // it takes a DWORD* out (index 0-3 for a jump table at 0x982F61), so writing a string
+    // would corrupt the index. The platform gate FUN_0045a6f0 reads only PlatformId +
+    // OsVersion, never BoardType; its sole consumer amBackup_getAreaDescriptor (0x982F40)
+    // does not gate attract.
 
     patchPlatformFunc('amPlatformGetPlatformId', APF.amPlatformGetPlatformId, PLATFORM_ID);
     patchPlatformFunc('amPlatformGetOsVersion',  APF.amPlatformGetOsVersion,  OS_VERSION);
