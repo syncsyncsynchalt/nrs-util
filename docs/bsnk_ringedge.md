@@ -163,7 +163,7 @@ ALL.Net = Amusement Linkage Live Network。4 サービス構成:
 ### 4.4 AiMeDB（`/allnet/aimedb/`）
 カード認証 DB。`aime.naominet.jp`。アクセスコード（Amusement IC / Banapass / Classical AiMe）、
 communication/common 仕様、FeliCa 変換、ログ送信(status/aimelog)、キャンペーン、拡張アカウント等。
-BBS のカード周りに当たる際の仕様（`boot/devices/cardreader.js` の文脈）。
+BBS のカード周りに当たる際の仕様（IC Card R/W presence は `boot/patches.json` 0x4F6310/30。実カード I/O 実装時の参照）。
 
 ---
 

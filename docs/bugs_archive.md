@@ -287,18 +287,18 @@ init SM `FUN_0089a010` の "CHECKING ..." 文字列: IC CARD R/W / TOUCH PANEL /
   `FUN_004f6310`(*statusのbit1)/`FUN_004f6330`(bit4=R/Wエラー)を読む。status は `*FUN_004f3e30()`
   (device-list の type 0x21/0x21 = IC Card R/W デバイス, status word は [dev+4]+4)。実機リーダ非在で
   bit4=1 → errCode 0x17 → error state9 → scene errNo 5101(sticky)。
-- 修正: `boot/devices/cardreader.js` が両プローブを `xor eax,eax;ret`(healthy)に patchCode(verify=true)。
+- 修正: `boot/patches.json` 0x4F6310(ready→1)/0x4F6330(err→0) が両プローブを healthy に patchCode(verify=true)。
   TP の emulated aime reader と同じ「リーダ正常」end-state のアサート(satisfy)。
 - 実機確認: 5101 消滅、HLSM attract 維持 → 次の USB Device 951 へ前進。
 
 ### [FIXED] Error 951 "USB Device Not Found" (errCode 0xf)
 - 真因: `FUN_00679de0`末尾が `DAT_016b88dc<1`(USB I/Oボード未検出)→ `iVar2=-0x70(-112)` →
   `FUN_006f0ad0` が `switch(DAT_016b7000)` default → errCode 0xf → scene 951。
-- エスケープ: `DAT_016b88dc>=1`(I/Oボード present) かつ `jvs_error_state(0x16b8670)==0`。
-- 修正: `boot/devices/usbio.js` が I/Oボード present フラグと jvs_error_state=0 を維持。
+- エスケープ: `FUN_006f0ad0` default 分岐の errCode 即値 `MOV ECX,0xf` を `0` 化（present フラグ操作より直接）。
+- 修正: `boot/patches.json` 0x6F0B80 が imm 0F→00（errCode 0xf を立てない。旧 Interceptor 版「present フラグ維持」は撤去）。
 
 ### [FIXED] Error 5501 "Touch Panel Not Found" (errCode 0x16)
-- 修正: `boot/devices/touchpanel.js` (patchCode, 永続)。
+- 修正: `boot/patches.json` 0x8B3B00(resp→1)/0x8B3B40(err→0) (patchCode, 永続)。
 
 ### [FIXED] Error 8005 "Network type error (WAN)" (errCode 0x14)
 - 修正: `boot/patches.json(0x6FF18A/AC/B3)` (patchCode, 永続)。
