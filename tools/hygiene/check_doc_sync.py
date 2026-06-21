@@ -4,18 +4,24 @@
 単一番地方言: 人間/ツールが番地を触るところは全て STATIC VA（Ghidra ImageBase 0x400000）。
 RVA は lib/base.js の va() helper の内部にのみ存在する。
 
+番地の唯一ソースは各モジュール先頭ヘッダの `// va:` 行（MANIFEST は va を持たない）。
+disasm.py の逆引き索引もこのヘッダから動的構築される。
+
 HARD チェック（失敗で exit 1）:
   1. load_order[0] == "lib/base.js"（全モジュールが使う va()/logMsg を定義）。
   2. 各モジュールファイルが存在する。
-  3. 各 MANIFEST 'va'（static VA）が当該モジュールファイルに逐語で現れる（drift 検出）。
+  3. ヘッダ `// va:` の各番地が当該モジュールの本体（ヘッダ va 行を除く）に逐語で現れる
+     （declared but unused = stale ヘッダ entry を検出）。
   4. DIALECT GUARD: 生のモジュール base で nrs.exe を番地参照しない。すなわち
      `nrsBase.add(` や `nb.add(` の呼び出しが無い。番地参照は全て va() 経由。（helper を
      定義する lib/base.js は除外。）
+  4b. MANIFEST の 'subsys' がモジュール先頭ヘッダの `// subsys:` 行と一致する（命名 drift 検出）。
+      ヘッダ（ディレクトリ名）を正とする。
   5. known_names.json のキーが static VA（>= ImageBase）。誤った RVA エントリを検出。
-  6. MANIFEST 'va' の値が妥当な static VA（>= ImageBase）。stale な RVA を検出。
+  6. ヘッダ `// va:` の値が妥当な static VA（>= ImageBase）。stale な RVA を検出。
 
 SOFT チェック（warn のみ）:
-  7. 各 'va' が FACTS.md / ARCH.md のどこかに記載されている。
+  7. 各ヘッダ va が FACTS.md / ARCH.md のどこかに記載されている。
   8. persistence の妥当性（Interceptor/timer と persistent、patchCode と monitor）。
 
 使い方:  python tools/hygiene/check_doc_sync.py [--quiet] [--warn-only]
@@ -34,10 +40,24 @@ KNOWN_NAMES = os.path.join(ROOT, "data", "known_names.json")
 IMAGE_BASE = 0x400000
 HEX = re.compile(r"0x[0-9a-fA-F]{3,8}")
 RAW_BASE_ADD = re.compile(r"\b(?:nrsBase|nb)\.add\(")
+SUBSYS_HDR = re.compile(r"^//\s*subsys:\s*(\S+)", re.MULTILINE)
+VA_HDR = re.compile(r"^\s*//\s*va:\s*(.*)$", re.MULTILINE)
 
 
 def hexset(text):
     return {int(t, 16) for t in HEX.findall(text)}
+
+
+def header_va(text):
+    """モジュール先頭ヘッダの `// va:` 行から static VA トークンを返す（全 hex。妥当性は呼び元で検査）。
+    注釈 (FUN_... など) は 0x 接頭辞が無いので自然に除外される。`// va:` 行が無ければ空。"""
+    m = VA_HDR.search(text)
+    return [int(t, 16) for t in HEX.findall(m.group(1))] if m else []
+
+
+def body_without_va_header(text):
+    """ヘッダ `// va:` 行を除いたモジュール本文（drift 検査で自己満足を避けるため）。"""
+    return VA_HDR.sub("", text, count=1)
 
 
 def collect_facts_hex():
@@ -67,6 +87,7 @@ def main():
         errors.append("load_order[0] must be 'lib/base.js' (defines va()/logMsg)")
 
     facts_hex, facts_paths = collect_facts_hex()
+    n_va = 0
 
     for e in lo:
         mod = e["module"]
@@ -76,18 +97,26 @@ def main():
             continue
         with open(path, encoding="utf-8") as f:
             text = f.read()
-        fhex = hexset(text)
+        body_hex = hexset(body_without_va_header(text))
         # 4. dialect guard（helper 定義ファイルは除外）
         if mod != "lib/base.js" and RAW_BASE_ADD.search(text):
             errors.append(f"{mod}: raw nrsBase/nb.add( — address via va(staticVA) instead")
-        for tok in e.get("va", []):
-            addr = int(tok, 16)
+        # 4b. subsys が MANIFEST とモジュール先頭ヘッダで一致（命名 drift 検出）。
+        # ヘッダ（5行ヘッダの subsys: 行）を正とする。
+        hdr = SUBSYS_HDR.search(text)
+        if hdr and hdr.group(1) != e.get("subsys"):
+            errors.append(f"{mod}: MANIFEST subsys={e.get('subsys')!r} != header subsys={hdr.group(1)!r}")
+        # 番地ソース＝ヘッダ `// va:` 行（MANIFEST は va を持たない）。
+        vas = header_va(text)
+        n_va += len(vas)
+        for addr in vas:
+            tok = f"0x{addr:X}"
             # 6. 妥当性
             if addr < IMAGE_BASE:
-                errors.append(f"{mod}: MANIFEST va {tok} < ImageBase (stale RVA?)")
-            # 3. モジュール内に存在（厳密な static VA、単一方言で許容なし）
-            if addr not in fhex:
-                errors.append(f"{mod}: MANIFEST va {tok} not found in module file (drift)")
+                errors.append(f"{mod}: header va {tok} < ImageBase (stale RVA?)")
+            # 3. 本体（ヘッダ va 行を除く）に存在 = 実際に使われている（declared-but-unused 検出）
+            elif addr not in body_hex:
+                errors.append(f"{mod}: header va {tok} declared but not used in module body (stale)")
             elif addr not in facts_hex:
                 warns.append(f"{mod}: va {tok} not documented in any FACTS.md/ARCH.md")
         # 8. persistence の妥当性。生のプリミティブと base.js の helper イディオム
@@ -114,47 +143,18 @@ def main():
     except FileNotFoundError:
         warns.append("known_names.json not found")
 
-    # 9. patches.json（データ駆動の純バイト patch テーブル）。各行の va が static VA で
-    # 一意であり、bytes 指定が解決可能（mnemonic | {retImm/retN} | hex）かを検証する。
-    patches_path = os.path.join(BOOT, "patches.json")
-    n_patches = 0
-    try:
-        with open(patches_path, encoding="utf-8") as f:
-            rows = json.load(f)
-        seen = set()
-        for i, row in enumerate(rows):
-            tok = row.get("va", "")
-            try:
-                addr = int(tok, 16)
-            except (TypeError, ValueError):
-                errors.append(f"patches.json[{i}]: va {tok!r} not a hex static VA")
-                continue
-            if addr < IMAGE_BASE:
-                errors.append(f"patches.json[{i}]: va {tok} < ImageBase (stale RVA?)")
-            if addr in seen:
-                errors.append(f"patches.json[{i}]: duplicate va {tok}")
-            seen.add(addr)
-            b = row.get("bytes")
-            ok_bytes = (b in ("RET0", "RET1")
-                        or (isinstance(b, dict) and ("retImm" in b or "retN" in b))
-                        or (isinstance(b, list) and all(isinstance(x, int) for x in b))
-                        or (isinstance(b, str) and re.fullmatch(r"[0-9A-Fa-f]{2}( [0-9A-Fa-f]{2})*", b.strip())))
-            if not ok_bytes:
-                errors.append(f"patches.json[{i}] ({tok}): unresolvable bytes spec {b!r}")
-            if addr not in facts_hex:
-                warns.append(f"patches.json {tok} not documented in any FACTS.md/ARCH.md")
-        n_patches = len(rows)
-    except FileNotFoundError:
-        pass
+    # 9. 静的パッチは各サブシステムモジュールに patch() 呼び出しとして在る（中央テーブルなし。
+    # 旧 patches.json / lib/static_patches.js は廃止）。その番地はヘッダ `// va:` 経由で
+    # section 3（本体に実在）として検証される。人間向けの一覧監査はオフラインツール
+    # tools/static/patch_audit.py が担う（全 .js の patch() を横断走査）。
 
     if errors:
         print("[FAIL] integrity / dialect errors:")
         for m in errors:
             print(f"  - {m}")
     else:
-        n = sum(len(e.get("va", [])) for e in lo)
-        print(f"OK: {len(lo)} modules, base-first, {n} va all static & present; "
-              f"{n_patches} patches.json rows; no raw base addressing.")
+        print(f"OK: {len(lo)} modules, base-first, {n_va} header-va all static & used; "
+              f"no raw base addressing.")
 
     if warns and not quiet:
         print("\n[WARN] (non-blocking):")

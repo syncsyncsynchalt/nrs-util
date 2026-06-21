@@ -67,8 +67,8 @@ var getStatusRecvDone = false;
 // 宣言的 patch/hook/watch ヘルパ
 // boot patch を表現する標準手段。モジュールは Ghidra static_VA を渡す。va()
 // (上記) が唯一の RVA 境界なので、モジュールは nrsBase に触れない。CONVENTIONS.md
-// 参照: 単純なバイト stub は patches.json の行として置き、hook/timer ロジックを
-// 持つものはモジュールに残して hook()/watch() を使う。
+// 参照: 単純な静的バイト stub も所属サブシステムのモジュールに patch() で置く（中央テーブル
+// なし）。hook/timer ロジックを持つものも同様に各モジュールで hook()/watch() を使う。
 
 // よく使う stdcall return stub を名前付きバイト配列で(可読 + トークン最小)。
 var RET0 = [0x31, 0xC0, 0xC3];                    // xor eax,eax ; ret        -> return 0
@@ -78,26 +78,6 @@ function retImm(n) {                              // mov eax,n ; ret          ->
 }
 function retN(n) {                                // ret n  (stdcall の引数掃除。eax は不変)
     return [0xC2, n & 0xFF, (n >>> 8) & 0xFF];
-}
-// patches.json の `bytes` フィールドを解決:
-//   'RET0' | 'RET1'            名前付き stub
-//   {retImm:n} | {retN:n}      組み立て stub
-//   "31 C0 C3"                 hex バイト文字列 (disasm.py 規約。最も可読)
-//   [0x31,0xC0,0xC3]           生バイト配列
-function patchBytes(spec) {
-    if (Array.isArray(spec)) return spec;
-    if (typeof spec === 'string') {
-        if (spec === 'RET0') return RET0;
-        if (spec === 'RET1') return RET1;
-        if (/^[0-9A-Fa-f]{2}( [0-9A-Fa-f]{2})*$/.test(spec.trim()))
-            return spec.trim().split(/\s+/).map(function (h) { return parseInt(h, 16); });
-        throw new Error('unknown bytes mnemonic/hex: ' + spec);
-    }
-    if (spec && typeof spec === 'object') {
-        if ('retImm' in spec) return retImm(spec.retImm);
-        if ('retN'  in spec) return retN(spec.retN);
-    }
-    throw new Error('unknown patch bytes spec: ' + JSON.stringify(spec));
 }
 // patchCode(static_VA) + read-back 検証 + ログ。`bytes` はバイト配列。
 function patch(staticVA, bytes, note) {

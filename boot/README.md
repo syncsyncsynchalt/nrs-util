@@ -5,30 +5,30 @@ emulate / patch する frida モジュール群 + keychip(PCP) サーバ。**解
 
 ## 構成（RingEdge 実機準拠）
 
-dir = RingEdge 実行ファイル(`mx*.exe`)/ ライブラリ(`am*`)。単純固定バイト patch は dir を持たず
-**`patches.json`**（データ表。`lib/patch_table.js` が適用）。
+dir = RingEdge 実行ファイル(`mx*.exe`)/ ライブラリ(`am*`)。単純固定バイト patch も
+**所属サブシステムの dir** に `patch()` で置く（中央ファイルは持たない。一覧監査 `tools/static/patch_audit.py`）。
 
 | dir | RingEdge コンポーネント | 役割 |
 |---|---|---|
-| `lib/` | — | 共有ヘルパ + `patch()/hook()/watch()` + データ表 applier。**先頭ロード必須** |
+| `lib/` | — | 共有ヘルパ + `patch()/hook()/watch()`。**先頭ロード必須** |
 | `amdongle/` | amDongle 1.12 | ドングル busy 固定 + SM 監視 |
 | `mxnetwork/` | mxnetwork.exe / amNet | DHCP/NIC SM、LAN type(state4)、ALL.Net 接続(state6) |
 | `amjvs/` | amJvs/amJvsp | JVS 初期化/状態（`state.js`） |
 | `amplatform/` | amPlatform | board/OS identity、HW 検出(Error 0901) |
 | `mxgfetcher/` | mxgfetcher.exe / amGfetcher | get_status recv 完了、boot SM 前進 |
-| `ambilling/` | ALL.Net Plus Billing (alpbEx) | billing offline idle（実装 `patches.json` 0xA065C0） |
+| `ambilling/` | ALL.Net Plus Billing (alpbEx) | billing offline idle（実装 `ambilling/status.js` 0xA065C0） |
 | `amrtc/` | amRtc | ローカル時刻 |
 | `mxkeychip/` | mxkeychip.exe / keychip / PCP | client 回復、setup、region、`server/`=PCPA サーバ（mxmaster port 40100 含む） |
 | `mxdrivers/` | mx ドライバ / amBackup 層 | mxsram/mxsuperio/mxhwreset/jvs pipe デバイス偽装 ＋ amBackup 層スタック |
-| `mxsegaboot/` | mxsegaboot.exe / SYSTEM STARTUP | extend image(state5)/p-ras(state7)（実装 `patches.json`） |
-| `mxstorage/` | mxstorage.exe | storage presence（実装 `patches.json` 0x4FDA50） |
-| `devices/` | 周辺デバイス presence 連鎖 | IC Card R/W・Touch Panel・USB I/O（実装 `patches.json`） |
+| `mxsegaboot/` | mxsegaboot.exe / SYSTEM STARTUP | extend image(state5)/p-ras(state7)（実装 `mxsegaboot/startup.js`） |
+| `mxstorage/` | mxstorage.exe | storage presence（実装 `mxstorage/presence.js` 0x4FDA50） |
+| `devices/` | 周辺デバイス presence 連鎖 | IC Card R/W・Touch Panel・USB I/O（実装 `devices/presence.js`） |
 | `app/` | ゲーム窓/プロセス | windowed、exit、self-shutdown 無力化 |
 
 ## 構成の単一ソース = `MANIFEST.json`
 
 `launch.py` は `MANIFEST.json` の `load_order` 順にモジュールを連結ロードする（ファイル名順ではない）。
-各エントリが `module / subsys / persistence / rva[] / ssot / network_role` を宣言する。
+各エントリが `module / subsys / persistence / network_role` を宣言する（番地 `// va:` は各モジュールヘッダが持つ）。
 
 - **persistence**: `persistent`(patchCode/data-write、detach 後も有効) / `runtime`(Interceptor・timer、
   detach で revert) / `monitor`(log のみ) / `served`(keychip サーバが応答) / `na`。

@@ -13,12 +13,12 @@ ATTRACT 起動する**。
 
 | state | 画面 | チェック関数 | 満たし方(satisfy) | 実装 |
 |---|---|---|---|---|
-| 2 | CHECKING IC CARD R/W | `FUN_004f6310`(ready bit1)/`FUN_004f6330`(err bit4), dev type 0x21 | ready→1（ready が立てば通過、err bit は不参照） | `patches.json` 0x4F6310 |
-| 3 | CHECKING TOUCH PANEL | `FUN_008b3b00`(resp)/`FUN_008b3b40`(err), dev type 0x22 | resp→1（resp が立てば通過、err bit は不参照） | `patches.json` 0x8B3B00 |
-| 4 | CHECKING NETWORK | network flags `DAT_0210b50a/b/c`(`FUN_006ff140`) + deviceMgr+0x1ec | b50c=LAN(IP一致). 早期 init 0→1 | `patches.json` 0x6FF1B3（b50c のみが &0x5f3 の gate）+ 0x72DCE0 |
-| 5 | CHECKING EXTEND IMAGE | `FUN_0072b3a0`(install status) / `FUN_004fda50`(is-DVD-boot, case1) | →4(done)+*ESI=0 で install skip ＋ DVD-boot→0 | `patches.json` 0x72B3A0 + 0x4FDA50。⚠️0x72B3A0 を消すと画面が "EXTEND IMAGE … NG / INSTALLING … WAITING" で停止する。**BOOT_DONE(HLSM `FUN_00457FE0`) は SYSTEM STARTUP SM と別物**でこの停止を検出できない |
-| 6 | CHECKING CONNECTION (ALL.NET AUTH/UPLOAD/GAME SERVER/LOCAL) | `FUN_0072dce0`(server status, deviceMgr+0x1d4[1..4]) | status≠1(resolved)に保持(=2 ready 固定) | `patches.json` 0x72DCE0 |
-| 7 | INITIALIZING P-ras | `FUN_00701280` = `b611!=0 \|\| b610==0`(billing-ready/offline) | →true 強制(FreePlay) | `patches.json` 0x701280 |
+| 2 | CHECKING IC CARD R/W | `FUN_004f6310`(ready bit1)/`FUN_004f6330`(err bit4), dev type 0x21 | ready→1（ready が立てば通過、err bit は不参照） | `../devices/presence.js` 0x4F6310 |
+| 3 | CHECKING TOUCH PANEL | `FUN_008b3b00`(resp)/`FUN_008b3b40`(err), dev type 0x22 | resp→1（resp が立てば通過、err bit は不参照） | `../devices/presence.js` 0x8B3B00 |
+| 4 | CHECKING NETWORK | network flags `DAT_0210b50a/b/c`(`FUN_006ff140`) + deviceMgr+0x1ec | b50c=LAN(IP一致). 早期 init 0→1 | `../mxnetwork/state.js` 0x6FF1B3（b50c のみが &0x5f3 の gate）+ 0x72DCE0 |
+| 5 | CHECKING EXTEND IMAGE | `FUN_0072b3a0`(install status) / `FUN_004fda50`(is-DVD-boot, case1) | →4(done)+*ESI=0 で install skip ＋ DVD-boot→0 | `./startup.js` 0x72B3A0 + `../mxstorage/presence.js` 0x4FDA50。⚠️0x72B3A0 を消すと画面が "EXTEND IMAGE … NG / INSTALLING … WAITING" で停止する。**BOOT_DONE(HLSM `FUN_00457FE0`) は SYSTEM STARTUP SM と別物**でこの停止を検出できない |
+| 6 | CHECKING CONNECTION (ALL.NET AUTH/UPLOAD/GAME SERVER/LOCAL) | `FUN_0072dce0`(server status, deviceMgr+0x1d4[1..4]) | status≠1(resolved)に保持(=2 ready 固定) | `../mxnetwork/state.js` 0x72DCE0 |
+| 7 | INITIALIZING P-ras | `FUN_00701280` = `b611!=0 \|\| b610==0`(billing-ready/offline) | →true 強制(FreePlay) | `./startup.js` 0x701280 |
 | 8→10 | (DONE) | `FUN_0089de10` | — state10 で SYSTEM STARTUP 完了 → ATTRACT | — |
 | 9 | ERROR | — | errCode を立て error scene(0903 等) | 回避=各 state を満たす |
 

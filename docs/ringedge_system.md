@@ -47,7 +47,7 @@ C:\src\ringedge_system_63.01.10\
 |---|---|---|---|
 | **`mxkeychip.exe`** | 738KB | **keychip デーモン**。PCP keyword ディスパッチ、物理 keychip(N2/PIC/DS2460/DS28CN01) との AES 通信、`code=54` バイパス。**非パック＝Ghidra で静的解析可（§5）**。最優先解析対象 | `boot/mxkeychip/server/pcpa_server.py` が偽装する相手の実装の正 |
 | **`mxsegaboot.exe`** (+`_2052.dll`) | 1.35MB | システム側ブートシーケンス（ゲーム起動シェル） | `boot/mxsegaboot/` が RE 中の SYSTEM STARTUP SM の上位レイヤ |
-| `mxnetwork.exe` | 269KB | ALL.Net / NIC / ネットワーク設定 | `boot/mxnetwork/`, `boot/patches.json(0x72DCE0)` |
+| `mxnetwork.exe` | 269KB | ALL.Net / NIC / ネットワーク設定 | `boot/mxnetwork/`, `boot/mxnetwork/state.js`(0x72DCE0) |
 | `mxgfetcher.exe` | 432KB | ゲームデータ fetch（ALL.Net 配信） | `boot/mxgfetcher/getstatus.js` |
 | `mxgdeliver.exe` / `mxgcatcher.exe` | 187/160KB | 配信 deliver / catcher（mx-catcher = port 40113） | `boot/mxnetwork/`, ARCH PCPA 40113 |
 | `mxauthdisc.exe` | 101KB | ディスク/イメージ認証 | billing/auth |

@@ -3,7 +3,7 @@
 mxstorage.exe（ストレージ管理 / TrueCrypt・geminifs マウント）相当。横断定数は `../ARCH.md`、
 索引は repo ルート `FACTS.md`。confidence: [F]/[S]/[I]。
 
-## 現状（stub）。実装は `../patches.json`
+## 現状（stub）。実装は `./presence.js`
 | static_VA | 内容 |
 |---|---|
 | 0x4FDA50 | `FUN_004fda50`(is-DVD-boot-mode predicate) → 0(非DVD/storage OK) 固定。SYSTEM STARTUP state5 / Error 913 "Game Program Not Found on Storage Device" 回避 |

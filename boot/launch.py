@@ -27,22 +27,11 @@ PYTHON_EXE     = os.path.join(os.environ.get("LOCALAPPDATA", ""), r"Programs\Pyt
 PCPA_SERVER_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mxkeychip", "server", "pcpa_server.py")
 
 # FRIDA_SCRIPT は MANIFEST.json に列挙されたブートモジュールを load 順（lib/base.js が先頭）に
-# 連結して組み立てる。MANIFEST.json はブート構成（どのモジュールを、どの順で、persistence/rva/ssot
-# メタデータ付きで）の単一ソース。サブシステムは boot/<subsys>/<file>.js を編集し、モジュールの
+# 連結して組み立てる。MANIFEST.json はブート構成（どのモジュールを、どの順で、subsys/persistence/
+# va/network_role メタデータ付きで）の単一ソース。サブシステムは boot/<subsys>/<file>.js を編集し、モジュールの
 # 追加/削除は MANIFEST.json で行う。
 _BOOT_DIR = os.path.dirname(os.path.abspath(__file__))
 _MANIFEST = os.path.join(_BOOT_DIR, "MANIFEST.json")
-
-def _patch_table_literal():
-    """boot/patches.json（データ駆動の純バイトパッチテーブル）の生 JSON テキスト。
-    lib/patch_table.js が適用できるよう、lib/base.js の直後に `var __PATCH_TABLE__ = [...]` として
-    スクリプトへ注入する。ファイルが無い/空なら '[]'。"""
-    p = os.path.join(_BOOT_DIR, "patches.json")
-    try:
-        with open(p, encoding="utf-8") as f:
-            return f.read().strip() or "[]"
-    except FileNotFoundError:
-        return "[]"
 
 def _load_boot_script():
     import json
@@ -53,10 +42,6 @@ def _load_boot_script():
         mod_path = os.path.join(_BOOT_DIR, *entry["module"].split("/"))
         with open(mod_path, encoding="utf-8", newline="") as mf:
             parts.append(mf.read())
-        # パッチテーブルを base.js の直後に注入する（base.js の 'use strict' を先頭に保ちつつ、
-        # lib/patch_table.js が消費する前に __PATCH_TABLE__ を定義する）。
-        if entry["module"] == "lib/base.js":
-            parts.append("\nvar __PATCH_TABLE__ = " + _patch_table_literal() + ";\n")
     return "".join(parts)
 
 FRIDA_SCRIPT = _load_boot_script()

@@ -1,232 +1,148 @@
 {
-  "_doc": "Boot composition for nrs.exe (NRS, RingEdge emulate). launch.py concatenates load_order in order (lib/base.js MUST be first). load_order is load-order sensitive; keep the numeric-faithful ordering (00..32). persistence: persistent=patchCode/data survives detach; runtime=Interceptor/timer reverts (runtime set = standalone blockers); monitor=log-only; served=keychip/server. network_role: local | serve. tools/hygiene/check_doc_sync.py verifies va[] (static VA) against the module file.",
+  "_doc": "Boot composition for nrs.exe (NRS, RingEdge emulate). launch.py concatenates load_order in order (lib/base.js MUST be first). load_order is load-order sensitive; keep the numeric-faithful ordering (00..32). Static byte patches live in each owning subsystem module as patch() calls (no external table, no central file); audit offline with tools/static/patch_audit.py. persistence: persistent=patchCode/data survives detach; runtime=Interceptor/timer reverts (runtime set = standalone blockers); monitor=log-only; served=keychip/server. network_role: local | serve. Patch/hook addresses are NOT stored here — each module's `// va:` header line is the sole source; disasm.py and check_doc_sync.py read it from there.",
   "load_order": [
     {
       "module": "lib/base.js",
       "subsys": "lib",
       "persistence": "na",
-      "va": [],
-      "ssot": "CONVENTIONS.md",
       "network_role": "local"
     },
     {
-      "module": "lib/patch_table.js",
-      "subsys": "lib",
+      "module": "devices/presence.js",
+      "subsys": "devices",
       "persistence": "persistent",
-      "va": [],
-      "ssot": "CONVENTIONS.md",
       "network_role": "local"
+    },
+    {
+      "module": "mxstorage/presence.js",
+      "subsys": "mxstorage",
+      "persistence": "persistent",
+      "network_role": "local"
+    },
+    {
+      "module": "mxsegaboot/startup.js",
+      "subsys": "mxsegaboot",
+      "persistence": "persistent",
+      "network_role": "local"
+    },
+    {
+      "module": "mxnetwork/state.js",
+      "subsys": "mxnetwork",
+      "persistence": "persistent",
+      "network_role": "serve"
+    },
+    {
+      "module": "ambilling/status.js",
+      "subsys": "ambilling",
+      "persistence": "persistent",
+      "network_role": "serve"
     },
     {
       "module": "amdebug/diag.js",
       "subsys": "amdebug",
       "persistence": "monitor",
-      "va": [
-        "0x1696F38",
-        "0x1696F3C",
-        "0x55C800",
-        "0x55C7BC"
-      ],
-      "ssot": "amdebug/FACTS.md",
       "network_role": "local"
     },
     {
       "module": "mxgfetcher/recv.js",
-      "subsys": "amgfetcher",
+      "subsys": "mxgfetcher",
       "persistence": "runtime",
-      "va": [],
-      "ssot": "mxgfetcher/FACTS.md",
       "network_role": "local"
     },
     {
       "module": "mxkeychip/client.js",
-      "subsys": "keychip",
+      "subsys": "mxkeychip",
       "persistence": "runtime",
-      "va": [
-        "0x98AEA0"
-      ],
-      "ssot": "mxkeychip/FACTS.md",
       "network_role": "serve"
     },
     {
       "module": "mxkeychip/diag.js",
       "subsys": "mxkeychip",
       "persistence": "monitor",
-      "va": [
-        "0x98AB20",
-        "0x98AB60",
-        "0x98AF50",
-        "0x98AFF0"
-      ],
-      "ssot": "mxkeychip/FACTS.md",
       "network_role": "serve"
     },
     {
       "module": "mxnetwork/diag.js",
-      "subsys": "amnet",
+      "subsys": "mxnetwork",
       "persistence": "monitor",
-      "va": [
-        "0x9814E0"
-      ],
-      "ssot": "mxnetwork/FACTS.md",
       "network_role": "serve"
     },
     {
       "module": "amdongle/diag.js",
       "subsys": "amdongle",
       "persistence": "monitor",
-      "va": [
-        "0x96EEC0",
-        "0x96F1A0",
-        "0x96EFC0",
-        "0x96F290",
-        "0x457500",
-        "0x457810",
-        "0x457822",
-        "0x457910",
-        "0x978450",
-        "0x975E00"
-      ],
-      "ssot": "amdongle/FACTS.md",
       "network_role": "local"
     },
     {
       "module": "amplatform/identity.js",
       "subsys": "amplatform",
       "persistence": "persistent",
-      "va": [
-        "0x981D60",
-        "0x981FF0"
-      ],
-      "ssot": "amplatform/FACTS.md",
       "network_role": "local"
     },
     {
       "module": "mxkeychip/region.js",
-      "subsys": "keychip",
+      "subsys": "mxkeychip",
       "persistence": "runtime",
-      "va": [
-        "0x459109",
-        "0x45A846",
-        "0x16014C4",
-        "0x1601744",
-        "0x1601989"
-      ],
-      "ssot": "mxkeychip/FACTS.md",
       "network_role": "local"
     },
     {
       "module": "mxgfetcher/getstatus.js",
-      "subsys": "amgfetcher",
+      "subsys": "mxgfetcher",
       "persistence": "runtime",
-      "va": [
-        "0x457FE0",
-        "0x9746C0",
-        "0x974760",
-        "0x9747A0",
-        "0x975140",
-        "0x6FF980",
-        "0x9744F0",
-        "0x975857",
-        "0x98ADC0",
-        "0x458271"
-      ],
-      "ssot": "mxgfetcher/FACTS.md",
       "network_role": "local"
     },
     {
       "module": "mxgfetcher/diag.js",
       "subsys": "mxgfetcher",
       "persistence": "monitor",
-      "va": [
-        "0x974B00",
-        "0x974820",
-        "0x975A70",
-        "0x975320",
-        "0x975700",
-        "0x975830",
-        "0x974560"
-      ],
-      "ssot": "mxgfetcher/FACTS.md",
       "network_role": "local"
     },
     {
       "module": "amjvs/state.js",
       "subsys": "amjvs",
       "persistence": "persistent",
-      "va": [
-        "0x67AFA0",
-        "0x987590",
-        "0x9883D3",
-        "0x16B7858",
-        "0x16B785C",
-        "0x16B7860",
-        "0x16B8668",
-        "0x16B7EA0",
-        "0xCCF54C"
-      ],
-      "ssot": "amjvs/FACTS.md",
       "network_role": "local"
     },
     {
       "module": "mxdrivers/devices.js",
       "subsys": "mxdrivers",
       "persistence": "runtime",
-      "va": [],
-      "ssot": "mxdrivers/FACTS.md",
       "network_role": "local"
     },
     {
       "module": "amdongle/patch.js",
       "subsys": "amdongle",
       "persistence": "persistent",
-      "va": [
-        "0x975E00",
-        "0x457AF0"
-      ],
-      "ssot": "amdongle/FACTS.md",
       "network_role": "local"
     },
     {
       "module": "app/windowed.js",
       "subsys": "app",
       "persistence": "runtime",
-      "va": [],
-      "ssot": "app/FACTS.md",
       "network_role": "local"
     },
     {
       "module": "amrtc/rtc.js",
       "subsys": "amrtc",
       "persistence": "runtime",
-      "va": [],
-      "ssot": "amrtc/FACTS.md",
       "network_role": "local"
     },
     {
       "module": "app/exit.js",
       "subsys": "app",
       "persistence": "runtime",
-      "va": [],
-      "ssot": "app/FACTS.md",
       "network_role": "local"
     },
     {
       "module": "app/no_selfshutdown.js",
       "subsys": "app",
       "persistence": "persistent",
-      "va": [
-        "0x6C3F20"
-      ],
-      "ssot": "app/FACTS.md",
       "network_role": "local"
     },
     {
       "module": "mxkeychip/setup.js",
-      "subsys": "keychip",
+      "subsys": "mxkeychip",
       "persistence": "runtime",
-      "va": [],
-      "ssot": "mxkeychip/FACTS.md",
       "network_role": "local"
     }
   ]

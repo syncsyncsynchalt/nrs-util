@@ -10,7 +10,7 @@ RVA モードは無く、単一方言で変換もしない。RVA は runtime の
   disasm.py <VA> -n 40              40 命令を disassemble
   disasm.py <VA> -x [N]             N バイトを hex ダンプ（既定 64）
   disasm.py <VA> -b [N]            patchCode 用のバイト配列（既定 16）+ va() 形式 +
-                                    MANIFEST patch-site の相互参照
+                                    patch-site 相互参照（各モジュールヘッダ `// va:` 由来）
   disasm.py <VA> -r [N]            C 文字列を読む（既定 最大 256）
   disasm.py <VA> --xrefs           この VA を指す CALL/JMP を全て探す
   disasm.py -s 31C0C390             バイトパターンを検索（hex、空白なし）
@@ -20,7 +20,7 @@ RVA モードは無く、単一方言で変換もしない。RVA は runtime の
 -x/-b/-n/--xrefs/-s/-S に --json を付けると機械可読出力になる。
 """
 
-import sys, os, json, struct
+import sys, os, re, json, struct
 import pefile
 import capstone
 from capstone import x86
@@ -60,21 +60,35 @@ def to_rva(va):
     return va - IMAGE_BASE
 
 
-# MANIFEST patch-site の相互参照
+# patch-site の相互参照（番地の正＝各モジュール先頭ヘッダの `// va:` 行。MANIFEST は va を持たない）
+_HDR_VA = re.compile(r"^\s*//\s*va:\s*(.*)$", re.M)
+_HEX = re.compile(r"0x[0-9A-Fa-f]{3,8}")
+
+
 def manifest_sites():
-    """MANIFEST の 'va' 配列から {static_VA: [module, ...]} を返す（best-effort）。"""
+    """{static_VA: [module, ...]} を返す（best-effort）。各モジュール先頭ヘッダの `// va:` 行から
+    番地を抽出して逆引き索引を動的構築する。MANIFEST は load_order（モジュール一覧）だけを供給。"""
     out = {}
+    boot = os.path.join(ROOT, "boot")
     try:
         with open(MANIFEST, encoding="utf-8") as f:
             mani = json.load(f)
     except Exception:
         return out
     for e in mani.get("load_order", []):
-        for tok in e.get("va", []):
-            try:
-                out.setdefault(int(tok, 16), []).append(e["module"])
-            except (ValueError, KeyError):
-                pass
+        mod = e.get("module")
+        if not mod:
+            continue
+        path = os.path.join(boot, *mod.split("/"))
+        try:
+            with open(path, encoding="utf-8") as f:
+                m = _HDR_VA.search(f.read())
+        except OSError:
+            continue
+        if not m:
+            continue
+        for tok in _HEX.findall(m.group(1)):
+            out.setdefault(int(tok, 16), []).append(mod)
     return out
 
 
@@ -132,9 +146,9 @@ def do_bytearray(va, size, as_json=False):
     print(f"  // {size} bytes at va(0x{va:X})")
     print(f"  Memory.patchCode(va(0x{va:X}), {size}, c => c.writeByteArray([{arr}]));")
     if sites:
-        print(f"  // MANIFEST patch-site: {', '.join(sites)}")
+        print(f"  // patch-site (header // va:): {', '.join(sites)}")
     else:
-        print(f"  // (not currently a MANIFEST patch-site)")
+        print(f"  // (not currently a declared patch-site)")
 
 
 def do_read_string(va, maxlen, as_json=False):

@@ -2,12 +2,13 @@
 
 目的: AI が grep なしで場所を引け、1 ディレクトリ閉で作業でき、トークンを最小化できる構造を保つ。
 
-## 0. 書き方の標準（helper / データ表。token 最小・AI 編集容易）
-- **単純な固定バイト patch**（無条件・固定値・`Memory.patchCode` だけ）は **`boot/patches.json`** に 1 行追加で表現する。
-  `{ "va":"0xSTATIC", "bytes":<spec>, "subsys":"...", "ssot":"<subsys>/FACTS.md", "note":"..." }`。
-  `bytes` は `"RET0"`(xor eax,eax;ret) / `"RET1"`(mov eax,1;ret) / `{"retImm":n}` / `{"retN":n}` / `"31 C0 C3"`(hex)。
-  → ファイル新規作成も IIFE も不要。`lib/patch_table.js` が `lib/base.js` の `patch()` で適用する。
-  **入れない**もの: 条件分岐つき・実行時に値を計算する patch・同一番地を hook もする衝突番地（順序が挙動になる）→ これらは `.js` のまま。
+## 0. 書き方の標準（helper / co-location。token 最小・AI 編集容易）
+- **単純な固定バイト patch** も含め、patch は**所属サブシステムの `.js` モジュール**に `patch()` で書く
+  （中央テーブルは持たない。旧 `patches.json` / `lib/static_patches.js` は廃止）。
+  `patch(0xSTATIC, <bytes>, '... (Error <n>)');`。`bytes` は `RET0`(xor eax,eax;ret) /
+  `RET1`(mov eax,1;ret) / `retImm(n)` / `retN(n)` / `[0x..,..]`（いずれも `lib/base.js` 定義）。
+  そのサブシステムに `.js` が無ければ新規作成（§1・§4）。persistent な patch のみのファイルは persistence=persistent。
+  一覧監査は `python tools/static/patch_audit.py`（起動不要。全 `.js` の `patch()` を横断走査＝住所が分散しても完全カタログ）。
 - **hook/timer を持つ複雑系**は従来どおり `.js` モジュール。base.js の helper を使う:
   `patch(staticVA, bytes, note)` / `hook(staticVA, {onEnter,onLeave}, note)` / `watch(intervalMs, fn, note)`。
   生 `Memory.patchCode`/`Interceptor.attach`/`setInterval` を直書きせず helper 経由に統一（boilerplate 削減＋不変ハーネスが全効果を捕捉できる）。
@@ -19,7 +20,7 @@
   `mxnetwork/` `mxgfetcher/` `amjvs/` `amdongle/` `amplatform/` `ambilling/` `amrtc/` `mxdrivers/`
   `mxstorage/` `devices/` `app/`）。対応表は `README.md`。
 - 該当が無い実機サブシステムなら新ディレクトリを作る（実機の SEGA 名＝`mx*.exe`/`am*` を使う）。
-- 単純固定バイト patch は §0 のとおり `patches.json` 行（ファイル配置不要）。
+- 単純固定バイト patch も §0 のとおり**所属サブシステムの dir** に `patch()` で置く（中央ファイルなし）。
 
 ## 2. 命名: 名詞のみ、動詞禁止
 - ディレクトリ = 実機コンポーネント名（`amjvs`）。ファイル = 機能名詞（`state.js`
@@ -40,7 +41,8 @@
 // ssot:        ./FACTS.md
 // role:        1 行で何をするか
 ```
-- `va` は**そのファイルが実際に触る** static_VA（`MANIFEST.json` の `va[]` と一致させる）。
+- `va` は**そのファイルが実際に触る** static_VA。**これが番地の唯一ソース**（MANIFEST は va を持たない。
+  `disasm.py` の逆引きと `check_doc_sync.py` の検証はこのヘッダ行を読む）。複数なら `,` 区切り、注釈は `()` 可。
 - `ssot` は事実の所在（同階層 `FACTS.md`）。
 
 ## 5. MANIFEST.json が構成の単一ソース
@@ -57,5 +59,5 @@
 - 詳細・アンチパターンは `../BUGS.md`、横断定数は `ARCH.md`。
 
 ## 7. 検証
-- `python tools/hygiene/check_doc_sync.py` … MANIFEST↔モジュール↔FACTS の整合（va[] 実在・base 先頭・
+- `python tools/hygiene/check_doc_sync.py` … MANIFEST↔モジュール↔FACTS の整合（ヘッダ `// va:` の実在・base 先頭・
   生 nrsBase.add 禁止・known_names が static_VA・persistence 整合）。pre-commit で自動実行。

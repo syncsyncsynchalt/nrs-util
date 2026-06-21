@@ -45,7 +45,9 @@ nrs.exe (NRS, x86-32, SEGA RingEdge) を Frida でパッチ・フックして
 **横断的事実の正本（散在ビューは引用・編集はここを直す＝drift 防止）**:
 - **起動シーケンス**（SYSTEM STARTUP `FUN_0089a010` の state→check→satisfy）＝ `boot/mxsegaboot/FACTS.md`。
   他 FACTS は自 subsystem の slice のみ持ち、全体像はそこを引用する。
-- **エラー→fix 対応**（どの patch/module が満たすか）＝ `boot/patches.json`（各行 note に errNo）＋ `boot/MANIFEST.json`。
+- **エラー→fix 対応**（どの patch/module が満たすか）＝ 各モジュールヘッダの `// va:` ＋ `patch()` note。
+  静的バイトパッチは**所属サブシステムのモジュール**に `patch()` で置く（各 note に errNo。中央テーブルなし、旧 patches.json/static_patches.js は廃止）。
+  一覧監査は `python tools/static/patch_audit.py`（起動不要のオフライン横断走査）。
   STATUS/BUGS/各 FACTS の error 表は読み用ビュー。**impl 列の正はこの2つ**（過去ここが drift して stale 化した）。
 - **トークン規律（AI向け）**: `docs/*.md`（計~1700行）は外部ソースの**要約で正ではない**。per-task で全読せず、
   値/フォーマット/シーケンスが要るときだけ各行「正は」の実ソースを直読する。重複表を見たら上記 SSOT を信じる。
@@ -59,10 +61,11 @@ nrs.exe (NRS, x86-32, SEGA RingEdge) を Frida でパッチ・フックして
 - 各サーフェスの dialect（全て static_VA）:
   - **Ghidra MCP** `mcp__ghidra__*` … 引数も出力も static_VA（不変・基準）
   - **`tools/static/disasm.py`** … 引数は static_VA のみ（旧 RVA モード/自動判定は撤去）。`-b` は
-    `va(0xSTATIC)`+バイト列+MANIFEST patch-site を出力。`--json` で機械可読。
-  - **boot シム** … `va(0xSTATIC)` で番地参照（`nrsBase.add(rva)` は checker が禁止）。runtime addr の
+    `va(0xSTATIC)`+バイト列+patch-site 相互参照（各モジュールヘッダ `// va:` 由来）を出力。`--json` で機械可読。
+  - **boot シム** … `va(0xSTATIC)` で番地参照（`nrsBase.add(rva)` は checker が禁止）。番地はモジュール先頭
+    ヘッダ `// va:` 行で宣言（番地の唯一ソース。MANIFEST は va を持たない）。runtime addr の
     ログは `rtToVa(ptr)` で static_VA に逆換算。
-  - **`boot/MANIFEST.json`** `va[]`、**`data/known_names.json`** キー、**FACTS/ARCH/BUGS** … static_VA
+  - **モジュールヘッダ `// va:`**、**`data/known_names.json`** キー、**FACTS/ARCH/BUGS** … static_VA
   - 唯一の変換式 `runtime = (static_VA − 0x400000) + nrsBase` は `va()` の中だけ（`base.js`）。
 
 ---
@@ -106,10 +109,10 @@ nrs.exe (NRS, x86-32, SEGA RingEdge) を Frida でパッチ・フックして
 - アンチパターン全量は `BUGS.md` の `[ANTI-PATTERN]` 群。
 
 **ドキュメント同期（必須）**: モジュールの追加・削除・分割・機構変更（Interceptor↔patchCode）は、
-**同一コミットで `boot/MANIFEST.json`（va/persistence/ssot）と該当 `boot/<subsys>/FACTS.md` を更新**する。
-MANIFEST が boot 構成の単一ソース。STATUS だけ直して MANIFEST/FACTS を放置すると陳腐化する
-（過去に commit 56cb7b2/7f69740/38ffd45 で発生）。
-- 整合チェッカ: `python tools/hygiene/check_doc_sync.py`（MANIFEST の各 va[]（static_VA）が当該モジュールに
+**同一コミットで `boot/MANIFEST.json`（subsys/persistence/network_role）・モジュール先頭ヘッダ（`// va:` 等）・
+該当 `boot/<subsys>/FACTS.md` を更新**する。MANIFEST が boot 構成（構成と順序）の単一ソース、番地は各ヘッダが正。
+STATUS だけ直して MANIFEST/ヘッダ/FACTS を放置すると陳腐化する（過去に commit 56cb7b2/7f69740/38ffd45 で発生）。
+- 整合チェッカ: `python tools/hygiene/check_doc_sync.py`（各モジュールヘッダ `// va:`（static_VA）が当該モジュール本体に
   実在するか、base.js が先頭か、**生 `nrsBase.add(`/`nb.add(` が無いか（dialect guard）**、known_names キーが
   static_VA か、persistence と実機構が矛盾しないかを機械検証。INFO で runtime=スタンドアロン残課題、
   serve=将来ネットワーク層も併記）。

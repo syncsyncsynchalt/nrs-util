@@ -11,7 +11,7 @@ boot 後に居座る「Error NNNN」は**ゲームアプリのエラーシーン
 レンダラ `FUN_006f2730`(RVA 0x2f2730) が記述子を毎フレーム描画。記述子レイアウト:
 `+0x00`=amlib errCode / `+0x04`=detail / `+0x0c`=msgPtr / `+0x10`=errNo(表示番号) / `+0x16`=flags(&4=Caution)。
 
-**device-presence 連鎖**: errCode→errNo→fix の対応は `../patches.json`（各行 note に errNo/state）。発生源関数は
+**device-presence 連鎖**: errCode→errNo→fix の対応は `./presence.js`（各行 note に errNo/state）。発生源関数は
 `FUN_0089a010` state2(IC Card)/state3(Touch)/state6(Network)＝`../mxsegaboot/FACTS.md`。1つ満たすと次の
 デバイスエラーへ前進（実証順 1000→5101→951→5501→8005）。HLSM は全工程 attract 到達済み。
 ネットワークメッセージ: `0xbd02c4` "Network timeout error (DNS-WAN)" / `0xbd0304` "Network type error (WAN)"。
@@ -25,6 +25,6 @@ boot 後に居座る「Error NNNN」は**ゲームアプリのエラーシーン
   `if(1<DAT_016b6ffc && DAT_016b7000==0) DAT_016b7000=iVar2` / `if(DAT_016b8670!=0 && DAT_016b7000==0) DAT_016b7000=DAT_016b8670(jvs_error_state)`。
 - `FUN_006f0ad0`: `switch(DAT_016b7000)` default → `if(DAT_016b8b50!=8) DAT_016f5af0=0xf`。
 - **適用 patch**: `0x6F0B80`（`DAT_016f5af0=0xf` の imm `0F→00`。USB I/O board errCode 無効化＝Error 951 non-fatal）。
-  正は `../patches.json`（subsys=devices）。
+  正は `./presence.js`（subsys=devices）。
 - 回避: `DAT_016b88dc>=1`(+ `DAT_016b88e0<=1 && DAT_016b88e4==1`) かつ `DAT_016b8670==0`、または `DAT_016b8b50==8`。
   `DAT_016014a3!=0` でも skip するが mxkeychip/dongle 派生(`FUN_00459220/459460`)なので force 非推奨。

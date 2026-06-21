@@ -139,7 +139,7 @@ ALL.Net = Amusement Linkage Live Network。4 サービス構成:
 店舗ルータは IPSEC トンネル(`vpn1jpn.sys-all.net`/`vpn2jpn.sys-all.net`)接続。
 
 ### 4.1 Billing（`/allnet/billing/`）
-`boot/patches.json(0xA065C0)` の正準仕様。
+`boot/ambilling/status.js`(0xA065C0) の正準仕様。
 
 - **単一 HTTPS エンドポイント `ib.naominet.jp:8443`**、**HTTP/1.1 + TLS 1.1** 必須。
 - POST 先 `/request.php`（`/request/`・`/request` もリダイレクトなしで受理必須）。
@@ -163,7 +163,7 @@ ALL.Net = Amusement Linkage Live Network。4 サービス構成:
 ### 4.4 AiMeDB（`/allnet/aimedb/`）
 カード認証 DB。`aime.naominet.jp`。アクセスコード（Amusement IC / Banapass / Classical AiMe）、
 communication/common 仕様、FeliCa 変換、ログ送信(status/aimelog)、キャンペーン、拡張アカウント等。
-BBS のカード周りに当たる際の仕様（IC Card R/W presence は `boot/patches.json` 0x4F6310/30。実カード I/O 実装時の参照）。
+BBS のカード周りに当たる際の仕様（IC Card R/W presence は `boot/devices/presence.js` 0x4F6310/30。実カード I/O 実装時の参照）。
 
 ---
 

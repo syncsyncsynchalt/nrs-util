@@ -22,7 +22,7 @@ micetools は SEGA の `am*` ライブラリ（amDongle/amEeprom/amBackup/…）
 | `boot/amdongle/patch.js` | `lib/am/amDongle.c` / `.h` | amDongle 状態機械・リクエストコード・PCP 会話の全手順 |
 | `boot/mxkeychip/setup.js`（観測 `frida_diag/keychip_setup_diag.js`） | `amDongle.c::amDongleSetupKeychip` + `micekeychip/` | keychip セットアップが投げる PCP keyword と期待応答 |
 | `boot/amdongle/*`（観測 `frida_diag/dongle_update_diag.js`） | `amDongle.c::amDongleUpdate` / tracedata callbacks | dongle update が tracedata.restore で何を待つか |
-| `boot/patches.json(0xA065C0)` | `micekeychip/callbacks/billing.c` | playcount/playlimit/nearfull/keyid の応答フォーマット |
+| `boot/ambilling/status.js`(0xA065C0) | `micekeychip/callbacks/billing.c` | playcount/playlimit/nearfull/keyid の応答フォーマット |
 | `boot/mxgfetcher/getstatus.js` | `lib/am/amGfetcher.h` + `patches/mxgfetcher.patch` | gfetcher は薄い。実体は AMSRAM ログフラグ程度 |
 | region error(0903)調査 | `micekeychip/callbacks/appboot.c::mxkPcpAbRegion` | region は `keychip.appboot.region` の 2 桁 HEX 応答 |
 | Error 1000 調査 | `amDongle.c` の `AM_DONGLE_STATUS_*` 列挙 | dongle 系エラーの正準コード表 |
