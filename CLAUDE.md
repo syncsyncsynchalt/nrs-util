@@ -41,6 +41,14 @@ nrs.exe (NRS, x86-32, SEGA RingEdge) を Frida でパッチ・フックして
 | RingEdge セキュリティ/PCP/DS28CN01/billing/ALL.Net の散文解説 | `docs/bsnk_ringedge.md`（micetools 作者の裏取り。`/nu_alls/` keychip は非該当） |
 | 解析ツール一覧 | `tools/README.md` |
 
+**横断的事実の正本（散在ビューは引用・編集はここを直す＝drift 防止）**:
+- **起動シーケンス**（SYSTEM STARTUP `FUN_0089a010` の state→check→satisfy）＝ `boot/mxsegaboot/FACTS.md`。
+  他 FACTS は自 subsystem の slice のみ持ち、全体像はそこを引用する。
+- **エラー→fix 対応**（どの patch/module が満たすか）＝ `boot/patches.json`（各行 note に errNo）＋ `boot/MANIFEST.json`。
+  STATUS/BUGS/各 FACTS の error 表は読み用ビュー。**impl 列の正はこの2つ**（過去ここが drift して stale 化した）。
+- **トークン規律（AI向け）**: `docs/*.md`（計~1700行）は外部ソースの**要約で正ではない**。per-task で全読せず、
+  値/フォーマット/シーケンスが要るときだけ各行「正は」の実ソースを直読する。重複表を見たら上記 SSOT を信じる。
+
 ## バイナリ定数
 
 - Path `C:\src\bbs\nrs.exe`、x86-32、ImageBase `0x400000`、ASLR 有（nrs base は実行毎に変動）
