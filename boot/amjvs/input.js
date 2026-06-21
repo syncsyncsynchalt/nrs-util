@@ -31,110 +31,110 @@
 
     // --- amJvspAckSwInput hook ---
     hook(VA_ackSwInput, {
-            onEnter: function(args) {
-                this.panel  = args[2].toInt32();
-                this.outPtr = args[4];
-                this.buf    = args[0];  // report_buf = node+4
-            },
-            onLeave: function(ret) {
-                var origRet = ret.toInt32();
-                // -11 override is handled by patchCode at 0x5883D3 (amjvs/state.js);
-                // origRet here should be 0 on GetReport failure.
-                totalCalls++;
-                if (totalCalls <= 10) {
-                    logMsg('JVS_CALL', 'call#' + totalCalls + ' panel=0x' +
-                           (this.panel >>> 0).toString(16) + ' origRet=' + origRet);
-                }
-                if (this.panel !== 0) return;  // only inject for P1 (panel index 0)
-                callCount++;
+        onEnter: function(args) {
+            this.panel  = args[2].toInt32();
+            this.outPtr = args[4];
+            this.buf    = args[0];  // report_buf = node+4
+        },
+        onLeave: function(ret) {
+            var origRet = ret.toInt32();
+            // -11 override is handled by patchCode at 0x5883D3 (amjvs/state.js);
+            // origRet here should be 0 on GetReport failure.
+            totalCalls++;
+            if (totalCalls <= 10) {
+                logMsg('JVS_CALL', 'call#' + totalCalls + ' panel=0x' +
+                       (this.panel >>> 0).toString(16) + ' origRet=' + origRet);
+            }
+            if (this.panel !== 0) return;  // only inject for P1 (panel index 0)
+            callCount++;
 
-                if (phase === 0 && callCount >= WAIT_BEFORE_SVC) {
-                    phase = 1; phaseCount = 0;
+            if (phase === 0 && callCount >= WAIT_BEFORE_SVC) {
+                phase = 1; phaseCount = 0;
+                try {
+                    var node = va(VA_node0);
+                    var nodeDevId = node.readU32();
+                    var p1devId   = va(VA_devId1).readU32();
+                    logMsg('JVS_INPUT', 'Phase 1 START: SERVICE button | node[0]=0x' +
+                           nodeDevId.toString(16) + ' devId1=0x' + p1devId.toString(16));
+                    if (nodeDevId !== p1devId) {
+                        va(VA_devId1).writeU32(nodeDevId);
+                        logMsg('JVS_INPUT', 'devId1 set to node[0]=0x' + nodeDevId.toString(16));
+                    }
+                } catch(e) {}
+            }
+            if (phase === 1) {
+                phaseCount++;
+                if (this.outPtr && !this.outPtr.isNull()) {
                     try {
-                        var node = va(VA_node0);
-                        var nodeDevId = node.readU32();
-                        var p1devId   = va(VA_devId1).readU32();
-                        logMsg('JVS_INPUT', 'Phase 1 START: SERVICE button | node[0]=0x' +
-                               nodeDevId.toString(16) + ' devId1=0x' + p1devId.toString(16));
-                        if (nodeDevId !== p1devId) {
-                            va(VA_devId1).writeU32(nodeDevId);
-                            logMsg('JVS_INPUT', 'devId1 set to node[0]=0x' + nodeDevId.toString(16));
-                        }
+                        this.outPtr.writeU8(0x40);  // SERVICE bit (bit6)
+                        if (phaseCount <= 3)
+                            logMsg('JVS_INPUT', 'SERVICE injected (frame ' + phaseCount + ')');
                     } catch(e) {}
                 }
-                if (phase === 1) {
-                    phaseCount++;
-                    if (this.outPtr && !this.outPtr.isNull()) {
-                        try {
-                            this.outPtr.writeU8(0x40);  // SERVICE bit (bit6)
-                            if (phaseCount <= 3)
-                                logMsg('JVS_INPUT', 'SERVICE injected (frame ' + phaseCount + ')');
-                        } catch(e) {}
-                    }
-                    if (phaseCount >= SERVICE_FRAMES) {
-                        phase = 2; phaseCount = 0;
-                        logMsg('JVS_INPUT', 'Phase 2: pause before START');
-                    }
-                } else if (phase === 2) {
-                    phaseCount++;
-                    if (phaseCount >= WAIT_BEFORE_START) {
-                        phase = 3; phaseCount = 0;
-                        logMsg('JVS_INPUT', 'Phase 3: START button');
-                    }
-                } else if (phase === 3) {
-                    phaseCount++;
-                    if (this.outPtr && !this.outPtr.isNull()) {
-                        try {
-                            this.outPtr.writeU8(0x80);  // START bit (bit7)
-                            if (phaseCount <= 3)
-                                logMsg('JVS_INPUT', 'START injected (frame ' + phaseCount + ')');
-                        } catch(e) {}
-                    }
-                    if (phaseCount >= START_FRAMES) {
-                        phase = 4;
-                        logMsg('JVS_INPUT', 'Phase 4: done. Monitor game state.');
-                    }
+                if (phaseCount >= SERVICE_FRAMES) {
+                    phase = 2; phaseCount = 0;
+                    logMsg('JVS_INPUT', 'Phase 2: pause before START');
                 }
-
-                if (callCount % 100 === 1 && this.buf && !this.buf.isNull()) {
+            } else if (phase === 2) {
+                phaseCount++;
+                if (phaseCount >= WAIT_BEFORE_START) {
+                    phase = 3; phaseCount = 0;
+                    logMsg('JVS_INPUT', 'Phase 3: START button');
+                }
+            } else if (phase === 3) {
+                phaseCount++;
+                if (this.outPtr && !this.outPtr.isNull()) {
                     try {
-                        var b200 = hexBuf(this.buf.add(0x200), 8);
-                        var b100 = hexBuf(this.buf.add(0x100), 4);
-                        logMsg('JVS_INPUT', 'call=' + callCount + ' phase=' + phase +
-                               ' buf+0x100=[' + b100 + '] buf+0x200=[' + b200 + ']');
+                        this.outPtr.writeU8(0x80);  // START bit (bit7)
+                        if (phaseCount <= 3)
+                            logMsg('JVS_INPUT', 'START injected (frame ' + phaseCount + ')');
                     } catch(e) {}
+                }
+                if (phaseCount >= START_FRAMES) {
+                    phase = 4;
+                    logMsg('JVS_INPUT', 'Phase 4: done. Monitor game state.');
                 }
             }
+
+            if (callCount % 100 === 1 && this.buf && !this.buf.isNull()) {
+                try {
+                    var b200 = hexBuf(this.buf.add(0x200), 8);
+                    var b100 = hexBuf(this.buf.add(0x100), 4);
+                    logMsg('JVS_INPUT', 'call=' + callCount + ' phase=' + phase +
+                           ' buf+0x100=[' + b100 + '] buf+0x200=[' + b200 + ']');
+                } catch(e) {}
+            }
+        }
     }, 'amJvspAckSwInput');
     logMsg('JVS_INPUT', 'amJvspAckSwInput hook OK (va=0x988360)');
 
     // --- amJvspGetCoinCount hook: inject 1 coin during SERVICE phase ---
     hook(VA_getCoinCount, {
-            onEnter: function(args) {
-                this.chute   = args[2].toInt32();
-                this.outCoin = args[3];
-            },
-            onLeave: function(ret) {
-                if (this.chute !== 1) return;  // only chute 1 (1-indexed)
-                if (!this.outCoin || this.outCoin.isNull()) return;
-                try {
-                    var cur = this.outCoin.readU16();
-                    if (coinBaseline === null) {
-                        coinBaseline = cur;
-                        coinCounter  = cur;
-                        logMsg('JVS_INPUT', 'CoinCount baseline=' + coinBaseline);
-                    }
-                    if (phase >= 1 && phase <= 2 && coinCounter === coinBaseline) {
-                        coinCounter = coinBaseline + 1;
-                        this.outCoin.writeU16(coinCounter);
-                        ret.replace(0);
-                        logMsg('JVS_INPUT', 'Coin injected (baseline=' + coinBaseline + ' → ' + coinCounter + ')');
-                    } else if (coinCounter !== null && coinCounter > coinBaseline) {
-                        this.outCoin.writeU16(coinCounter);
-                        ret.replace(0);
-                    }
-                } catch(e) {}
-            }
+        onEnter: function(args) {
+            this.chute   = args[2].toInt32();
+            this.outCoin = args[3];
+        },
+        onLeave: function(ret) {
+            if (this.chute !== 1) return;  // only chute 1 (1-indexed)
+            if (!this.outCoin || this.outCoin.isNull()) return;
+            try {
+                var cur = this.outCoin.readU16();
+                if (coinBaseline === null) {
+                    coinBaseline = cur;
+                    coinCounter  = cur;
+                    logMsg('JVS_INPUT', 'CoinCount baseline=' + coinBaseline);
+                }
+                if (phase >= 1 && phase <= 2 && coinCounter === coinBaseline) {
+                    coinCounter = coinBaseline + 1;
+                    this.outCoin.writeU16(coinCounter);
+                    ret.replace(0);
+                    logMsg('JVS_INPUT', 'Coin injected (baseline=' + coinBaseline + ' → ' + coinCounter + ')');
+                } else if (coinCounter !== null && coinCounter > coinBaseline) {
+                    this.outCoin.writeU16(coinCounter);
+                    ret.replace(0);
+                }
+            } catch(e) {}
+        }
     }, 'amJvspGetCoinCount');
     logMsg('JVS_INPUT', 'amJvspGetCoinCount hook OK (va=0x9884F0)');
 
