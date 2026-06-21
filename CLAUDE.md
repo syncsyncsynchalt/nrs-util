@@ -28,7 +28,7 @@ nrs.exe (NRS, x86-32, SEGA RingEdge) を Frida でパッチ・フックして
 |---|---|
 | 横断定数（バイナリ base / static_VA・va() 規約 / PCP ポート / ワイヤ形式 / 静的lib） | `boot/ARCH.md` |
 | サブシステム別の事実（アドレス/構造体） | `boot/<subsys>/FACTS.md`（索引は `FACTS.md`） |
-| バグ・根本原因・アンチパターン（live: OPEN/RISK/ANTI-PATTERN） | `BUGS.md`（解決済み FIXED と参考 NOTE は `docs/bugs_archive.md`） |
+| バグ・根本原因・アンチパターン（live: OPEN/RISK/ANTI-PATTERN） | `BUGS.md`（解決済み FIXED の履歴は `git log`） |
 | 現在地・次の一手・起動コマンド | `STATUS.md` |
 | 関数の逆コンパイル C・xref を調べる | Ghidra MCP（下記） |
 | ブートシム本体（1 サブシステム=1 ディレクトリ） | `boot/<subsys>/<file>.js`（構成 `boot/MANIFEST.json`、規約 `boot/CONVENTIONS.md`） |
