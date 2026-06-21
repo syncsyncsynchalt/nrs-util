@@ -60,6 +60,21 @@ GAME_ARGS = ["-wsvga", "-full", "-img"]
 _PROLOGUE = r"""
 'use strict';
 var __INV = { patches: [], hooks: [], seq: [] };
+// Stable, ASLR-independent identifier for an effect target. nrs.exe addresses ->
+// Ghidra static VA via rtToVa (stable). Win32/NT export targets (mxdrivers hooks
+// on kernel32/ntdll/setupapi) -> "module+0xRVA": rtToVa would yield an nrsBase-
+// dependent value that drifts between two spawns, causing false drift; module+RVA
+// is invariant. Falls back to rtToVa if the module can't be resolved.
+function __stableVa(addr) {
+    try {
+        var m = Process.findModuleByAddress(addr);
+        if (m) {
+            if (m.name.toLowerCase() === 'nrs.exe') return rtToVa(addr);
+            return m.name.toLowerCase() + '+0x' + addr.sub(m.base).toString(16);
+        }
+    } catch (e) {}
+    return rtToVa(addr);
+}
 (function () {
     // patchCode/attach are non-configurable+non-writable, so a Proxy get-trap that
     // returns a wrapper violates the "inconsistent get" invariant. Instead shadow
@@ -78,7 +93,7 @@ var __INV = { patches: [], hooks: [], seq: [] };
                 var a = new Uint8Array(addr.readByteArray(size));
                 for (var i = 0; i < a.length; i++) bytes.push(a[i]);
             } catch (e) {}
-            var v = rtToVa(addr);
+            var v = __stableVa(addr);
             __INV.patches.push({ va: v, bytes: bytes });
             __INV.seq.push({ op: 'patch', va: v });
         }
@@ -89,7 +104,7 @@ var __INV = { patches: [], hooks: [], seq: [] };
     var sI = Object.create(_I);
     Object.defineProperty(sI, 'attach', { configurable: true, writable: true, value:
         function (addr, cbs) {
-            try { var v = rtToVa(addr); __INV.hooks.push({ va: v });
+            try { var v = __stableVa(addr); __INV.hooks.push({ va: v });
                   __INV.seq.push({ op: 'hook', va: v }); } catch (e) {}
             return _I.attach(addr, cbs);
         }
