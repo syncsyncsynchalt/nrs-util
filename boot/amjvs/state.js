@@ -23,10 +23,6 @@
 // All hooks eliminated: FUN_0067afa0 + specCheck both patchCode (persistent)
 // ─────────────────────────────────────────────────────────────────────────────
 (function bypassJvs() {
-    var nb;
-    try { nb = Process.getModuleByName('nrs.exe').base; }
-    catch(e) { logMsg('WARN', 'bypassJvs: nrs.exe not found'); return; }
-
     // ── Initial JVS state write ───────────────────────────────────────────────
     va(0x16B7858).writeU8(1);    // jvs_initialized_flag = 1
     va(0x16B785C).writeU32(1);   // jvs_node_count = 1
@@ -47,42 +43,15 @@
         }
     } catch(e) { logMsg('WARN', 'bypassJvs sub1 write: ' + e); }
 
-    // ── patchCode FUN_0067afa0 → ret (persistent) ────────────────────────────
-    var code = [0xC3];  // ret — void fn(void), no stack cleanup needed
-    try {
-        var t = va(0x67AFA0);
-        Memory.patchCode(t, code.length, function(c) { c.writeByteArray(code); });
-        var ok = t.readU8() === 0xC3;
-        logMsg('JVS_BYPASS', 'FUN_0067afa0 (JVS reinit) → ret patchCode persistent, verify=' + ok);
-    } catch(e) { logMsg('WARN', 'bypassJvs patchCode 0x27afa0: ' + e); }
-
-    // ── patchCode specCheck (RVA 0x587590) → return 0 (persistent) ──────────
-    // specCheck(void *param_1, undefined1 param_2): stdcall 2 args → ret 8
-    // Replaces: Interceptor.attach startup fallback (side-effected sub1Ptr[0]=1).
-    // patchCode always returns 0 (success); [[0xCCF54C]] guard never fails.
-    // xor eax,eax (31 C0) + ret 8 (C2 08 00) = 5 bytes (fits MOV EAX,[0xCCF54C] exactly).
-    var codeSpec = [0x31, 0xC0, 0xC2, 0x08, 0x00]; // xor eax,eax; ret 8
-    try {
-        var tSpec = va(0x987590);
-        Memory.patchCode(tSpec, codeSpec.length, function(c) { c.writeByteArray(codeSpec); });
-        var okSpec = tSpec.readU8() === 0x31;
-        logMsg('JVS_BYPASS', 'specCheck(0x987590) → patchCode(xor eax,eax; ret 8) persistent, verify=' + okSpec);
-    } catch(e) { logMsg('WARN', 'bypassJvs specCheck patchCode: ' + e); }
-
+    // FUN_0067afa0 (JVS reinit) → ret: memset(initFlag,0,0xe20)+amJvspInit fail path を消す。void fn(void)。
+    patch(0x67AFA0, [0xC3], 'FUN_0067afa0 JVS reinit -> ret');
+    // specCheck(0x987590) stdcall 2args → xor eax,eax; ret 8（[[0xCCF54C]] guard を常に成功に。5B で原命令に収まる）。
+    patch(0x987590, [0x31, 0xC0, 0xC2, 0x08, 0x00], 'specCheck -> xor eax,eax; ret 8');
     logMsg('INIT_JVS', 'bypassJvs done — amJvspInit/statusFn/nodeInfoFn/specCheck hooks eliminated');
 })();
 
 // amJvspAckSwInput GetReport(-11) failure path → return 0 (not -11) so errCnt stays 0.
-// 0x5883D3: MOV EAX,EDI (8B C7) → XOR EAX,EAX (33 C0). Persistent; pairs with amjvs/input.js.
+// 0x9883D3: MOV EAX,EDI (8B C7) → XOR EAX,EAX (33 C0). Persistent; pairs with amjvs/input.js.
 (function jvsAckReturnFix() {
-    var nrsBase = null;
-    try { nrsBase = Process.getModuleByName('nrs.exe').base; }
-    catch(e) { logMsg('WARN', 'jvsAckReturnFix: nrs.exe not found'); return; }
-    try {
-        Memory.patchCode(va(0x9883D3), 2, function(c) {
-            c.writeByteArray([0x33, 0xC0]); // XOR EAX,EAX (was MOV EAX,EDI = 8B C7)
-        });
-        var ok = va(0x9883D3).readU8() === 0x33;
-        logMsg('JVS_INPUT', 'amJvspAckSwInput 0x9883D3 MOV→XOR patchCode persistent, verify=' + ok);
-    } catch(e) { logMsg('WARN', '0x5883D3 patchCode: ' + e); }
+    patch(0x9883D3, [0x33, 0xC0], 'amJvspAckSwInput -11 path -> xor eax,eax (errCnt stays 0)');
 })();

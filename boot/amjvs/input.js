@@ -7,10 +7,6 @@
 // Phase sequence: wait WAIT_BEFORE_SVC P1 calls → SERVICE (5 frames) → wait → START (5 frames).
 // The persistent 0x5883D3 return-fix lives in amjvs/state.js; the JVS-state watchdog in amjvs/watchdog.js.
 (function injectJvsInput() {
-    var nrsBase = null;
-    try { nrsBase = Process.getModuleByName('nrs.exe').base; }
-    catch(e) { logMsg('WARN', 'JVS input: nrs.exe not found'); return; }
-
     var VA_ackSwInput   = 0x988360;  // amJvspAckSwInput
     var VA_getCoinCount = 0x9884F0;  // amJvspGetCoinCount
     var VA_node0        = 0x16B7860; // node[0] base
@@ -34,8 +30,7 @@
     var coinCounter  = null;
 
     // --- amJvspAckSwInput hook ---
-    try {
-        Interceptor.attach(va(VA_ackSwInput), {
+    hook(VA_ackSwInput, {
             onEnter: function(args) {
                 this.panel  = args[2].toInt32();
                 this.outPtr = args[4];
@@ -110,13 +105,11 @@
                     } catch(e) {}
                 }
             }
-        });
-        logMsg('JVS_INPUT', 'amJvspAckSwInput hook OK (va=0x988360)');
-    } catch(e) { logMsg('WARN', 'amJvspAckSwInput hook: ' + e); }
+    }, 'amJvspAckSwInput');
+    logMsg('JVS_INPUT', 'amJvspAckSwInput hook OK (va=0x988360)');
 
     // --- amJvspGetCoinCount hook: inject 1 coin during SERVICE phase ---
-    try {
-        Interceptor.attach(va(VA_getCoinCount), {
+    hook(VA_getCoinCount, {
             onEnter: function(args) {
                 this.chute   = args[2].toInt32();
                 this.outCoin = args[3];
@@ -142,13 +135,12 @@
                     }
                 } catch(e) {}
             }
-        });
-        logMsg('JVS_INPUT', 'amJvspGetCoinCount hook OK (va=0x9884F0)');
-    } catch(e) { logMsg('WARN', 'amJvspGetCoinCount hook: ' + e); }
+    }, 'amJvspGetCoinCount');
+    logMsg('JVS_INPUT', 'amJvspGetCoinCount hook OK (va=0x9884F0)');
 
     // --- Periodic JVS_DIAG (every 2s) ---
     var diagTick = 0;
-    setInterval(function() {
+    watch(2000, function() {
         diagTick++;
         try {
             var node    = va(VA_node0);
@@ -170,7 +162,7 @@
                    ' sw642/643/645=0x' + sw642.toString(16) + '/0x' + sw643.toString(16) + '/0x' + sw645.toString(16) +
                    ' coin0=' + coin0 + ' err=' + errSt);
         } catch(e) { logMsg('JVS_DIAG', 'err: ' + e); }
-    }, 2000);
+    }, 'jvs-diag');
 
     logMsg('JVS_INPUT', 'JVS input injection installed. Wait ' + WAIT_BEFORE_SVC +
            ' frames then SERVICE→START auto sequence begins.');

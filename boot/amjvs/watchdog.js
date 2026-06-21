@@ -4,10 +4,6 @@
 // ssot:        FACTS.md §injectJvsInput Frida timer ; BUGS.md [FIXED] JVS watchdog setInterval
 // role:        2s setInterval re-forcing JVS init/node/poll/err state every tick (game resets them) so amJvspAckSwInput keeps being polled. Frida timer → stops on detach (standalone blocker; future: replace with TeknoParrot_jvs pipe in amjvs/pipe/).
 (function jvsWatchdog() {
-    var nrsBase = null;
-    try { nrsBase = Process.getModuleByName('nrs.exe').base; }
-    catch(e) { logMsg('WARN', 'JVS watchdog: nrs.exe not found'); return; }
-
     var VA_jvsInitFlag  = 0x16B7858;
     var VA_jvsNodeCount = 0x16B785C;  // node_count: game polls only if >0
     var VA_node0        = 0x16B7860;
@@ -15,7 +11,7 @@
     var VA_ctxGvar      = 0xCCF548;   // pointer to amJvs ctx
 
     var watchdogFires = 0;
-    setInterval(function() {
+    watch(2000, function() {
         watchdogFires++;
         try {
             var prevInitFlg  = va(VA_jvsInitFlag).readU8();
@@ -51,5 +47,5 @@
                        ' err=' + prevErr + '->0');
             }
         } catch(e) { logMsg('JVS_WATCHDOG', 'err: ' + e); }
-    }, 2000);
+    }, 'jvs-watchdog');
 })();
