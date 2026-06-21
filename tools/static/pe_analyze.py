@@ -1,10 +1,10 @@
-"""PE analyzer for BBS investigation targets.
+"""BBS 調査対象向けの PE アナライザ。
 
-Usage:
+使い方:
   python pe_analyze.py tp         -- TeknoParrot.dll
   python pe_analyze.py nrs        -- nrs.exe
   python pe_analyze.py dlls       -- lib/win32/bin/*.dll + mxGetHwInfo.exe
-  python pe_analyze.py <path>     -- arbitrary PE file
+  python pe_analyze.py <path>     -- 任意の PE ファイル
 """
 import pefile, math, re, os, sys
 
@@ -82,7 +82,7 @@ def analyze(path: str) -> None:
         print(f"  {name:12s} 0x{s.VirtualAddress:08X} 0x{s.PointerToRawData:08X} "
               f"0x{s.SizeOfRawData:08X} 0x{s.Misc_VirtualSize:08X} {e:8.2f}  {flags}")
 
-    # OEP section
+    # OEP が属する section
     oep_va = oh.ImageBase + oh.AddressOfEntryPoint
     for s in pe.sections:
         if oh.ImageBase + s.VirtualAddress <= oep_va < oh.ImageBase + s.VirtualAddress + s.Misc_VirtualSize:
@@ -143,7 +143,7 @@ def main() -> None:
 
     paths = TARGETS.get(arg)
     if paths is None:
-        paths = arg  # treat as file path
+        paths = arg  # ファイルパスとして扱う
 
     if isinstance(paths, list):
         for p in paths:

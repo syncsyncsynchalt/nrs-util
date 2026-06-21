@@ -60,8 +60,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class GhidraMCPHeadless extends GhidraScript {
 
     private HttpServer server;
-    // Lazily-built cache of decompiled C for every function, for full-text search.
-    // key "entryPoint\tname" -> decompiled C. Built once per server lifetime in a background thread.
+    // 全関数の逆コンパイル C を遅延構築するキャッシュ。全文検索用。
+    // key "entryPoint\tname" -> 逆コンパイル C。サーバ稼働中に一度だけ background thread で構築する。
     private volatile java.util.Map<String,String> decompCache = null;
     private volatile boolean decompCacheBuilding = false;
     private volatile int decompCacheDone = 0;
@@ -84,7 +84,7 @@ public class GhidraMCPHeadless extends GhidraScript {
     private void startServer() throws IOException {
         int port = DEFAULT_PORT;
 
-        // Stop existing server if running (e.g., if plugin is reloaded)
+        // 既存サーバが動いていれば停止する（例: plugin が reload された場合）
         if (server != null) {
             Msg.info(this, "Stopping existing HTTP server before starting new one.");
             server.stop(0);
@@ -93,7 +93,7 @@ public class GhidraMCPHeadless extends GhidraScript {
 
         server = HttpServer.create(new InetSocketAddress(port), 0);
 
-        // Each listing endpoint uses offset & limit from query params:
+        // 各 listing endpoint は query params の offset & limit を使う:
         server.createContext("/methods", exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
@@ -185,7 +185,7 @@ public class GhidraMCPHeadless extends GhidraScript {
             sendResponse(exchange, searchDecompiled(query, limit));
         });
 
-        // New API endpoints based on requirements
+        // 要件に基づく新規 API endpoint
         
         server.createContext("/get_function_by_address", exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
@@ -246,18 +246,18 @@ public class GhidraMCPHeadless extends GhidraScript {
             String functionAddress = params.get("function_address");
             String prototype = params.get("prototype");
 
-            // Call the set prototype function and get detailed result
+            // プロトタイプ設定関数を呼び、詳細な結果を得る
             PrototypeResult result = setFunctionPrototype(functionAddress, prototype);
 
             if (result.isSuccess()) {
-                // Even with successful operations, include any warning messages for debugging
+                // 成功時でも、デバッグ用に warning メッセージがあれば含める
                 String successMsg = "Function prototype set successfully";
                 if (!result.getErrorMessage().isEmpty()) {
                     successMsg += "\n\nWarnings/Debug Info:\n" + result.getErrorMessage();
                 }
                 sendResponse(exchange, successMsg);
             } else {
-                // Return the detailed error message to the client
+                // 詳細な error メッセージをクライアントへ返す
                 sendResponse(exchange, "Failed to set function prototype: " + result.getErrorMessage());
             }
         });
@@ -268,13 +268,13 @@ public class GhidraMCPHeadless extends GhidraScript {
             String variableName = params.get("variable_name");
             String newType = params.get("new_type");
 
-            // Capture detailed information about setting the type
+            // 型設定に関する詳細情報を収集する
             StringBuilder responseMsg = new StringBuilder();
             responseMsg.append("Setting variable type: ").append(variableName)
                       .append(" to ").append(newType)
                       .append(" in function at ").append(functionAddress).append("\n\n");
 
-            // Attempt to find the data type in various categories
+            // data type を各カテゴリから探す
             Program program = getCurrentProgram();
             if (program != null) {
                 DataTypeManager dtm = program.getDataTypeManager();
@@ -294,7 +294,7 @@ public class GhidraMCPHeadless extends GhidraScript {
                 }
             }
 
-            // Try to set the type
+            // 型の設定を試みる
             boolean success = setLocalVariableType(functionAddress, variableName, newType);
 
             String successMsg = success ? "Variable type set successfully" : "Failed to set variable type";
@@ -342,13 +342,13 @@ public class GhidraMCPHeadless extends GhidraScript {
                 Msg.info(this, "GhidraMCP HTTP server started on port " + port);
             } catch (Exception e) {
                 Msg.error(this, "Failed to start HTTP server on port " + port + ". Port might be in use.", e);
-                server = null; // Ensure server isn't considered running
+                server = null; // サーバが稼働中と見なされないようにする
             }
         }, "GhidraMCP-HTTP-Server").start();
     }
 
     // ----------------------------------------------------------------------------------
-    // Pagination-aware listing methods
+    // ページネーション対応の listing メソッド
     // ----------------------------------------------------------------------------------
 
     private String getAllFunctionNames(int offset, int limit) {
@@ -363,9 +363,9 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * Full-text search over the decompiled C of every function (replaces nrs_query.py --grep).
-     * Builds an in-memory cache on first use (background thread); reports progress until ready.
-     * Matches function name OR decompiled C, case-insensitive. Returns address, name, matching lines.
+     * 全関数の逆コンパイル C を全文検索する（nrs_query.py --grep の置き換え）。
+     * 初回利用時に in-memory キャッシュを構築し（background thread）、準備完了まで進捗を報告する。
+     * 関数名 または 逆コンパイル C に対し case-insensitive でマッチ。番地・名前・一致行を返す。
      */
     private String searchDecompiled(String query, int limit) {
         Program program = getCurrentProgram();
@@ -439,7 +439,7 @@ public class GhidraMCPHeadless extends GhidraScript {
                 classNames.add(ns.getName());
             }
         }
-        // Convert set to list for pagination
+        // ページネーション用に set を list へ変換
         List<String> sorted = new ArrayList<>(classNames);
         Collections.sort(sorted);
         return paginateList(sorted, offset, limit);
@@ -477,7 +477,7 @@ public class GhidraMCPHeadless extends GhidraScript {
         List<String> lines = new ArrayList<>();
         while (it.hasNext()) {
             Symbol s = it.next();
-            // On older Ghidra, "export" is recognized via isExternalEntryPoint()
+            // 古い Ghidra では "export" は isExternalEntryPoint() で判別する
             if (s.isExternalEntryPoint()) {
                 lines.add(s.getName() + " -> " + s.getAddress());
             }
@@ -532,7 +532,7 @@ public class GhidraMCPHeadless extends GhidraScript {
         List<String> matches = new ArrayList<>();
         for (Function func : program.getFunctionManager().getFunctions(true)) {
             String name = func.getName();
-            // simple substring match
+            // 単純な部分文字列マッチ
             if (name.toLowerCase().contains(searchTerm.toLowerCase())) {
                 matches.add(String.format("%s @ %s", name, func.getEntryPoint()));
             }
@@ -547,7 +547,7 @@ public class GhidraMCPHeadless extends GhidraScript {
     }    
 
     // ----------------------------------------------------------------------------------
-    // Logic for rename, decompile, etc.
+    // rename・decompile などのロジック
     // ----------------------------------------------------------------------------------
 
     private String decompileFunctionByName(String name) {
@@ -724,13 +724,13 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * Copied from AbstractDecompilerAction.checkFullCommit, it's protected.
-	 * Compare the given HighFunction's idea of the prototype with the Function's idea.
-	 * Return true if there is a difference. If a specific symbol is being changed,
-	 * it can be passed in to check whether or not the prototype is being affected.
-	 * @param highSymbol (if not null) is the symbol being modified
-	 * @param hfunction is the given HighFunction
-	 * @return true if there is a difference (and a full commit is required)
+     * AbstractDecompilerAction.checkFullCommit からのコピー（向こうは protected）。
+	 * 与えられた HighFunction が持つプロトタイプと Function が持つプロトタイプを比較する。
+	 * 差異があれば true を返す。特定の symbol を変更中なら、それを渡してプロトタイプに
+	 * 影響するかを判定できる。
+	 * @param highSymbol （非 null なら）変更中の symbol
+	 * @param hfunction 対象の HighFunction
+	 * @return 差異があれば true（full commit が必要）
 	 */
 	protected static boolean checkFullCommit(HighSymbol highSymbol, HighFunction hfunction) {
 		if (highSymbol != null && !highSymbol.isParameter()) {
@@ -750,7 +750,7 @@ public class GhidraMCPHeadless extends GhidraScript {
 				return true;
 			}
 			VariableStorage storage = param.getStorage();
-			// Don't compare using the equals method so that DynamicVariableStorage can match
+			// DynamicVariableStorage がマッチできるよう、equals メソッドでは比較しない
 			if (0 != storage.compareTo(parameters[i].getVariableStorage())) {
 				return true;
 			}
@@ -760,11 +760,11 @@ public class GhidraMCPHeadless extends GhidraScript {
 	}
 
     // ----------------------------------------------------------------------------------
-    // New methods to implement the new functionalities
+    // 新機能を実装する新規メソッド
     // ----------------------------------------------------------------------------------
 
     /**
-     * Get function by address
+     * 番地から関数を取得する
      */
     private String getFunctionByAddress(String addressStr) {
         Program program = getCurrentProgram();
@@ -790,7 +790,7 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * Get current address selected in Ghidra GUI
+     * Ghidra GUI で選択中の現在アドレスを取得する
      */
     private String getCurrentAddress() {
         Program program = getCurrentProgram();
@@ -799,7 +799,7 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * Get current function selected in Ghidra GUI
+     * Ghidra GUI で選択中の現在関数を取得する
      */
     private String getCurrentFunction() {
         Program program = getCurrentProgram();
@@ -812,7 +812,7 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * List all functions in the database
+     * データベース内の全関数を列挙する
      */
     private String listFunctions() {
         Program program = getCurrentProgram();
@@ -829,8 +829,8 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * Gets a function at the given address or containing the address
-     * @return the function or null if not found
+     * 指定番地にある、または指定番地を含む関数を取得する
+     * @return 関数。見つからなければ null
      */
     private Function getFunctionForAddress(Program program, Address addr) {
         Function func = program.getFunctionManager().getFunctionAt(addr);
@@ -841,7 +841,7 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * Decompile a function at the given address
+     * 指定番地の関数を逆コンパイルする
      */
     private String decompileFunctionByAddress(String addressStr) {
         Program program = getCurrentProgram();
@@ -866,7 +866,7 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * Get assembly code for a function
+     * 関数の assembly コードを取得する
      */
     private String disassembleFunction(String addressStr) {
         Program program = getCurrentProgram();
@@ -887,7 +887,7 @@ public class GhidraMCPHeadless extends GhidraScript {
             while (instructions.hasNext()) {
                 Instruction instr = instructions.next();
                 if (instr.getAddress().compareTo(end) > 0) {
-                    break; // Stop if we've gone past the end of the function
+                    break; // 関数の末尾を越えたら停止する
                 }
                 String comment = listing.getComment(CodeUnit.EOL_COMMENT, instr.getAddress());
                 comment = (comment != null) ? "; " + comment : "";
@@ -905,7 +905,7 @@ public class GhidraMCPHeadless extends GhidraScript {
     }    
 
     /**
-     * Set a comment using the specified comment type (PRE_COMMENT or EOL_COMMENT)
+     * 指定した comment type（PRE_COMMENT または EOL_COMMENT）でコメントを設定する
      */
     private boolean setCommentAtAddress(String addressStr, String comment, int commentType, String transactionName) {
         Program program = getCurrentProgram();
@@ -935,21 +935,21 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * Set a comment for a given address in the function pseudocode
+     * 関数の擬似コード（pseudocode）の指定番地にコメントを設定する
      */
     private boolean setDecompilerComment(String addressStr, String comment) {
         return setCommentAtAddress(addressStr, comment, CodeUnit.PRE_COMMENT, "Set decompiler comment");
     }
 
     /**
-     * Set a comment for a given address in the function disassembly
+     * 関数の逆アセンブリ（disassembly）の指定番地にコメントを設定する
      */
     private boolean setDisassemblyComment(String addressStr, String comment) {
         return setCommentAtAddress(addressStr, comment, CodeUnit.EOL_COMMENT, "Set disassembly comment");
     }
 
     /**
-     * Class to hold the result of a prototype setting operation
+     * プロトタイプ設定処理の結果を保持するクラス
      */
     private static class PrototypeResult {
         private final boolean success;
@@ -970,7 +970,7 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * Rename a function by its address
+     * 番地を指定して関数をリネームする
      */
     private boolean renameFunctionByAddress(String functionAddrStr, String newName) {
         Program program = getCurrentProgram();
@@ -994,7 +994,7 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * Helper method to perform the actual function rename within a transaction
+     * transaction 内で実際の関数リネームを行う helper メソッド
      */
     private void performFunctionRename(Program program, String functionAddrStr, String newName, AtomicBoolean success) {
         int tx = program.startTransaction("Rename function by address");
@@ -1017,10 +1017,10 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * Set a function's prototype with proper error handling using ApplyFunctionSignatureCmd
+     * ApplyFunctionSignatureCmd を使い、適切な error handling 付きで関数のプロトタイプを設定する
      */
     private PrototypeResult setFunctionPrototype(String functionAddrStr, String prototype) {
-        // Input validation
+        // 入力検証
         Program program = getCurrentProgram();
         if (program == null) return new PrototypeResult(false, "No program loaded");
         if (functionAddrStr == null || functionAddrStr.isEmpty()) {
@@ -1046,12 +1046,12 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * Helper method that applies the function prototype within a transaction
+     * transaction 内で関数プロトタイプを適用する helper メソッド
      */
     private void applyFunctionPrototype(Program program, String functionAddrStr, String prototype, 
                                        AtomicBoolean success, StringBuilder errorMessage) {
         try {
-            // Get the address and function
+            // 番地と関数を取得する
             Address addr = program.getAddressFactory().getAddress(functionAddrStr);
             Function func = getFunctionForAddress(program, addr);
 
@@ -1064,10 +1064,10 @@ public class GhidraMCPHeadless extends GhidraScript {
 
             Msg.info(this, "Setting prototype for function " + func.getName() + ": " + prototype);
 
-            // Store original prototype as a comment for reference
+            // 参照用に元のプロトタイプをコメントとして保存する
             addPrototypeComment(program, func, prototype);
 
-            // Use ApplyFunctionSignatureCmd to parse and apply the signature
+            // ApplyFunctionSignatureCmd で signature を parse して適用する
             parseFunctionSignatureAndApply(program, addr, prototype, success, errorMessage);
 
         } catch (Exception e) {
@@ -1078,7 +1078,7 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * Add a comment showing the prototype being set
+     * 設定中のプロトタイプを示すコメントを追加する
      */
     private void addPrototypeComment(Program program, Function func, String prototype) {
         int txComment = program.startTransaction("Add prototype comment");
@@ -1094,25 +1094,25 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * Parse and apply the function signature with error handling
+     * error handling 付きで関数 signature を parse して適用する
      */
     private void parseFunctionSignatureAndApply(Program program, Address addr, String prototype,
                                               AtomicBoolean success, StringBuilder errorMessage) {
-        // Use ApplyFunctionSignatureCmd to parse and apply the signature
+        // ApplyFunctionSignatureCmd で signature を parse して適用する
         int txProto = program.startTransaction("Set function prototype");
         try {
-            // Get data type manager
+            // data type manager を取得
             DataTypeManager dtm = program.getDataTypeManager();
 
-            // Get data type manager service
-            ghidra.app.services.DataTypeManagerService dtms = 
+            // data type manager service を取得
+            ghidra.app.services.DataTypeManagerService dtms =
                 null;
 
-            // Create function signature parser
-            ghidra.app.util.parser.FunctionSignatureParser parser = 
+            // function signature parser を生成
+            ghidra.app.util.parser.FunctionSignatureParser parser =
                 new ghidra.app.util.parser.FunctionSignatureParser(dtm, dtms);
 
-            // Parse the prototype into a function signature
+            // プロトタイプを function signature に parse する
             ghidra.program.model.data.FunctionDefinitionDataType sig = parser.parse(null, prototype);
 
             if (sig == null) {
@@ -1122,12 +1122,12 @@ public class GhidraMCPHeadless extends GhidraScript {
                 return;
             }
 
-            // Create and apply the command
-            ghidra.app.cmd.function.ApplyFunctionSignatureCmd cmd = 
+            // command を生成して適用する
+            ghidra.app.cmd.function.ApplyFunctionSignatureCmd cmd =
                 new ghidra.app.cmd.function.ApplyFunctionSignatureCmd(
                     addr, sig, SourceType.USER_DEFINED);
 
-            // Apply the command to the program
+            // command を program に適用する
             boolean cmdResult = cmd.applyTo(program, new ConsoleTaskMonitor());
 
             if (cmdResult) {
@@ -1148,10 +1148,10 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * Set a local variable's type using HighFunctionDBUtil.updateDBVariable
+     * HighFunctionDBUtil.updateDBVariable を使い、local variable の型を設定する
      */
     private boolean setLocalVariableType(String functionAddrStr, String variableName, String newType) {
-        // Input validation
+        // 入力検証
         Program program = getCurrentProgram();
         if (program == null) return false;
         if (functionAddrStr == null || functionAddrStr.isEmpty() || 
@@ -1173,12 +1173,12 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * Helper method that performs the actual variable type change
+     * 実際の variable 型変更を行う helper メソッド
      */
     private void applyVariableType(Program program, String functionAddrStr, 
                                   String variableName, String newType, AtomicBoolean success) {
         try {
-            // Find the function
+            // 関数を探す
             Address addr = program.getAddressFactory().getAddress(functionAddrStr);
             Function func = getFunctionForAddress(program, addr);
 
@@ -1198,14 +1198,14 @@ public class GhidraMCPHeadless extends GhidraScript {
                 return;
             }
 
-            // Find the symbol by name
+            // symbol を名前で探す
             HighSymbol symbol = findSymbolByName(highFunction, variableName);
             if (symbol == null) {
                 Msg.error(this, "Could not find variable '" + variableName + "' in decompiled function");
                 return;
             }
 
-            // Get high variable
+            // high variable を取得
             HighVariable highVar = symbol.getHighVariable();
             if (highVar == null) {
                 Msg.error(this, "No HighVariable found for symbol: " + variableName);
@@ -1215,7 +1215,7 @@ public class GhidraMCPHeadless extends GhidraScript {
             Msg.info(this, "Found high variable for: " + variableName + 
                      " with current type " + highVar.getDataType().getName());
 
-            // Find the data type
+            // data type を探す
             DataTypeManager dtm = program.getDataTypeManager();
             DataType dataType = resolveDataType(dtm, newType);
 
@@ -1226,7 +1226,7 @@ public class GhidraMCPHeadless extends GhidraScript {
 
             Msg.info(this, "Using data type: " + dataType.getName() + " for variable " + variableName);
 
-            // Apply the type change in a transaction
+            // transaction 内で型変更を適用する
             updateVariableType(program, symbol, dataType, success);
 
         } catch (Exception e) {
@@ -1235,7 +1235,7 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * Find a high symbol by name in the given high function
+     * 指定した high function 内で high symbol を名前から探す
      */
     private HighSymbol findSymbolByName(ghidra.program.model.pcode.HighFunction highFunction, String variableName) {
         Iterator<HighSymbol> symbols = highFunction.getLocalSymbolMap().getSymbols();
@@ -1249,15 +1249,15 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * Decompile a function and return the results
+     * 関数を逆コンパイルして結果を返す
      */
     private DecompileResults decompileFunction(Function func, Program program) {
-        // Set up decompiler for accessing the decompiled function
+        // 逆コンパイル結果にアクセスするため decompiler を準備する
         DecompInterface decomp = new DecompInterface();
         decomp.openProgram(program);
-        decomp.setSimplificationStyle("decompile"); // Full decompilation
+        decomp.setSimplificationStyle("decompile"); // フル逆コンパイル
 
-        // Decompile the function
+        // 関数を逆コンパイルする
         DecompileResults results = decomp.decompileFunction(func, 60, new ConsoleTaskMonitor());
 
         if (!results.decompileCompleted()) {
@@ -1269,17 +1269,17 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * Apply the type update in a transaction
+     * transaction 内で型の更新を適用する
      */
     private void updateVariableType(Program program, HighSymbol symbol, DataType dataType, AtomicBoolean success) {
         int tx = program.startTransaction("Set variable type");
         try {
-            // Use HighFunctionDBUtil to update the variable with the new type
+            // HighFunctionDBUtil で variable を新しい型に更新する
             HighFunctionDBUtil.updateDBVariable(
-                symbol,                // The high symbol to modify
-                symbol.getName(),      // Keep original name
-                dataType,              // The new data type
-                SourceType.USER_DEFINED // Mark as user-defined
+                symbol,                // 変更対象の high symbol
+                symbol.getName(),      // 元の名前を保持
+                dataType,              // 新しい data type
+                SourceType.USER_DEFINED // user-defined として記録
             );
 
             success.set(true);
@@ -1292,7 +1292,7 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * Get all references to a specific address (xref to)
+     * 指定番地への全参照を取得する（xref to）
      */
     private String getXrefsTo(String addressStr, int offset, int limit) {
         Program program = getCurrentProgram();
@@ -1324,7 +1324,7 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * Get all references from a specific address (xref from)
+     * 指定番地からの全参照を取得する（xref from）
      */
     private String getXrefsFrom(String addressStr, int offset, int limit) {
         Program program = getCurrentProgram();
@@ -1363,7 +1363,7 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * Get all references to a specific function by name
+     * 指定した関数（名前指定）への全参照を取得する
      */
     private String getFunctionXrefs(String functionName, int offset, int limit) {
         Program program = getCurrentProgram();
@@ -1402,7 +1402,7 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
 /**
- * List all defined strings in the program with their addresses
+ * program 内の定義済み文字列を、その番地とともに全て列挙する
  */
     private String listDefinedStrings(int offset, int limit, String filter) {
         Program program = getCurrentProgram();
@@ -1428,7 +1428,7 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * Check if the given data is a string type
+     * 与えられた data が文字列型かどうかを判定する
      */
     private boolean isStringData(Data data) {
         if (data == null) return false;
@@ -1439,7 +1439,7 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * Escape special characters in a string for display
+     * 表示用に文字列内の特殊文字をエスケープする
      */
     private String escapeString(String input) {
         if (input == null) return "";
@@ -1463,29 +1463,29 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * Resolves a data type by name, handling common types and pointer types
-     * @param dtm The data type manager
-     * @param typeName The type name to resolve
-     * @return The resolved DataType, or null if not found
+     * data type を名前から解決する。common type と pointer type を扱う
+     * @param dtm data type manager
+     * @param typeName 解決する型名
+     * @return 解決した DataType。見つからなければ null
      */
     private DataType resolveDataType(DataTypeManager dtm, String typeName) {
-        // First try to find exact match in all categories
+        // まず全カテゴリで完全一致を探す
         DataType dataType = findDataTypeByNameInAllCategories(dtm, typeName);
         if (dataType != null) {
             Msg.info(this, "Found exact data type match: " + dataType.getPathName());
             return dataType;
         }
 
-        // Check for Windows-style pointer types (PXXX)
+        // Windows 形式の pointer type（PXXX）をチェックする
         if (typeName.startsWith("P") && typeName.length() > 1) {
             String baseTypeName = typeName.substring(1);
 
-            // Special case for PVOID
+            // PVOID の特別扱い
             if (baseTypeName.equals("VOID")) {
                 return new PointerDataType(dtm.getDataType("/void"));
             }
 
-            // Try to find the base type
+            // base type を探す
             DataType baseType = findDataTypeByNameInAllCategories(dtm, baseTypeName);
             if (baseType != null) {
                 return new PointerDataType(baseType);
@@ -1495,7 +1495,7 @@ public class GhidraMCPHeadless extends GhidraScript {
             return new PointerDataType(dtm.getDataType("/void"));
         }
 
-        // Handle common built-in types
+        // common な built-in type を扱う
         switch (typeName.toLowerCase()) {
             case "int":
             case "long":
@@ -1529,46 +1529,46 @@ public class GhidraMCPHeadless extends GhidraScript {
             case "void":
                 return dtm.getDataType("/void");
             default:
-                // Try as a direct path
+                // direct path として試す
                 DataType directType = dtm.getDataType("/" + typeName);
                 if (directType != null) {
                     return directType;
                 }
 
-                // Fallback to int if we couldn't find it
+                // 見つからなければ int に fallback する
                 Msg.warn(this, "Unknown type: " + typeName + ", defaulting to int");
                 return dtm.getDataType("/int");
         }
     }
     
     /**
-     * Find a data type by name in all categories/folders of the data type manager
-     * This searches through all categories rather than just the root
+     * data type manager の全カテゴリ/フォルダから data type を名前で探す
+     * root だけでなく全カテゴリを横断して検索する
      */
     private DataType findDataTypeByNameInAllCategories(DataTypeManager dtm, String typeName) {
-        // Try exact match first
+        // まず完全一致を試す
         DataType result = searchByNameInAllCategories(dtm, typeName);
         if (result != null) {
             return result;
         }
 
-        // Try lowercase
+        // lowercase で試す
         return searchByNameInAllCategories(dtm, typeName.toLowerCase());
     }
 
     /**
-     * Helper method to search for a data type by name in all categories
+     * 全カテゴリから data type を名前で検索する helper メソッド
      */
     private DataType searchByNameInAllCategories(DataTypeManager dtm, String name) {
-        // Get all data types from the manager
+        // manager から全 data type を取得する
         Iterator<DataType> allTypes = dtm.getAllDataTypes();
         while (allTypes.hasNext()) {
             DataType dt = allTypes.next();
-            // Check if the name matches exactly (case-sensitive) 
+            // 名前が完全一致するか（case-sensitive）
             if (dt.getName().equals(name)) {
                 return dt;
             }
-            // For case-insensitive, we want an exact match except for case
+            // case-insensitive 用。大小文字以外は完全一致を求める
             if (dt.getName().equalsIgnoreCase(name)) {
                 return dt;
             }
@@ -1577,21 +1577,21 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     // ----------------------------------------------------------------------------------
-    // Utility: parse query params, parse post params, pagination, etc.
+    // ユーティリティ: query params の parse、post params の parse、ページネーション等
     // ----------------------------------------------------------------------------------
 
     /**
-     * Parse query parameters from the URL, e.g. ?offset=10&limit=100
+     * URL から query parameter を parse する。例: ?offset=10&limit=100
      */
     private Map<String, String> parseQueryParams(HttpExchange exchange) {
         Map<String, String> result = new HashMap<>();
-        String query = exchange.getRequestURI().getQuery(); // e.g. offset=10&limit=100
+        String query = exchange.getRequestURI().getQuery(); // 例: offset=10&limit=100
         if (query != null) {
             String[] pairs = query.split("&");
             for (String p : pairs) {
                 String[] kv = p.split("=");
                 if (kv.length == 2) {
-                    // URL decode parameter values
+                    // parameter 値を URL decode する
                     try {
                         String key = URLDecoder.decode(kv[0], StandardCharsets.UTF_8);
                         String value = URLDecoder.decode(kv[1], StandardCharsets.UTF_8);
@@ -1606,7 +1606,7 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * Parse post body form params, e.g. oldName=foo&newName=bar
+     * post body の form params を parse する。例: oldName=foo&newName=bar
      */
     private Map<String, String> parsePostParams(HttpExchange exchange) throws IOException {
         byte[] body = exchange.getRequestBody().readAllBytes();
@@ -1629,21 +1629,21 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * Convert a list of strings into one big newline-delimited string, applying offset & limit.
+     * 文字列の list を offset & limit を適用して 1 つの改行区切り文字列に変換する。
      */
     private String paginateList(List<String> items, int offset, int limit) {
         int start = Math.max(0, offset);
         int end   = Math.min(items.size(), offset + limit);
 
         if (start >= items.size()) {
-            return ""; // no items in range
+            return ""; // 範囲内に項目なし
         }
         List<String> sub = items.subList(start, end);
         return String.join("\n", sub);
     }
 
     /**
-     * Parse an integer from a string, or return defaultValue if null/invalid.
+     * 文字列から整数を parse する。null/不正なら defaultValue を返す。
      */
     private int parseIntOrDefault(String val, int defaultValue) {
         if (val == null) return defaultValue;
@@ -1656,7 +1656,7 @@ public class GhidraMCPHeadless extends GhidraScript {
     }
 
     /**
-     * Escape non-ASCII chars to avoid potential decode issues.
+     * decode の問題を避けるため non-ASCII 文字をエスケープする。
      */
     private String escapeNonAscii(String input) {
         if (input == null) return "";

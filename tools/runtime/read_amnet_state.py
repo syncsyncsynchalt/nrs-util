@@ -1,8 +1,8 @@
-"""One-shot read-only dump of amNet/error-scene globals from a running nrs.exe.
+"""稼働中の nrs.exe から amNet/error-scene のグローバルを一度だけ読み取りダンプする。
 
-Usage: python tools/runtime/read_amnet_state.py [pid]
-If pid omitted, attaches to the first nrs.exe found.
-RVA = static_VA - 0x400000 (nrs.exe ImageBase 0x400000).
+使い方: python tools/runtime/read_amnet_state.py [pid]
+pid を省略すると最初に見つかった nrs.exe に attach する。
+RVA = static_VA - 0x400000（nrs.exe ImageBase 0x400000）。
 """
 import frida, sys, json, time, subprocess
 

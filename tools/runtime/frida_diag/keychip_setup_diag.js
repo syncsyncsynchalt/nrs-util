@@ -1,16 +1,16 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Keychip setup SM diagnostic — amDongleSetupKeychip (FUN_0096d520). Logging only.
+// Keychip setup ステートマシン診断 — amDongleSetupKeychip (FUN_0096d520)。観測のみ。
 //
-// PCPA client SM; unpopulated keychip ctx → errCode 1 → Error 0949 "Keychip Not Found".
-//   ctx = *PTR_DAT_00ccf000   (pointer at static 0xCCF000 / RVA 0x8CF000)
+// PCPA client のステートマシン。keychip ctx が未設定だと errCode 1 → Error 0949 "Keychip Not Found"。
+//   ctx = *PTR_DAT_00ccf000   (static 0xCCF000 / RVA 0x8CF000 のポインタ)
 //   ctx+0x30 = SM state (1 open → 2 recv-wait → 3 send → 4 recvresp → 5 parse →
 //              6 finalize → 7 error/retry → 8 done → 9 give-up)
-//   ctx+0x34 = saved next-state, ctx+0x38 = retry counter (≥3 → state 9 = fail)
-//   ctx+0x56 = PCPA keychip port (u16); pcpaOpenClient() to 127.0.0.1
-//   ctx+0x04, ctx+0x08 = set to 1 only on success (state 6, substate 8); read by
-//                        presence check FUN_0096c5d0.
-// Sends "keychip.appboot.systemflag" then "keychip.version".
+//   ctx+0x34 = 保存した next-state、ctx+0x38 = retry カウンタ (≥3 → state 9 = fail)
+//   ctx+0x56 = PCPA keychip port (u16)。pcpaOpenClient() で 127.0.0.1 へ
+//   ctx+0x04, ctx+0x08 = 成功時のみ 1 に設定 (state 6, substate 8)。presence チェック
+//                        FUN_0096c5d0 が読む。
+// "keychip.appboot.systemflag" の後に "keychip.version" を送る。
 // ─────────────────────────────────────────────────────────────────────────────
 (function diagKeychipSetup() {
     var nrsBase = null;
@@ -41,7 +41,7 @@
                 var c = ctx();
                 var st = -1;
                 try { st = c && !c.isNull() ? c.add(0x30).readU32() : -1; } catch(e) {}
-                // Log on state change, first 10 calls, then every 500th.
+                // state 変化時、最初の 10 回、以降 500 回ごとにログする。
                 if (st !== seen || calls <= 10 || calls % 500 === 0) {
                     logMsg('KCSETUP', '#' + calls + ' ret=' + ret.toInt32() +
                            ' [' + this.before + '] -> [' + snap(c) + ']');
@@ -52,8 +52,8 @@
         logMsg('INIT_KCSETUP', 'amDongleSetupKeychip (FUN_0096d520) state-machine diagnostic hooked');
     } catch(e) { logMsg('WARN', 'diagKeychipSetup attach 0x56D520: ' + e); }
 
-    // Gate chain leading to FUN_0096d520: FUN_00459220 (keychip init), FUN_0096c480
-    // (amDongleInit: ctx + ports + winsock), FUN_0096dad0 (file/"toolmode" check).
+    // FUN_0096d520 に至る gate chain: FUN_00459220 (keychip init)、FUN_0096c480
+    // (amDongleInit: ctx + ports + winsock)、FUN_0096dad0 (file/"toolmode" チェック)。
     try {
         Interceptor.attach(nrsBase.add(0x59220), {   // FUN_00459220 keychip init
             onLeave: function() { logMsg('KCGATE', 'FUN_00459220(keychip init) returned; ' + snap(ctx())); }

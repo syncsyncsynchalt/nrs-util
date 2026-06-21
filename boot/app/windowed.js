@@ -5,12 +5,12 @@
 // role:        ウィンドウモード化（フルスクリーン抑止・窓スタイル）。
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Windowed mode — block ChangeDisplaySettings*, strip WS_POPUP from windows
+// ウィンドウモード — ChangeDisplaySettings* をブロックし、ウィンドウから WS_POPUP を除去する
 //
-// TeknoParrot equivalent: hooks ChangeDisplaySettingsA + CreateWindowExA/W to
-// prevent fullscreen mode switch and force overlapped (windowed) windows.
-// For D3D11 (which nrs.exe uses), ChangeDisplaySettings may not fire, but the
-// CreateWindowExA/W hook ensures any top-level window is created windowed.
+// TeknoParrot 相当: ChangeDisplaySettingsA + CreateWindowExA/W をフックし、フルスクリーンへの
+// モード切替を防いで overlapped（ウィンドウ）スタイルを強制する。
+// nrs.exe が使う D3D11 では ChangeDisplaySettings が発火しない場合があるが、CreateWindowExA/W
+// フックによってトップレベルウィンドウは必ずウィンドウモードで生成される。
 // ─────────────────────────────────────────────────────────────────────────────
 (function windowedMode() {
     ['ChangeDisplaySettingsA', 'ChangeDisplaySettingsW',

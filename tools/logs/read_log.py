@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Show the most recent Frida capture log, with optional filtering.
+最新の Frida capture ログを表示する (任意でフィルタ可能).
 
 Usage:
-  read_log.py                        show full latest log
-  read_log.py -f keychip             filter lines containing "keychip"
-  read_log.py -f "JVS|WATCHDOG"      filter by regex
-  read_log.py -t 100                 show last 100 lines
-  read_log.py -l                     list available log files
-  read_log.py <filename_or_date>     open specific log (e.g. "20260608-110910")
+  read_log.py                        最新ログ全体を表示
+  read_log.py -f keychip             "keychip" を含む行に絞り込む
+  read_log.py -f "JVS|WATCHDOG"      正規表現でフィルタ
+  read_log.py -t 100                 末尾 100 行を表示
+  read_log.py -l                     利用可能なログファイルを一覧
+  read_log.py <filename_or_date>     特定のログを開く (例: "20260608-110910")
 """
 
 import sys, os, re, glob

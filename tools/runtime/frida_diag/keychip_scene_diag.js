@@ -1,13 +1,13 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DIAGNOSTIC: keychip 0949 scene — presence timing + scene-activation source. Logging only.
+// 診断: keychip 0949 scene — presence のタイミング + scene 起動元。観測のみ。
 //
-// "Error 0949 Keychip Not Found" = scene-type 0x66 → scene-ID 0x3b5 (=949), built by
-// autoscene builder FUN_00489130. keychip presence = FUN_0096c5d0() = (ctx+4 && ctx+8).
+// "Error 0949 Keychip Not Found" = scene-type 0x66 → scene-ID 0x3b5 (=949)。
+// autoscene builder FUN_00489130 が生成する。keychip presence = FUN_0096c5d0() = (ctx+4 && ctx+8)。
 //
-// Logs (a) FUN_0096c5d0 return transitions (does presence flicker to 0?) and
-// (b) first few autoscene builds of the keychip scene (param_2+0x10 == 0x66) with
-// backtrace → scene-activation source.
+// ログ対象: (a) FUN_0096c5d0 の戻り値遷移 (presence が一瞬 0 になるか?)、
+// (b) keychip scene の autoscene 生成 (param_2+0x10 == 0x66) の最初の数回と
+// その backtrace → scene 起動元。
 // ─────────────────────────────────────────────────────────────────────────────
 (function diagKeychipScene() {
     var nrsBase = null;
@@ -16,7 +16,7 @@
 
     var ctxPtr = nrsBase.add(0x8CF000);   // PTR_DAT_00ccf000
 
-    // (a) keychip presence FUN_0096c5d0 (RVA 0x56c5d0): log transitions of its result.
+    // (a) keychip presence FUN_0096c5d0 (RVA 0x56c5d0): 戻り値の遷移をログする。
     var lastPres = -1, presCalls = 0;
     try {
         Interceptor.attach(nrsBase.add(0x56C5D0), {
@@ -34,8 +34,8 @@
         logMsg('INIT_KCPRES', 'keychip presence FUN_0096c5d0 transition tracer hooked');
     } catch(e) { logMsg('WARN', 'diagKeychipScene 0x56C5D0: ' + e); }
 
-    // (b) autoscene builder FUN_00489130 (RVA 0x89130): when scene-type == 0x66 (keychip),
-    //     log a backtrace (first few) to locate what activated the keychip error scene.
+    // (b) autoscene builder FUN_00489130 (RVA 0x89130): scene-type == 0x66 (keychip) のとき、
+    //     keychip エラー scene を起動した箇所を特定するため backtrace をログする (最初の数回)。
     var kcSceneLogged = 0;
     try {
         Interceptor.attach(nrsBase.add(0x89130), {

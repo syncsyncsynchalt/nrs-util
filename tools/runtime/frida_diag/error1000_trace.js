@@ -1,16 +1,16 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Error 1000 trigger diagnostic — hook FUN_006f2730 (RVA 0x2f2730). Logging only.
+// Error 1000 トリガ診断 — FUN_006f2730 (RVA 0x2f2730) をフック。観測のみ。
 //
-// FUN_006f2730 = game-application error renderer:
-//   void FUN_006f2730(int param_1)   // cdecl, single stack arg
-//     msgPtr = *(param_1 + 0xc);     // char* message; NULL → default path
-//     errNo  = *(param_1 + 0x10);    // uint16 error number (read only if msgPtr!=0)
-//     flags  = *(param_1 + 0x16);    // byte; (&4)!=0 → "Caution" else "Error"
-//   msgPtr==0 → "Error 1000\n\nUnknown Application Error".
+// FUN_006f2730 = ゲームアプリのエラー描画関数:
+//   void FUN_006f2730(int param_1)   // cdecl、スタック引数 1 個
+//     msgPtr = *(param_1 + 0xc);     // char* message。NULL → デフォルト経路
+//     errNo  = *(param_1 + 0x10);    // uint16 エラー番号 (msgPtr!=0 のときだけ読む)
+//     flags  = *(param_1 + 0x16);    // byte。(&4)!=0 → "Caution" それ以外 "Error"
+//   msgPtr==0 → "Error 1000\n\nUnknown Application Error"。
 //
-// Caller is INDIRECT (fn ptr / handler table) → no static xref. Captures resolved
-// errNo + message + flags byte + fuzzy backtrace to identify the trigger site.
+// 呼び出し元は間接 (fn ptr / handler table) で static xref なし。確定した
+// errNo + message + flags byte + fuzzy backtrace を取得してトリガ箇所を特定する。
 // ─────────────────────────────────────────────────────────────────────────────
 (function hookError1000() {
     var nrsBase = null;
@@ -31,7 +31,7 @@
                     var kind    = (flags & 4) ? 'Caution' : 'Error';
                     var text    = msgPtr.isNull() ? '<NULL→Unknown Application Error>'
                                                   : msgPtr.readCString();
-                    var ec0 = desc.readU32();            // desc+0x00 = amlib errCode (0x15 was billing)
+                    var ec0 = desc.readU32();            // desc+0x00 = amlib errCode (0x15 は billing だった)
                     var ec4 = desc.add(4).readS32();     // desc+0x04
                     var ec8 = desc.add(8).readU32();     // desc+0x08
                     msg += ' desc=' + desc +
@@ -43,7 +43,7 @@
                            ' msg="' + text + '"';
                 } catch(e) { msg += ' (read err: ' + e + ')'; }
 
-                // Fuzzy backtrace to locate the indirect caller / raising path.
+                // 間接呼び出し元 / 発生経路を特定するための fuzzy backtrace。
                 try {
                     var bt = Thread.backtrace(this.context, Backtracer.FUZZY).slice(0, 12)
                         .map(function(f) {

@@ -50,10 +50,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pid", type=int, default=None)
     ap.add_argument("--duration", type=int, default=90)
-    ap.add_argument("--wait", type=int, default=60, help="seconds to wait for nrs.exe")
+    ap.add_argument("--wait", type=int, default=60, help="nrs.exe を待つ秒数")
     ap.add_argument("--trace-tp", action="store_true",
-                    help="also load tp_trace.js to observe TeknoParrot.dll behavior "
-                         "(VirtualProtect/GetProcAddress/LoadLibrary/Socket hooks)")
+                    help="tp_trace.js も併せてロードし TeknoParrot.dll の動作を観測する "
+                         "(VirtualProtect/GetProcAddress/LoadLibrary/Socket フック)")
     args = ap.parse_args()
 
     os.makedirs(CAPTURES_DIR, exist_ok=True)

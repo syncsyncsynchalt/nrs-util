@@ -26,7 +26,7 @@ def gf_mul128(a_in, b):
     return bytes(p)
 
 def _tweak(tweak_key, block_index):
-    # B = 8 zero bytes + 8-byte big-endian block_index ; t = tweak_key (x) B
+    # B = ゼロ8バイト + block_index の big-endian 8バイト ; t = tweak_key (x) B
     B = b'\x00'*8 + block_index.to_bytes(8, 'big')
     return gf_mul128(tweak_key, B)
 
@@ -44,19 +44,19 @@ def lrw_process(aes_key, tweak_key, data, block_index, decrypt):
         idx += 1
     return bytes(out)
 
-def lrw_decrypt_header(aes_key, tweak_key, data):  # header: blockIndex starts at 1
+def lrw_decrypt_header(aes_key, tweak_key, data):  # header: blockIndex は 1 始まり
     return lrw_process(aes_key, tweak_key, data, 1, True)
 
 def sector_to_block_index(sector_index, sector_offset=1):
     return ((sector_index - sector_offset) << 5) | 1
 
 if __name__ == '__main__':
-    # Official LRW test vector (EncryptionTest.cpp TestLegacyModes, AES)
-    buf = bytes(range(256)) * 4  # 1024 bytes, buf[i]=i&0xff
+    # 公式 LRW テストベクタ (EncryptionTest.cpp TestLegacyModes, AES)
+    buf = bytes(range(256)) * 4  # 1024 バイト, buf[i]=i&0xff
     buf = bytes((i & 0xff) for i in range(1024))
     iv  = bytes(range(32))
-    aes_key = buf[:32]          # AES-256 key
-    tweak_key = iv[:16]         # LRW tweak key (mode key)
+    aes_key = buf[:32]          # AES-256 鍵
+    tweak_key = iv[:16]         # LRW tweak 鍵 (mode key)
     secNo = 0x0234567890ABCDEF
     bi = sector_to_block_index(secNo, 1)
     ct = lrw_process(aes_key, tweak_key, buf, bi, decrypt=False)

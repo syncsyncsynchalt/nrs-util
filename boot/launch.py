@@ -1,5 +1,5 @@
-"""Standalone boot launcher for nrs.exe: spawns the game suspended, installs the boot
-hooks (assembled from MANIFEST.json), resumes, and auto-starts pcpa_server.py.
+"""nrs.exe のスタンドアロンブートランチャ: ゲームを suspended で spawn し、ブートフック
+（MANIFEST.json から組み立て）を導入、resume して pcpa_server.py を自動起動する。
 
 Usage:
   python boot/launch.py --spawn              # 起動+アタッチ（推奨）
@@ -11,7 +11,7 @@ Log: captures\frida-YYYYMMDD-HHMMSS.txt に自動保存
 import frida, sys, time, os, argparse, subprocess, threading
 
 def _safe_print(text, file=None):
-    """Print with UTF-8 fallback for Windows cp932 consoles."""
+    """Windows の cp932 コンソール向けに UTF-8 フォールバックして print する。"""
     f = file or sys.stdout
     try:
         print(text, file=f)
@@ -22,21 +22,21 @@ def _safe_print(text, file=None):
 CAPTURES_DIR   = os.path.join(os.path.dirname(__file__), "..", "captures")
 GAME_DIR       = os.environ.get("NRS_GAME_DIR", r"C:\src\bbs")
 GAME_EXE       = os.environ.get("NRS_EXE", os.path.join(GAME_DIR, "nrs.exe"))
-GAME_ARGS      = ["-wsvga", "-full", "-img"]  # -img: game mode (from game.bat via nrs.bat)
+GAME_ARGS      = ["-wsvga", "-full", "-img"]  # -img: game mode（nrs.bat 経由の game.bat より）
 PYTHON_EXE     = os.path.join(os.environ.get("LOCALAPPDATA", ""), r"Programs\Python\Python313\python.exe")
 PCPA_SERVER_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mxkeychip", "server", "pcpa_server.py")
 
-# FRIDA_SCRIPT is assembled by concatenating the boot modules listed in MANIFEST.json
-# in load order (lib/base.js first). MANIFEST.json is the single source of truth for
-# boot composition (which modules, in what order, with persistence/rva/ssot metadata).
-# Edit a subsystem in boot/<subsys>/<file>.js; add/remove a module in MANIFEST.json.
+# FRIDA_SCRIPT は MANIFEST.json に列挙されたブートモジュールを load 順（lib/base.js が先頭）に
+# 連結して組み立てる。MANIFEST.json はブート構成（どのモジュールを、どの順で、persistence/rva/ssot
+# メタデータ付きで）の単一ソース。サブシステムは boot/<subsys>/<file>.js を編集し、モジュールの
+# 追加/削除は MANIFEST.json で行う。
 _BOOT_DIR = os.path.dirname(os.path.abspath(__file__))
 _MANIFEST = os.path.join(_BOOT_DIR, "MANIFEST.json")
 
 def _patch_table_literal():
-    """Raw JSON text of boot/patches.json (the data-driven pure-byte patch table),
-    injected into the script as `var __PATCH_TABLE__ = [...]` right after lib/base.js
-    so lib/patch_table.js can apply it. Absent/empty file -> '[]'."""
+    """boot/patches.json（データ駆動の純バイトパッチテーブル）の生 JSON テキスト。
+    lib/patch_table.js が適用できるよう、lib/base.js の直後に `var __PATCH_TABLE__ = [...]` として
+    スクリプトへ注入する。ファイルが無い/空なら '[]'。"""
     p = os.path.join(_BOOT_DIR, "patches.json")
     try:
         with open(p, encoding="utf-8") as f:
@@ -53,8 +53,8 @@ def _load_boot_script():
         mod_path = os.path.join(_BOOT_DIR, *entry["module"].split("/"))
         with open(mod_path, encoding="utf-8", newline="") as mf:
             parts.append(mf.read())
-        # Inject the patch table right after base.js (keeps base.js's 'use strict'
-        # first, and defines __PATCH_TABLE__ before lib/patch_table.js consumes it).
+        # パッチテーブルを base.js の直後に注入する（base.js の 'use strict' を先頭に保ちつつ、
+        # lib/patch_table.js が消費する前に __PATCH_TABLE__ を定義する）。
         if entry["module"] == "lib/base.js":
             parts.append("\nvar __PATCH_TABLE__ = " + _patch_table_literal() + ";\n")
     return "".join(parts)
@@ -92,7 +92,7 @@ def wait_for_process(name: str = "nrs.exe", timeout: int = 15) -> int | None:
 
 
 def _is_pcpa_running() -> bool:
-    """Return True if pcpa_server.py is already listening (port 40106 open)."""
+    """pcpa_server.py が既に listen している（ポート 40106 が open）なら True を返す。"""
     import socket
     try:
         s = socket.create_connection(("127.0.0.1", 40106), timeout=0.3)
@@ -103,7 +103,7 @@ def _is_pcpa_running() -> bool:
 
 
 def _ensure_pcpa_server() -> subprocess.Popen | None:
-    """Start pcpa_server.py in the background if not already running. Returns Popen or None."""
+    """未起動なら pcpa_server.py をバックグラウンドで起動する。Popen または None を返す。"""
     if _is_pcpa_running():
         print("[*] pcpa_server already running — skipping auto-start.")
         return None
@@ -113,7 +113,7 @@ def _ensure_pcpa_server() -> subprocess.Popen | None:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    # Wait up to 3s for the server to open its port
+    # サーバがポートを open するまで最大 3 秒待つ
     deadline = time.time() + 3.0
     while time.time() < deadline:
         if _is_pcpa_running():
@@ -125,20 +125,20 @@ def _ensure_pcpa_server() -> subprocess.Popen | None:
 
 
 def _nrs_env() -> dict:
-    """Environment for spawning nrs.exe: lib/win32/bin on PATH + captures dir hint."""
+    """nrs.exe を spawn する際の環境: PATH に lib/win32/bin + captures ディレクトリのヒント。"""
     lib_path = os.path.join(GAME_DIR, "lib", "win32", "bin")
     env = os.environ.copy()
     env["PATH"] = lib_path + os.pathsep + env.get("PATH", "")
-    # exit.js (boot/app) reads this to write captures/exit_debug.txt without hardcoding a repo path.
+    # exit.js (boot/app) はこれを読み、リポジトリパスをハードコードせずに captures/exit_debug.txt を書く。
     env["NRS_CAPTURES_DIR"] = os.path.abspath(CAPTURES_DIR)
     return env
 
 
 def _spawn_nrs_suspended() -> int:
     """
-    Kill any running nrs.exe, then spawn a fresh one SUSPENDED via frida.spawn().
-    Returns the pid. The process is frozen at its entry point until frida.resume(pid),
-    so every boot hook is installed before any game code (incl. amlib/device init) runs.
+    実行中の nrs.exe を kill してから、frida.spawn() で新しいものを SUSPENDED で spawn する。
+    pid を返す。プロセスは frida.resume(pid) まで entry point で凍結されるため、ゲームコード
+    （amlib/device init を含む）が走る前に全ブートフックが導入される。
     """
     subprocess.run(['taskkill', '/F', '/IM', 'nrs.exe'], capture_output=True)
     time.sleep(0.3)
@@ -148,13 +148,13 @@ def _spawn_nrs_suspended() -> int:
 
 def _attach_and_monitor(pid: int, log_path: str, duration: int | None, resume: bool = False) -> None:
     """
-    Attach Frida to `pid`, run the script, then wait for `duration` seconds
-    (or until the process exits / Ctrl+C).
+    `pid` に Frida を attach してスクリプトを走らせ、`duration` 秒（またはプロセス終了 / Ctrl+C まで）
+    待つ。
 
-    If `resume` is True the pid was created suspended via frida.spawn(): we install
-    ALL hooks first, then frida.resume(pid) so no game code runs un-instrumented.
-    This is required for device/init emulation that the game touches at the very
-    first instructions (e.g. amSramInit/amEepromInit → mxsram/mxsmbus).
+    `resume` が True なら、その pid は frida.spawn() で suspended に作られている: 先に全フックを
+    導入してから frida.resume(pid) し、計測なしでゲームコードが走らないようにする。
+    これは、ゲームが最初の命令で触る device/init エミュレーション（例: amSramInit/amEepromInit →
+    mxsram/mxsmbus）に必要。
     """
     detached_event = threading.Event()
 
@@ -169,7 +169,7 @@ def _attach_and_monitor(pid: int, log_path: str, duration: int | None, resume: b
         scr.on('message', on_message(log_path))
         scr.load()
         if resume:
-            # Hooks are live — let the suspended process run.
+            # フックは live — suspended のプロセスを走らせる。
             frida.resume(pid)
             print(f"[*] Resumed PID={pid} (hooks installed before any game code ran)")
 
@@ -193,11 +193,11 @@ def _attach_and_monitor(pid: int, log_path: str, duration: int | None, resume: b
 
 def run(pid: int | None = None, spawn: bool = False, duration: int | None = None) -> None:
     """
-    Single-phase RingEdge boot: current builds boot straight to ATTRACT with no
-    early auth-exit, so we spawn nrs.exe once and monitor it.
+    単一フェーズの RingEdge ブート: 現行ビルドは early auth-exit 無しで ATTRACT まで直行するため、
+    nrs.exe を 1 回 spawn して監視する。
 
-    If spawn=True we start pcpa_server (if needed) and spawn nrs.exe.
-    If pid is given we just attach to an existing process (manual mode).
+    spawn=True なら（必要に応じて）pcpa_server を起動し nrs.exe を spawn する。
+    pid が与えられた場合は既存プロセスへ attach するだけ（手動モード）。
     """
     os.makedirs(CAPTURES_DIR, exist_ok=True)
     log_path = os.path.join(CAPTURES_DIR, f"frida-{time.strftime('%Y%m%d-%H%M%S')}.txt")
@@ -207,7 +207,7 @@ def run(pid: int | None = None, spawn: bool = False, duration: int | None = None
     print(f"[*] Log: {log_path}")
 
     if pid:
-        # Manual attach — single session, no relaunch logic
+        # 手動 attach — 単一セッション、再起動ロジック無し
         print(f"[*] Attaching to PID={pid}")
         _attach_and_monitor(pid, log_path, duration)
         print(f"[*] Done. Log: {log_path}")
@@ -224,8 +224,8 @@ def run(pid: int | None = None, spawn: bool = False, duration: int | None = None
         print(f"[*] Done. Log: {log_path}")
         return
 
-    # ── Spawn mode (suspended) ──────────────────────────────────────────────
-    # Ensure pcpa_server.py is running before nrs.exe tries to connect
+    # ── Spawn モード (suspended) ──────────────────────────────────────────────
+    # nrs.exe が接続を試みる前に pcpa_server.py が起動していることを保証する
     pcpa_proc = _ensure_pcpa_server()
 
     print("[*] Spawning nrs.exe SUSPENDED (frida.spawn)...")
@@ -238,21 +238,21 @@ def run(pid: int | None = None, spawn: bool = False, duration: int | None = None
     boot_dur = duration or 120
     print(f"[*] Attaching to PID={pid}, installing hooks, then resuming (up to {boot_dur}s)")
     _attach_and_monitor(pid, log_path, duration=boot_dur, resume=True)
-    # nrs.exe keeps running after Frida detaches; watch the screen for Error 09xx.
+    # Frida detach 後も nrs.exe は走り続ける。画面で Error 09xx を監視する。
     print(f"[*] Done (process left running). Log: {log_path}")
 
 
 if __name__ == "__main__":
-    # Windows console is cp932; em-dash etc. in prints would raise UnicodeEncodeError
-    # and abort the run. Replace unencodable chars instead of crashing.
+    # Windows コンソールは cp932。print 中の em-dash 等は UnicodeEncodeError を起こし run を中断させる。
+    # クラッシュさせず、エンコードできない文字を置換する。
     try:
         sys.stdout.reconfigure(errors='replace')
         sys.stderr.reconfigure(errors='replace')
     except Exception:
         pass
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument('--pid',      type=int,  help='attach to existing PID')
-    p.add_argument('--spawn',    action='store_true', help='spawn nrs.exe suspended via frida.spawn (recommended)')
-    p.add_argument('--duration', type=int,  help='capture duration in seconds (default: until Ctrl+C)')
+    p.add_argument('--pid',      type=int,  help='既存の PID に attach する')
+    p.add_argument('--spawn',    action='store_true', help='frida.spawn で nrs.exe を suspended で spawn する（推奨）')
+    p.add_argument('--duration', type=int,  help='キャプチャ秒数（デフォルト: Ctrl+C まで）')
     a = p.parse_args()
     run(pid=a.pid, spawn=a.spawn, duration=a.duration)

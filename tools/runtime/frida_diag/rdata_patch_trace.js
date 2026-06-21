@@ -1,8 +1,8 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
-// VirtualProtect .rdata patch reader
-// When TeknoParrot patches a 4-byte .rdata entry (func ptr overwrite),
-// we read the NEW value right after the write.
+// VirtualProtect .rdata パッチ読み取り
+// TeknoParrot が .rdata の 4 バイトエントリ (関数ポインタ) を書き換えたとき、
+// 書き込み直後に新しい値を読む。
 // ─────────────────────────────────────────────────────────────────────────────
 (function hookRdataPatch() {
     var RDATA_PATCH_RVAS = [
@@ -12,13 +12,13 @@
     var nrsBase = null;
     try { nrsBase = Process.getModuleByName('nrs.exe').base; }
     catch(e) { return; }
-    // Convert to set of VAs for quick lookup
+    // 高速ルックアップ用に VA の集合に変換する
     var patchSet = {};
     RDATA_PATCH_RVAS.forEach(function(rva) {
         patchSet['0x' + (nrsBase.add(rva).toUInt32()).toString(16)] = rva;
     });
 
-    // Enhance VirtualProtect to read the patched value for known .rdata sites
+    // 既知の .rdata サイトについて、VirtualProtect でパッチ後の値を読む
     var vpOrig = Module.getGlobalExportByName('VirtualProtect');
     Interceptor.attach(vpOrig, {
         onEnter: function(args) {

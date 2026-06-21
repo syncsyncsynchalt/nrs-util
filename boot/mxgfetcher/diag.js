@@ -15,13 +15,13 @@
                 logMsg(tag, '#' + n + ' ' + label + '=' + ret.toInt32());
         } }, tag);
     }
-    tap(0x974B00, 'DIAG_974B00', 5,  200, 'ret');        // get_status result parser
-    tap(0x974820, 'DIAG_974820', 10, 200, 'statusInt');  // status string→int
+    tap(0x974B00, 'DIAG_974B00', 5,  200, 'ret');        // get_status result パーサ
+    tap(0x974820, 'DIAG_974820', 10, 200, 'statusInt');  // status 文字列→int
     tap(0x975A70, 'DIAG_975A70', 5,  200, 'ret');        // get_status sender
-    tap(0x975320, 'DIAG_975320', 10, 100, 'ret');        // TCP sub-state 4 parser
-    tap(0x974560, 'DIAG_974560', 10, 200, 'ret');        // pause done-check (called from 0x975830)
+    tap(0x975320, 'DIAG_975320', 10, 100, 'ret');        // TCP sub-state 4 パーサ
+    tap(0x974560, 'DIAG_974560', 10, 200, 'ret');        // pause done チェック（0x975830 から呼ばれる）
 
-    // 0x975700 — TCP SM step (busy=1 path); also reads sub-state [0x1286FF4].
+    // 0x975700 — TCP SM step（busy=1 経路）。sub-state [0x1286FF4] も読む。
     var n7 = 0;
     hook(0x975700, { onLeave: function (ret) {
         n7++;
@@ -30,7 +30,7 @@
             logMsg('DIAG_975700', '#' + n7 + ' subState=' + subState + ' ret=' + ret.toInt32());
     } }, 'DIAG_975700');
 
-    // 0x975830 — state-9 pause request SM; logs arg + stream ptr/busy.
+    // 0x975830 — state-9 pause request SM。arg + stream ptr/busy をログする。
     var n8 = 0;
     hook(0x975830, {
         onEnter: function (args) {

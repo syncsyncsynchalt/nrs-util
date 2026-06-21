@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
-"""check_doc_sync.py — boot/MANIFEST.json <-> boot modules <-> FACTS integrity + dialect guard.
+"""check_doc_sync.py — boot/MANIFEST.json <-> boot モジュール <-> FACTS の整合 + dialect guard。
 
-Single address dialect: STATIC VA (Ghidra ImageBase 0x400000) everywhere a human/tool
-touches an address. RVA exists only inside the va() helper in lib/base.js.
+単一番地方言: 人間/ツールが番地を触るところは全て STATIC VA（Ghidra ImageBase 0x400000）。
+RVA は lib/base.js の va() helper の内部にのみ存在する。
 
-HARD checks (exit 1 on failure):
-  1. load_order[0] == "lib/base.js"  (defines va()/logMsg used by every module).
-  2. each module file exists.
-  3. each MANIFEST 'va' (static VA) appears verbatim in its module file (drift detection).
-  4. DIALECT GUARD: no module addresses nrs.exe by raw module base — i.e. no
-     `nrsBase.add(` / `nb.add(` call. All addressing must go through va(). (lib/base.js,
-     which defines the helper, is exempt.)
-  5. known_names.json keys are static VAs (>= ImageBase). Catches an accidental RVA entry.
-  6. MANIFEST 'va' values are plausible static VAs (>= ImageBase). Catches a stale RVA.
+HARD チェック（失敗で exit 1）:
+  1. load_order[0] == "lib/base.js"（全モジュールが使う va()/logMsg を定義）。
+  2. 各モジュールファイルが存在する。
+  3. 各 MANIFEST 'va'（static VA）が当該モジュールファイルに逐語で現れる（drift 検出）。
+  4. DIALECT GUARD: 生のモジュール base で nrs.exe を番地参照しない — つまり
+     `nrsBase.add(` / `nb.add(` 呼び出しが無い。番地参照は全て va() 経由。（helper を
+     定義する lib/base.js は除外。）
+  5. known_names.json のキーが static VA（>= ImageBase）。誤った RVA エントリを検出。
+  6. MANIFEST 'va' の値が妥当な static VA（>= ImageBase）。stale な RVA を検出。
 
-SOFT checks (warn only):
-  7. each 'va' is documented somewhere under FACTS.md / ARCH.md.
-  8. persistence plausibility (Interceptor/timer vs persistent; patchCode vs monitor).
+SOFT チェック（warn のみ）:
+  7. 各 'va' が FACTS.md / ARCH.md のどこかに記載されている。
+  8. persistence の妥当性（Interceptor/timer と persistent、patchCode と monitor）。
 
-Usage:  python tools/hygiene/check_doc_sync.py [--quiet] [--warn-only]
+使い方:  python tools/hygiene/check_doc_sync.py [--quiet] [--warn-only]
 """
 import io, os, re, json, sys
 
@@ -62,7 +62,7 @@ def main():
     lo = manifest["load_order"]
     errors, warns = [], []
 
-    # 1. base first
+    # 1. base が先頭
     if not lo or lo[0]["module"] != "lib/base.js":
         errors.append("load_order[0] must be 'lib/base.js' (defines va()/logMsg)")
 
@@ -77,22 +77,22 @@ def main():
         with open(path, encoding="utf-8") as f:
             text = f.read()
         fhex = hexset(text)
-        # 4. dialect guard (exempt the helper definition file)
+        # 4. dialect guard（helper 定義ファイルは除外）
         if mod != "lib/base.js" and RAW_BASE_ADD.search(text):
             errors.append(f"{mod}: raw nrsBase/nb.add( — address via va(staticVA) instead")
         for tok in e.get("va", []):
             addr = int(tok, 16)
-            # 6. plausibility
+            # 6. 妥当性
             if addr < IMAGE_BASE:
                 errors.append(f"{mod}: MANIFEST va {tok} < ImageBase (stale RVA?)")
-            # 3. present in module (exact static VA — one dialect, no tolerance)
+            # 3. モジュール内に存在（厳密な static VA — 単一方言・許容なし）
             if addr not in fhex:
                 errors.append(f"{mod}: MANIFEST va {tok} not found in module file (drift)")
             elif addr not in facts_hex:
                 warns.append(f"{mod}: va {tok} not documented in any FACTS.md/ARCH.md")
-        # 8. persistence plausibility. Recognize BOTH raw primitives and the base.js
-        # helper idioms (hook()/watch()=runtime, patch()=persistent byte write), so the
-        # heuristic doesn't go blind once modules are declarativized.
+        # 8. persistence の妥当性。生のプリミティブと base.js の helper イディオム
+        # （hook()/watch()=runtime、patch()=persistent なバイト書き込み）の両方を認識し、
+        # モジュールが宣言的になっても heuristic が機能しなくならないようにする。
         persist = e.get("persistence")
         has_runtime = (re.search(r"Interceptor\.(attach|replace)\(", text) is not None
                        or "setInterval(" in text or "setTimeout(" in text
@@ -103,7 +103,7 @@ def main():
         if persist == "monitor" and has_patch:
             warns.append(f"{mod}: persistence=monitor but has patchCode/patch() (not log-only?)")
 
-    # 5. known_names static-VA keys
+    # 5. known_names の static-VA キー
     try:
         with open(KNOWN_NAMES, encoding="utf-8") as f:
             kn = json.load(f)
@@ -114,8 +114,8 @@ def main():
     except FileNotFoundError:
         warns.append("known_names.json not found")
 
-    # 9. patches.json (data-driven pure-byte patch table) — validate each row's va is a
-    # static VA, unique, and its bytes spec is resolvable (mnemonic | {retImm/retN} | hex).
+    # 9. patches.json（データ駆動の純バイト patch テーブル）— 各行の va が static VA で
+    # 一意であり、bytes 指定が解決可能（mnemonic | {retImm/retN} | hex）かを検証する。
     patches_path = os.path.join(BOOT, "patches.json")
     n_patches = 0
     try:

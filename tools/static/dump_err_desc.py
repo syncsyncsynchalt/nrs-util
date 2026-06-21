@@ -1,14 +1,14 @@
 #!/usr/bin/env python
-"""One-shot: attach to a running nrs.exe and dump the Error-1000 scene descriptor.
+"""ワンショット: 稼働中の nrs.exe に attach し、Error-1000 シーンの descriptor をダンプする。
 
-The error renderer FUN_006f2730 reads:
-  desc+0xc  = char* message (shown when non-null)
-  desc+0x10 = uint16 error number
-  desc+0x16 = byte flags (&4 -> "Caution")
-Dumps the descriptor bytes + the message string it points to.
+エラー描画関数 FUN_006f2730 は次を読む:
+  desc+0xc  = char* message（非 null のとき表示）
+  desc+0x10 = uint16 エラー番号
+  desc+0x16 = byte flags（&4 -> "Caution"）
+descriptor のバイト列と、それが指す message 文字列をダンプする。
 
-Usage:  python tools/static/dump_err_desc.py <pid> <desc_addr_hex>
-Example: python tools/static/dump_err_desc.py 1044 0x1e28ce50
+使い方:  python tools/static/dump_err_desc.py <pid> <desc_addr_hex>
+例:      python tools/static/dump_err_desc.py 1044 0x1e28ce50
 """
 import sys
 import frida

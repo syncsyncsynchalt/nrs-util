@@ -1,20 +1,20 @@
-"""session_summary.py — One-line-per-concern summary of latest Frida session log.
+"""session_summary.py — 最新の Frida セッションログを観点ごとに 1 行で要約する.
 
 Usage:
-  python session_summary.py              # summarize latest captures/frida-*.txt
-  python session_summary.py <logfile>    # summarize specific log
+  python session_summary.py              # 最新の captures/frida-*.txt を要約
+  python session_summary.py <logfile>    # 特定のログを要約
 """
 import sys, os, re, glob, collections, io
 from pathlib import Path
 
-# Force UTF-8 output on Windows (default cp932 can't encode many Unicode chars)
+# Windows で UTF-8 出力を強制 (デフォルトの cp932 は多くの Unicode 文字を encode できない)
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'captures')
 PATTERN = os.path.join(LOG_DIR, 'frida-[0-9]*.txt')
 
-# Log format: "[TAG                     ] message"
+# ログ形式: "[TAG                     ] message"
 RE_LINE  = re.compile(r'^\[([^\]]+)\]\s+(.*)')
 RE_HLSM  = re.compile(r'state=(\d+)', re.I)
 RE_ERR   = re.compile(r'ERR_DISPLAY|Error \d{4}|EXCEPTION_HANDLER|EXCEPTION_ACCESS|TerminateProcess')
@@ -44,7 +44,7 @@ def summarize(path):
     line_count = 0
 
     for raw in lines:
-        # Check for header timestamp
+        # ヘッダのタイムスタンプを確認
         hm = RE_HEADER.match(raw)
         if hm and start_time is None:
             start_time = hm.group(1)
@@ -56,7 +56,7 @@ def summarize(path):
         tag, msg = m.group(1).strip(), m.group(2)
         line_count += 1
 
-        # HLSM state transitions (only from HLSM tag)
+        # HLSM 状態遷移 (HLSM タグの行のみ)
         if 'HLSM' in tag:
             hm = RE_HLSM.search(msg)
             if hm:
@@ -64,23 +64,23 @@ def summarize(path):
                 if not hlsm_states or hlsm_states[-1] != st:
                     hlsm_states.append(st)
 
-        # Errors
+        # エラー
         if RE_ERR.search(msg):
             errors.append(msg[:80])
 
-        # PCPA requests
+        # PCPA リクエスト
         for rm in RE_PCPA_REQ.finditer(msg):
             pcpa_reqs[rm.group(1)] += 1
 
-        # Boot / attract
+        # ブート / アトラクト
         if RE_BOOT.search(msg):
             boot_done = True
 
-        # get_status fix fires
+        # get_status fix の発火回数
         if RE_GETSTATUS_FIX.search(msg):
             getstatus_fixed += 1
 
-        # Exit signal
+        # 終了シグナル
         if 'TerminateProcess' in msg or 'CRASH' in msg:
             exit_reason = 'crash'
         elif 'DETACH' in tag or 'duration' in msg.lower():
@@ -90,7 +90,7 @@ def summarize(path):
     if start_time:
         duration = f'started {start_time}'
 
-    # Format HLSM path
+    # HLSM の経路を整形
     if hlsm_states:
         counts = []
         i = 0
@@ -108,11 +108,11 @@ def summarize(path):
     else:
         hlsm_str = 'none'
 
-    # Format PCPA
+    # PCPA を整形
     top_reqs = sorted(pcpa_reqs.items(), key=lambda x: -x[1])[:6]
     pcpa_str = '  '.join(f'{k}×{v}' for k, v in top_reqs) or 'none'
 
-    # Next action hint
+    # 次のアクションのヒント
     if boot_done:
         next_hint = 'ATTRACT reached!'
     elif 'get_status' in pcpa_reqs and pcpa_reqs['get_status'] > 10 and getstatus_fixed == 0:

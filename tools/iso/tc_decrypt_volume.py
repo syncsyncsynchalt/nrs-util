@@ -28,7 +28,7 @@ def pool(password, keyfile):
     return bytes(q)
 
 def lrw_decrypt_header(aes_key, tweak_key, data):
-    # header: block index starts at 1 (slow path, only 28 blocks)
+    # header: block index は 1 始まり (低速パスだが 28 ブロックのみ)
     ecb=AES.new(aes_key,AES.MODE_ECB); out=bytearray(); idx=1
     for b in range(len(data)//16):
         B=b'\x00'*8+idx.to_bytes(8,'big'); t=gf_mul128(tweak_key,B)
@@ -47,7 +47,7 @@ mk=d[192:192+256]; m_tweak=mk[0:16]; m_aes=mk[32:64]
 print("master AES:",binascii.hexlify(m_aes).decode(),flush=True)
 ecb=AES.new(m_aes,AES.MODE_ECB)
 
-# Precompute M[k] = K2 (x) 2^k  (block_index is 64-bit; cover k=0..47)
+# M[k] = K2 (x) 2^k を事前計算 (block_index は 64bit; k=0..47 をカバー)
 M=[]
 for k in range(48):
     B=b'\x00'*8 + (1<<k).to_bytes(8,'big')
@@ -61,12 +61,12 @@ def tweak_int(n):
 
 import time
 out=open(OUT,'wb')
-data_sectors=NSEC-1  # sector 0 = header; data starts at partition sector 1
-CHUNK=8192  # sectors per read
+data_sectors=NSEC-1  # sector 0 = header; データはパーティション sector 1 から
+CHUNK=8192  # 1回の読み込みあたりのセクタ数
 written=0
 f.seek((LBA+1)*512)
-n=1                    # continuous LRW block index across whole data (starts at 1)
-T=tweak_int(n)        # current tweak as int (for block n)
+n=1                    # データ全体を通した連続 LRW block index (1 始まり)
+T=tweak_int(n)        # 現在の tweak を int で保持 (block n 用)
 t0=time.time()
 while written < data_sectors:
     nsec=min(CHUNK, data_sectors-written)
@@ -74,7 +74,7 @@ while written < data_sectors:
     if len(buf)<nsec*512: nsec=len(buf)//512
     ob=bytearray(nsec*512)
     for s in range(nsec):
-        # build 512-byte tweak stream (32 blocks) incrementally
+        # 512バイトの tweak ストリーム (32 ブロック) を逐次構築
         tws=bytearray(512)
         for j in range(32):
             tws[j*16:j*16+16]=T.to_bytes(16,'big')

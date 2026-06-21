@@ -5,46 +5,46 @@
 // role:        HLSM state7→8 force (0x457FE0 onEnter) + result/parser patchCodes + 0x98ADC0 recv-completion fix。load-bearing のみ（純診断は diag.js）。runtime; detach で revert。Pairs with mxgfetcher/recv.js。
 
 // ─────────────────────────────────────────────────────────────────────────────
-// amGfetcher get_status SM force (HLSM driver). load-bearing patches only.
+// amGfetcher get_status SM の強制（HLSM ドライバ）。load-bearing なパッチのみ。
 //
-// NOTE: 0x97718E / 0x9771CB are strcmp-interior bytes in FUN_00977050 (amInstall channel),
-// not the [0x1287038] init-flag CMP — do not hook them (0x97718E cannot be intercepted
-// mid-instruction; 0x9771CB has no xref). No init-flag force is needed to reach ATTRACT.
+// NOTE: 0x97718E / 0x9771CB は FUN_00977050（amInstall チャネル）内の strcmp 途中バイトで、
+// [0x1287038] の init-flag CMP ではない — フックしない（0x97718E は命令途中で intercept
+// 不可、0x9771CB は xref が無い）。ATTRACT 到達に init-flag の強制は不要。
 // ─────────────────────────────────────────────────────────────────────────────
 (function patchAmGfetcher() {
     var nrsBase = null;
     try { nrsBase = Process.getModuleByName('nrs.exe').base; }
     catch(e) { logMsg('WARN', 'patchAmGfetcher: nrs.exe not found'); return; }
 
-    // Shared boot-complete flag: set when HLSM detects state-9→0 transition.
-    // Used by FUN_6FF980 patch to switch from "boot" (return 1) to "attract" (return 0).
+    // 共有の boot 完了フラグ: HLSM が state-9→0 遷移を検出したら立てる。
+    // FUN_6FF980 パッチが「boot」（return 1）から「attract」（return 0）へ切り替えるのに使う。
     var bootDone = 0;
 
-    // ── Diagnostic: FUN_00457FE0 (high-level SM) ──────────────────────────────
-    // Logs every state transition; also every 500 ticks for heartbeat.
+    // ── 診断: FUN_00457FE0（high-level SM） ──────────────────────────────
+    // state 遷移ごと、加えて heartbeat として 500 tick ごとにログする。
     var hlsmCount = 0;
     var hlsmLastState = -1;
     try {
         Interceptor.attach(va(0x457FE0), {
             onEnter: function(args) {
                 this.p1 = args[0];
-                // State-machine forced transitions (applied before function body runs):
-                //   param_1[0x14] = current state (prev tick value, first-switch not yet run)
-                //   param_1[0x18] = next state (what first-switch will set 0x14 to this tick)
-                // We target param_1[0x18] so we act on the state that WILL execute this tick.
+                // ステートマシンの強制遷移（関数本体が走る前に適用）:
+                //   param_1[0x14] = 現在の state（前 tick の値。first-switch がまだ走っていない）
+                //   param_1[0x18] = 次の state（first-switch がこの tick で 0x14 に設定する値）
+                // param_1[0x18] を狙い、この tick で実行されることになる state に作用する。
                 try {
                     var nextSt0 = this.p1.add(0x18).readU32();
                     var tcpBsy  = this.p1.add(3).readU8();
-                    // Force state7 → state8: case=7 runs param_1[1]=1 side effects that
-                    // crash when P-ras state isn't fully set up. Bypassing case=7 entirely
-                    // (writing next=8 before first-switch runs) is the safe path.
+                    // state7 → state8 を強制: case=7 は param_1[1]=1 の副作用を走らせ、P-ras
+                    // state が完全に整っていないとクラッシュする。case=7 を丸ごと飛ばす
+                    // （first-switch が走る前に next=8 を書く）のが安全な経路。
                     if (nextSt0 === 7 && tcpBsy === 0) {
                         this.p1.add(0x18).writeU32(8);
                     }
-                    // State 4: do NOT force isrelease=1.
-                    // Path A (FUN_004573E0=1 AND isrelease=1) → auth-exit (WRONG for game mode).
-                    // Path B (FUN_004573E0=0 OR isrelease!=1) → state 5 → get_status → game mode.
-                    // Without real keychip, FUN_004573E0 returns 0 naturally → path B is correct.
+                    // state 4: isrelease=1 を強制しない。
+                    // Path A（FUN_004573E0=1 かつ isrelease=1）→ auth-exit（game mode では誤り）。
+                    // Path B（FUN_004573E0=0 または isrelease!=1）→ state 5 → get_status → game mode。
+                    // 実 keychip が無ければ FUN_004573E0 は自然に 0 を返す → Path B が正しい。
                 } catch(e) {}
             },
             onLeave: function(ret) {
@@ -55,12 +55,12 @@
                     var tcpBusy  = this.p1.add(3).readU8();
                     var statInt  = this.p1.add(0xb4).readS32();
                     var result   = this.p1.add(4).readS32();
-                    var released = this.p1.add(2).readU8();   // param_1[2]: auth-done flag
-                    var isrelRes = this.p1.add(0x24).readS32(); // param_1+0x24: isrelease result
+                    var released = this.p1.add(2).readU8();   // param_1[2]: auth 完了フラグ
+                    var isrelRes = this.p1.add(0x24).readS32(); // param_1+0x24: isrelease の結果
                     var changed  = (state !== hlsmLastState);
-                    // Detect state-9 success (next=0): boot sequence complete.
-                    // FUN_006FF980 is patchCode'd to always return 1; NOP at 0x458271
-                    // (applied in GETSTATUS_FIX) prevents state=0 from re-booting.
+                    // state-9 成功（next=0）を検出: boot シーケンス完了。
+                    // FUN_006FF980 は常に 1 を返すよう patchCode 済み。0x458271 の NOP
+                    // （GETSTATUS_FIX で適用）が state=0 の再 boot を防ぐ。
                     if (state === 9 && nextSt === 0 && !bootDone) {
                         bootDone = 1;
                         logMsg('HLSM', 'BOOT_DONE: state-9 set next=0, attract mode armed');
@@ -79,13 +79,14 @@
         logMsg('INIT_DIAG', 'FUN_00457FE0 (high-level SM) hooked');
     } catch(e) { logMsg('WARN', 'FUN_00457FE0 hook: ' + e); }
 
-    // ── patchCode: response parsers → always return 0 (persistent, survives Frida detach) ─
-    // These parsers call FUN_58AAE0 to find fields in the PCPA response buffer. With the
-    // emulated responses, FUN_58AAE0 returns null → parsers would return -5 (error), making
-    // pcpaSetSendPacket return 0 → [0x1286FEC] check → Error 0903 "Wrong Region" in attract
-    // mode. They must return 0. patchCode (not Interceptor.replace) keeps this across detach.
+    // ── patchCode: レスポンスパーサ群 → 常に return 0（永続。Frida detach 後も有効） ─
+    // これらのパーサは PCPA レスポンスバッファ内のフィールドを探すのに FUN_58AAE0 を呼ぶ。
+    // エミュレートしたレスポンスでは FUN_58AAE0 が null を返す → パーサが -5（エラー）を返し
+    // pcpaSetSendPacket が 0 を返す → [0x1286FEC] チェック → attract モードで Error 0903
+    // "Wrong Region"。よって 0 を返す必要がある。Interceptor.replace ではなく patchCode で
+    // detach をまたいで維持する。
     //
-    // Bytes: xor eax, eax (33 C0) + ret (C3) = 3 bytes → cdecl, return 0.
+    // バイト列: xor eax, eax (33 C0) + ret (C3) = 3 バイト → cdecl, return 0。
     var retZero3 = [0x33, 0xC0, 0xC3];
     [
         { name: 'FUN_009746C0 (resume parser)',       va: 0x9746C0 },
@@ -101,18 +102,18 @@
         } catch(ex) { logMsg('WARN', e.name + ' patchCode: ' + ex); }
     });
 
-    // FUN_004573E0: NOT patched.
-    // State4 path-A (FUN_004573E0=1 AND isrelease=1) → sets released=1 → foreground.next=1 → EXIT.
-    // State4 path-B (FUN_004573E0=0 OR isrelease!=1) → state5 → get_status → game mode.
-    // Without keychip, FUN_004573E0 returns 0 naturally → path-B → game mode. Correct!
+    // FUN_004573E0: パッチしない。
+    // state4 path-A（FUN_004573E0=1 かつ isrelease=1）→ released=1 → foreground.next=1 → EXIT。
+    // state4 path-B（FUN_004573E0=0 または isrelease!=1）→ state5 → get_status → game mode。
+    // keychip が無ければ FUN_004573E0 は自然に 0 を返す → path-B → game mode。正しい。
     logMsg('PATCH', 'FUN_004573E0 not patched: natural 0 = state4 path-B = game mode');
 
-    // ── patchCode: FUN_006FF980 (HLSM state-0 gate) → always return 1 (persistent) ─
-    // hlsm_region_check() checks DAT_0210aed0/aed2/aed4 flags (0 without hardware).
-    // Must return 1 for state=0 condition-A to fire on initial boot (ctx.next=1).
-    // The NOP at 0x458271 (applied in GETSTATUS_FIX, state=5→6) blocks the ctx.next=1
-    // write → state=0 stays in attract regardless of return value.
-    // uint hlsm_region_check(void): no args → ret (C3). mov eax,1; ret = 6 bytes.
+    // ── patchCode: FUN_006FF980（HLSM state-0 ゲート） → 常に return 1（永続） ─
+    // hlsm_region_check() は DAT_0210aed0/aed2/aed4 フラグを見る（ハードウェアが無いと 0）。
+    // 初回 boot で state=0 の condition-A を発火させる（ctx.next=1）には 1 を返す必要がある。
+    // 0x458271 の NOP（GETSTATUS_FIX で state=5→6 時に適用）が ctx.next=1 の書き込みを
+    // 塞ぐ → return 値に関わらず state=0 は attract に留まる。
+    // uint hlsm_region_check(void): 引数なし → ret (C3)。mov eax,1; ret = 6 バイト。
     try {
         Memory.patchCode(va(0x6FF980), 6, function(c) {
             c.writeByteArray([0xB8, 0x01, 0x00, 0x00, 0x00, 0xC3]); // mov eax,1; ret
@@ -121,37 +122,36 @@
         logMsg('PATCH', 'FUN_006FF980 → patchCode(mov eax,1; ret) persistent, verify=' + ok980);
     } catch(e) { logMsg('WARN', '0x6FF980 patchCode: ' + e); }
 
-    // NOTE: state7→8 is driven by the 0x457FE0 onEnter direct-write (next=8 before case=7
-    // runs). FUN_006FF650 (0x6FF650) is intentionally NOT patched — it is redundant while
-    // attached (boot reaches ATTRACT before detach).
+    // NOTE: state7→8 は 0x457FE0 onEnter の直接書き込み（case=7 が走る前に next=8）で駆動する。
+    // FUN_006FF650（0x6FF650）は意図的にパッチしない — attach 中は冗長（detach 前に boot が
+    // ATTRACT へ到達する）。
 
-    // ── FUN_009744F0 (TCP SM done check) → patchCode (persistent, hang-safe) ─
-    // When sub-state 8 cleanup closes the stream ([0x1286FF0]=0), the native 9744F0
-    // sees [0x1286FF0]=0 and returns -3 instead of [0x1287000]=0, corrupting
-    // [ebp+4]=result to -3. With result=-3, the indirect table at 0x45829C maps to
-    // the error-counter path (0x45805F), not the advance path (0x458043), so state=5
-    // never advances to state=6; the same -3 is stored by FUN_00458330 into
-    // esi[4]/esi[8] (error result) → Error 0903 path. patchCode (not
-    // Interceptor.replace) keeps this across Frida detach.
+    // ── FUN_009744F0（TCP SM done チェック） → patchCode（永続・hang-safe） ─
+    // sub-state 8 のクリーンアップがストリームを閉じる（[0x1286FF0]=0）と、native 9744F0 は
+    // [0x1286FF0]=0 を見て [0x1287000]=0 ではなく -3 を返し、[ebp+4]=result を -3 に壊す。
+    // result=-3 だと 0x45829C の間接テーブルが error-counter 経路（0x45805F）にマップし、
+    // advance 経路（0x458043）に行かないため state=5 が state=6 へ進まない。同じ -3 が
+    // FUN_00458330 によって esi[4]/esi[8]（error result）に格納される → Error 0903 経路。
+    // Interceptor.replace ではなく patchCode で Frida detach をまたいで維持する。
     //
-    // Hang-safe: when the stream is closed ([0x1286FF0]==0) [0x1287000] may stay
-    // non-zero. A naive "return 1=pending while [0x1287000]!=0" would spin 9744F0
-    // forever → FUN_00458330 loop never exits → HLSM stall → watchdog "Error 1000".
-    // So gate on the stream pointer first: if [0x1286FF0]==0 (stream closed),
-    // return 0 (done) and reset sub-state. Native logic:
-    //     if ([0x1286FF0] == 0)      { [0x1286FF4]=0; return 0; }  // stream closed → done
+    // hang-safe: ストリームが閉じている（[0x1286FF0]==0）とき [0x1287000] は非ゼロのまま
+    // 残りうる。素朴に「[0x1287000]!=0 の間 return 1=pending」とすると 9744F0 が永久に回り
+    // → FUN_00458330 のループが抜けない → HLSM ストール → watchdog "Error 1000"。
+    // そこでまずストリームポインタで分岐する: [0x1286FF0]==0（ストリーム閉）なら 0（done）を
+    // 返し sub-state をリセットする。native ロジック:
+    //     if ([0x1286FF0] == 0)      { [0x1286FF4]=0; return 0; }  // ストリーム閉 → done
     //     if ([0x1287000] != 0)      { return 1; }                 // pending
     //     [0x1286FF4]=0; return 0;                                 // done → reset
-    // ecx = &[0x1286FF0]; [ecx+0x10]=[0x1287000]; [ecx+4]=[0x1286FF4] (contiguous).
-    // NOTE: no Interceptor.attach at this address (its trampoline restore on detach
-    // would overwrite the patchCode). Compatible with GETSTATUS_FIX forcing [0x1287000]=0.
-    // Hand-assembled (project convention: writeByteArray, not X86Writer). 30 bytes,
-    // fits the 32B function frame:
+    // ecx = &[0x1286FF0]; [ecx+0x10]=[0x1287000]; [ecx+4]=[0x1286FF4]（連続配置）。
+    // NOTE: この番地に Interceptor.attach はしない（detach 時の trampoline 復元が patchCode を
+    // 上書きする）。GETSTATUS_FIX が [0x1287000]=0 を強制するのと両立する。
+    // ハンドアセンブル（プロジェクト規約: X86Writer ではなく writeByteArray）。30 バイト、
+    // 32B の関数フレームに収まる:
     //   off  bytes            insn
     //    0   B9 <ff0Addr>     mov ecx, &[0x1286FF0]
     //    5   8B 01            mov eax, [ecx]        ; stream ptr
     //    7   85 C0            test eax, eax
-    //    9   74 07            jz  +7 (->18 ret0_reset) ; stream closed → done
+    //    9   74 07            jz  +7 (->18 ret0_reset) ; ストリーム閉 → done
     //   11   8B 41 10         mov eax, [ecx+0x10]   ; r=[0x1287000]
     //   14   85 C0            test eax, eax
     //   16   75 06            jnz +6 (->24 pending)
@@ -174,14 +174,13 @@
         logMsg('PATCH', '0x9744F0 patchCode (persistent hang-safe, ' + code.length + 'b): stream==0→ret0; else r!=0→ret1; r==0→reset+ret0');
     } catch(e) { logMsg('WARN', '0x9744F0 patchCode: ' + e); }
 
-    // ── FUN_00975830 pause SM strBusy stuck ─────────────────────────────
-    // The pre-HLSM init call to 975830(arg=0) does a full sync pause exchange and
-    // leaves [0x1286FF4]=1. The state=9 handler calls 975830(arg=1), sees strBusy=1
-    // and would return 1 (busy) forever.
-    // Bytes at 0x975857: B8 01 00 00 00 (mov eax,1) C2 04 00 (ret 4) → busy path.
-    // Patch 0x975857 with EB 06 (jmp to 0x97585F) → bypass strBusy check, always
-    // proceed to the send path (0x98AB20 sync exchange). Send returns 0 → state=9
-    // handler sets next=0, tcpBusy=1 → attract mode.
+    // ── FUN_00975830 pause SM の strBusy スタック ─────────────────────────────
+    // HLSM 前の init で呼ばれる 975830(arg=0) はフルの同期 pause 交換を行い [0x1286FF4]=1 を
+    // 残す。state=9 ハンドラは 975830(arg=1) を呼び、strBusy=1 を見て永久に 1（busy）を返す。
+    // 0x975857 のバイト列: B8 01 00 00 00 (mov eax,1) C2 04 00 (ret 4) → busy 経路。
+    // 0x975857 を EB 06（jmp to 0x97585F）でパッチ → strBusy チェックを飛ばし、常に send 経路
+    // （0x98AB20 同期交換）へ進む。Send が 0 を返す → state=9 ハンドラが next=0, tcpBusy=1 を
+    // 設定 → attract モード。
     try {
         Memory.patchCode(va(0x975857), 2, function(c) {
             c.writeByteArray([0xEB, 0x06]); // jmp to 0x97585F (send path)
@@ -189,14 +188,14 @@
         logMsg('PATCH', '0x975857 patched: bypass strBusy check in pause SM');
     } catch(e) { logMsg('WARN', '0x975857 patch: ' + e); }
 
-    // ── 0x98ADC0 (PCPA recv poll) → force ret=1 after get_status recv ──
-    // Port 40113 uses raw winsock recv(). 0x98DAB0 never returns 1 for the raw recv
-    // path → 0x98ADC0 always returns 0 → [stream+0x21C] stays 0 → 0x98B260 returns 0
-    // → 0x574510 pending-path fires → SM re-sends forever.
-    // After raw recv() captures a get_status response (flag set in recv hook), force
-    // 0x98ADC0 to return 1 once → 0x98B260 writes [stream+0x21C]=1 → returns 1 →
-    // 0x574510 takes the done-path (je 0x574533) → SM advances cleanly.
-    // Static analysis: 0x98ADC0 input=1 → jump table index 17 → 0x98ADD2 = ret 1.
+    // ── 0x98ADC0（PCPA recv poll） → get_status recv 後に ret=1 を強制 ──
+    // ポート 40113 は raw winsock recv() を使う。raw recv 経路では 0x98DAB0 が 1 を返さない
+    // → 0x98ADC0 が常に 0 を返す → [stream+0x21C] が 0 のまま → 0x98B260 が 0 を返す
+    // → 0x574510 の pending 経路が発火 → SM が永久に再送する。
+    // raw recv() が get_status レスポンスを捕捉したら（recv フックでフラグを立てる）、
+    // 0x98ADC0 に一度だけ 1 を返させる → 0x98B260 が [stream+0x21C]=1 を書く → 1 を返す
+    // → 0x574510 が done 経路（je 0x574533）を取る → SM がきれいに進む。
+    // 静的解析: 0x98ADC0 入力=1 → ジャンプテーブル index 17 → 0x98ADD2 = ret 1。
     try {
         Interceptor.attach(va(0x98ADC0), {
             onLeave: function(r) {
@@ -204,26 +203,26 @@
                     logMsg('GETSTATUS_FIX', '0x98ADC0 forced 0→1 (was ' + r.toInt32() + ')');
                     r.replace(1);
                     getStatusRecvDone = false;
-                    // Force [0x1287000]=0 so replaced FUN_009744F0 returns 0 same tick.
+                    // [0x1287000]=0 を強制し、置換した FUN_009744F0 が同 tick で 0 を返すようにする。
                     try {
                         va(0x1287000).writeU32(0);  // [0x1287000] = 0
                         logMsg('GETSTATUS_FIX', '[0x1287000] forced 0 → next 9744F0 returns 0');
                     } catch(e) { logMsg('WARN', 'GETSTATUS_FIX [1287000]: ' + e); }
-                    // NOTE: FUN_006FF980 NOT patched here (Interceptor.replace at same addr would
-                    // overwrite patchCode on detach). Re-boot is prevented by NOP at 0x458271 below.
-                    // After detach: FUN_006FF980 returns 0 naturally (hardware flags not set) so
-                    // state=0 condition A is false anyway. NOP handles conditions B and C.
-                    // Permanently NOP state=0 advance: patch ctx.next=1 write at 0x458271.
-                    // The state=0 handler (at 0x458237) has 3 re-boot conditions:
-                    //   A. FUN_006FF980()!=0 (fixed above)
-                    //   B. DAT_0210B508!=0  ([0x210B508] set during init, persists after detach)
-                    //   C. counter >= threshold (ctx+0x10 increments each tick; timed re-boot)
-                    // All 3 converge at: 0x458271: 89 5D 18 (mov [ebp+0x18], ebx → ctx.next=1).
-                    // NOP×3 prevents any condition from advancing state=0 → state=1 after detach.
-                    // Applied here (state=5→6 transition) = after initial boot, before attract.
+                    // NOTE: ここで FUN_006FF980 はパッチしない（同番地への Interceptor.replace が
+                    // detach 時に patchCode を上書きする）。再 boot は下の 0x458271 の NOP で防ぐ。
+                    // detach 後: FUN_006FF980 は自然に 0 を返す（ハードウェアフラグ未設定）ので
+                    // state=0 condition A はいずれにせよ false。NOP が condition B と C を処理する。
+                    // state=0 の advance を恒久的に NOP 化: 0x458271 の ctx.next=1 書き込みをパッチ。
+                    // state=0 ハンドラ（0x458237）には 3 つの再 boot 条件がある:
+                    //   A. FUN_006FF980()!=0（上で修正済み）
+                    //   B. DAT_0210B508!=0（[0x210B508] は init 中に設定され detach 後も残る）
+                    //   C. counter >= threshold（ctx+0x10 は毎 tick 増加。時間経過で再 boot）
+                    // 3 つは全て 0x458271: 89 5D 18 (mov [ebp+0x18], ebx → ctx.next=1) に収束する。
+                    // NOP×3 で、detach 後にどの条件も state=0 → state=1 へ進めないようにする。
+                    // ここ（state=5→6 遷移）で適用 = 初回 boot 後・attract 前。
                     try {
                         Memory.patchCode(va(0x458271), 3, function(c) {
-                            c.writeByteArray([0x90, 0x90, 0x90]); // NOP: block ctx.next=1
+                            c.writeByteArray([0x90, 0x90, 0x90]); // NOP: ctx.next=1 を塞ぐ
                         });
                         logMsg('GETSTATUS_FIX', '0x458271 NOP×3 → state=0 advance blocked (DAT_210B508 + counter-timeout fix)');
                     } catch(e) { logMsg('WARN', 'GETSTATUS_FIX patchCode 458271: ' + e); }

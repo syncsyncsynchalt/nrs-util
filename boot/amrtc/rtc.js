@@ -5,11 +5,11 @@
 // role:        amRtc サーバ時刻→PC ローカル時刻 / SetServerTime 無視。
 
 // ─────────────────────────────────────────────────────────────────────────────
-// amRtcGetServerTime (0x974040) bypass — return local system time instead of RingEdge
-// RTC. Without an RTC server the function returns -3 (no driver). Hook onLeave: on
-// failure call GetLocalTime, pack it into the amRtcTime struct at outPtr, force ret→0.
+// amRtcGetServerTime (0x974040) bypass — RingEdge RTC ではなく PC のローカルシステム時刻を返す。
+// RTC サーバが無いとこの関数は -3（ドライバ無し）を返す。onLeave フックで、失敗時に GetLocalTime を
+// 呼んで outPtr の amRtcTime 構造体へ詰め、ret を 0 に強制する。
 //
-// amRtcTime struct layout (from function body at 0x973FC0):
+// amRtcTime 構造体レイアウト（0x973FC0 の関数本体より）:
 //   +0x00  WORD  year
 //   +0x02  BYTE  month (1-12)
 //   +0x03  BYTE  day   (1-31)

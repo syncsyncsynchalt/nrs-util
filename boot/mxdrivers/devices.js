@@ -5,22 +5,22 @@
 // role:        mxsram/mxsuperio/mxhwreset/jvs_pipe/mxsmbus を CreateFile/NtCreateFile/DeviceIoControl フックでダミー成功。mxsram(micetools mxsram.c) + mxsmbus(AT24C64AN eeprom, SetupAPI 発見) は micetools 準拠で data/nvram/{sram,eeprom}.bin に永続。runtime
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RingEdge device emulation — mxhwreset / mxsuperio / mxsram / jvs_pipe
+// RingEdge デバイスエミュレーション — mxhwreset / mxsuperio / mxsram / jvs_pipe
 //
-// TeknoParrot emulates these four devices. Without emulation, CreateFile calls
-// return INVALID_HANDLE_VALUE and the game either logs errors or crashes when
-// it tries DeviceIoControl on invalid handles.
+// TeknoParrot はこの4デバイスをエミュレートする。エミュレートしないと CreateFile が
+// INVALID_HANDLE_VALUE を返し、ゲームは無効ハンドルへの DeviceIoControl で
+// エラーを記録するか、クラッシュする。
 //
-// Strategy: intercept CreateFileA and CreateFileW (Win32) plus NtCreateFile
-// (native API — the game uses this for device paths). For matching paths, return
-// a dummy event handle and record it. Any DeviceIoControl on a dummy handle is
-// intercepted and made to return success with a zeroed output buffer.
+// 方針: CreateFileA と CreateFileW（Win32）に加え NtCreateFile（native API。
+// ゲームはデバイスパスにこれを使う）をフックする。一致するパスにはダミーの event
+// ハンドルを返して記録する。ダミーハンドルへの DeviceIoControl はすべてフックし、
+// 出力バッファをゼロ埋めして成功を返す。
 // ─────────────────────────────────────────────────────────────────────────────
 (function emulateRingEdgeDevices() {
     var NULL_PTR = ptr(0);
 
-    // Create four dummy event handles (unnamed auto-reset events).
-    // Using real OS handles avoids kernel complaints about unknown handle types.
+    // ダミーの event ハンドルを4つ作る（無名の auto-reset event）。
+    // 実 OS ハンドルを使うと、未知のハンドル型に対するカーネルの苦情を避けられる。
     var CreateEventA;
     try { CreateEventA = new NativeFunction(
         Module.getGlobalExportByName('CreateEventA'),
@@ -32,14 +32,14 @@
         mxhwreset: CreateEventA(NULL_PTR, 0, 0, NULL_PTR),
         mxsuperio: CreateEventA(NULL_PTR, 0, 0, NULL_PTR),
         mxsram:    CreateEventA(NULL_PTR, 0, 0, NULL_PTR),
-        mxsmbus:   CreateEventA(NULL_PTR, 0, 0, NULL_PTR),  // amEeprom (AT24C64AN) backing
+        mxsmbus:   CreateEventA(NULL_PTR, 0, 0, NULL_PTR),  // amEeprom (AT24C64AN) のバッキング
     };
     logMsg('RINGEDGE', 'fake handles: jvs_pipe=' + FAKE.jvs_pipe +
            ' mxhwreset=' + FAKE.mxhwreset +
            ' mxsuperio=' + FAKE.mxsuperio + ' mxsram=' + FAKE.mxsram +
            ' mxsmbus=' + FAKE.mxsmbus);
 
-    // Set of fake handle string representations for fast lookup
+    // 高速 lookup 用に、fake ハンドルの文字列表現の集合を作る
     var fakeSet = {};
     Object.keys(FAKE).forEach(function(k) { fakeSet[FAKE[k].toString()] = k; });
 
@@ -53,7 +53,7 @@
         return null;
     }
 
-    // ── Win32 CreateFileA hook (additional attachment — existing hookFn logs first) ──
+    // ── Win32 CreateFileA フック（追加の attach。既存の hookFn が先にログ出力する） ──
     var cfaAddr;
     try { cfaAddr = Module.getGlobalExportByName('CreateFileA'); } catch(e) {}
     if (cfaAddr) {
@@ -70,7 +70,7 @@
         });
     }
 
-    // ── Win32 CreateFileW hook ──
+    // ── Win32 CreateFileW フック ──
     var cfwAddr;
     try { cfwAddr = Module.getGlobalExportByName('CreateFileW'); } catch(e) {}
     if (cfwAddr) {
@@ -87,15 +87,15 @@
         });
     }
 
-    // ── NtCreateFile hook — diagnostic + emulation ──
-    // The game uses NtCreateFile (ntdll) directly for some device paths, bypassing
-    // the Win32 CreateFile layer that our other hooks intercept.
+    // ── NtCreateFile フック — 診断 + エミュレーション ──
+    // ゲームは一部のデバイスパスで NtCreateFile（ntdll）を直接使い、他のフックが捕える
+    // Win32 CreateFile 層をバイパスする。
     var ntcfAddr;
     try { ntcfAddr = Module.getGlobalExportByName('NtCreateFile'); } catch(e) {}
     if (ntcfAddr) {
         Interceptor.attach(ntcfAddr, {
             onEnter: function(args) {
-                // args[0] = PHANDLE FileHandle (output)
+                // args[0] = PHANDLE FileHandle（出力）
                 // args[2] = POBJECT_ATTRIBUTES { ULONG Length; HANDLE Root; PUNICODE_STRING Name; ... }
                 this.hPtr = args[0];
                 this.dev = null;
@@ -103,22 +103,22 @@
                 try {
                     var oa = args[2];
                     var uni = oa.add(8).readPointer();   // PUNICODE_STRING ObjectName
-                    var len = uni.readU16();              // Length in bytes
-                    var buf = uni.add(4).readPointer();  // Buffer (wchar_t*)
+                    var len = uni.readU16();              // Length（バイト数）
+                    var buf = uni.add(4).readPointer();  // Buffer（wchar_t*）
                     this.path = buf.readUtf16String(Math.floor(len / 2));
                     this.dev = classify(this.path);
                 } catch(e) {}
             },
             onLeave: function(ret) {
                 if (this.dev) {
-                    // Override: write fake handle into *FileHandle, return STATUS_SUCCESS
+                    // 上書き: *FileHandle に fake ハンドルを書き込み、STATUS_SUCCESS を返す
                     try { this.hPtr.writePointer(FAKE[this.dev]); } catch(e) {}
                     ret.replace(0);  // STATUS_SUCCESS
                     logMsg('RINGEDGE', 'NtCreateFile "' + this.path + '" -> ' + this.dev +
                            ' fake_h=' + FAKE[this.dev]);
                 } else if (this.path) {
-                    // Diagnostic: log anything else that wasn't caught by CreateFileA/W
-                    // (only log device paths, skip normal files)
+                    // 診断: CreateFileA/W で捕えられなかったものを記録する
+                    // （デバイスパスのみログ。通常ファイルはスキップ）
                     var p = (this.path || '').toLowerCase();
                     if (p.indexOf('\\\\.\\') >= 0 || p.indexOf('\\device\\') >= 0 ||
                         p.indexOf('\\??\\') >= 0 || p.indexOf('namedpipe') >= 0) {
@@ -133,27 +133,26 @@
         logMsg('RINGEDGE', 'NtCreateFile hook installed (diagnostic + emulation)');
     }
 
-    // ── SetupAPI hooks: make MXSMBUS_GUID device discoverable (for amEeprom) ───────
-    // amEepromCreateDeviceFile (nrs FUN_00984910) finds the SMBUS device by interface
-    // GUID via SetupDi*, then CreateFileA(DevicePath). The real device is absent, so we
-    // advertise a single fake interface whose DevicePath is "\\.\mxsmbus" (caught by the
-    // CreateFile hooks above). We ONLY intervene for MXSMBUS_GUID / our fake HDEVINFO;
-    // every other SetupDi* call passes through untouched (USB/input enumeration intact).
-    // GUID {5C49E1FE-3FEC-4B8D-A4B5-76BE7025D842} — confirmed in the real mxsmbus.sys.
+    // ── SetupAPI フック: MXSMBUS_GUID デバイスを発見可能にする（amEeprom 用） ───────
+    // amEepromCreateDeviceFile（nrs FUN_00984910）は SetupDi* でインタフェース GUID から
+    // SMBUS デバイスを探し、CreateFileA(DevicePath) を呼ぶ。実デバイスは無いので、DevicePath が
+    // "\\.\mxsmbus"（上の CreateFile フックが捕える）の fake インタフェースを1つだけ広告する。
+    // 介入するのは MXSMBUS_GUID / 自前の fake HDEVINFO のときだけで、他の SetupDi* 呼び出しは
+    // 素通しする（USB/入力の列挙は無傷）。
+    // GUID {5C49E1FE-3FEC-4B8D-A4B5-76BE7025D842} — 実 mxsmbus.sys で確認済み。
     //
-    // ENABLE_EEPROM gate: when true the eeprom emulation below is active (amEepromInit
-    // succeeds, amBackup eeprom records read/write/persist, is broken=0) and the MXSMBUS
-    // device is discoverable. When false the device stays undiscoverable, amEepromInit
-    // fails (records -3, harmless). Making eeprom succeed advances the game into the full
-    // "real cabinet" operation path; its self-shutdown before ATTRACT is disarmed by
-    // app/no_selfshutdown.js.
+    // ENABLE_EEPROM ゲート: true のとき下の eeprom エミュレーションが有効になり（amEepromInit
+    // が成功、amBackup eeprom レコードの read/write/persist、is broken=0）、MXSMBUS デバイスが
+    // 発見可能になる。false のときデバイスは発見不能のまま、amEepromInit は失敗する（-3 を記録、
+    // 無害）。eeprom を成功させると、ゲームは「実キャビネット」運用パスへ進む。ATTRACT 前の
+    // 自己シャットダウンは app/no_selfshutdown.js で無効化する。
     var ENABLE_EEPROM = true;
     var MXSMBUS_GUID = [0xFE,0xE1,0x49,0x5C, 0xEC,0x3F, 0x8D,0x4B,
                         0xA4,0xB5,0x76,0xBE,0x70,0x25,0xD8,0x42];
-    var FAKE_HDEVINFO = ptr('0x5b115b00');  // sentinel HDEVINFO for our fake set
+    var FAKE_HDEVINFO = ptr('0x5b115b00');  // 自前の fake set 用の番兵 HDEVINFO
     var fakeDevInfoSet = {};
     function guidIsMxsmbus(p) {
-        if (!ENABLE_EEPROM) return false;   // gate: device stays undiscoverable when off
+        if (!ENABLE_EEPROM) return false;   // ゲート: off のときデバイスは発見不能のまま
         try { for (var i = 0; i < 16; i++) { if (p.add(i).readU8() !== MXSMBUS_GUID[i]) return false; } return true; }
         catch (e) { return false; }
     }
@@ -183,11 +182,11 @@
         function (ret) {
             if (!this.isMx) return;
             if (this.idx === 0) {
-                // Minimal SP_DEVICE_INTERFACE_DATA fill: keep cbSize, set Flags=SPINT_ACTIVE(1).
+                // SP_DEVICE_INTERFACE_DATA の最小限の充填: cbSize は残し Flags=SPINT_ACTIVE(1) を設定。
                 try { if (this.ifd && !this.ifd.isNull()) this.ifd.add(20).writeU32(1); } catch (e) {}
                 ret.replace(1);  // TRUE
             } else {
-                ret.replace(0);  // FALSE — no more interfaces (ERROR_NO_MORE_ITEMS)
+                ret.replace(0);  // FALSE — これ以上インタフェースは無い（ERROR_NO_MORE_ITEMS）
             }
         });
 
@@ -197,7 +196,7 @@
         function (ret) {
             if (!this.isMx) return;
             // SP_DEVICE_INTERFACE_DETAIL_DATA_A: { DWORD cbSize; CHAR DevicePath[]; }
-            // Path starts at +4 (cbSize already 5 from caller). Caller buffer = 0x400.
+            // パスは +4 から始まる（cbSize は呼び出し側が既に 5 を入れている）。呼び出し側バッファ = 0x400。
             try {
                 if (this.detail && !this.detail.isNull() && this.size >= 16) {
                     this.detail.add(4).writeAnsiString('\\\\.\\mxsmbus');
@@ -212,23 +211,23 @@
         function (args) { this.isMx = fakeDevInfoSet[args[0].toString()] === true; },
         function (ret) { if (this.isMx) ret.replace(1); });
 
-    // ── mxsram file-backed SRAM buffer (micetools dll/drivers/mxsram.c: 1024×2084, 0xFF init) ──
-    // micetools maps SRAM_PATH via open_mapped_file (persistent). We mirror that: a 2 MB RAM
-    // buffer loaded from / written through to data/nvram/sram.bin (mmap-equivalent auto-sync).
-    var SRAM_SIZE = 1024 * 2084;  // 2,134,016 bytes
+    // ── mxsram のファイルバックな SRAM バッファ（micetools dll/drivers/mxsram.c: 1024×2084, 0xFF 初期化）──
+    // micetools は SRAM_PATH を open_mapped_file で map する（永続）。それを踏襲し、data/nvram/sram.bin
+    // から読み込み・書き戻す 2 MB の RAM バッファを使う（mmap 相当の自動同期）。
+    var SRAM_SIZE = 1024 * 2084;  // 2,134,016 バイト
     var SRAM_PATH = 'C:\\src\\nrs-util\\data\\nvram\\sram.bin';
     var sramBuf = Memory.alloc(SRAM_SIZE);
     for (var si = 0; si < SRAM_SIZE; si += 65536) {
         sramBuf.add(si).writeByteArray(new Array(Math.min(65536, SRAM_SIZE - si)).fill(0xFF));
     }
-    // Per-handle file pointer (micetools: ctx->m_Pointer). Keyed by handle string.
+    // ハンドルごとのファイルポインタ（micetools: ctx->m_Pointer）。ハンドル文字列をキーにする。
     var sramPtrs = {};
     function sramPtrGet(h)    { var k = h.toString(); return sramPtrs[k] || 0; }
     function sramPtrSet(h, v) { sramPtrs[h.toString()] = v; }
 
-    // ── #1 persistence: native CreateFileW/ReadFile/WriteFile/SetFilePointer on the backing file ─
-    // Win32 NativeFunctions (kernel32). Errors degrade to volatile + WARN, matching micetools'
-    // "SRAM will be memory-backed and not syncronised!" fallback.
+    // ── #1 永続化: バッキングファイルへの native CreateFileW/ReadFile/WriteFile/SetFilePointer ─
+    // Win32 NativeFunctions（kernel32）。エラー時は volatile + WARN に縮退し、micetools の
+    // "SRAM will be memory-backed and not syncronised!" フォールバックに合わせる。
     var GENERIC_RW = 0xC0000000, OPEN_ALWAYS = 4, FILE_ATTR_NORMAL = 0x80, FILE_BEGIN = 0, FILE_END = 2;
     var SRAM_DIR = 'C:\\src\\nrs-util\\data\\nvram';
     var _CreateFileW, _ReadFile, _WriteFile, _SetFilePointer, _CreateDirectoryW, _GetLastError;
@@ -250,30 +249,30 @@
     var sramBackFile = ptr(-1);   // INVALID_HANDLE_VALUE
     function sramBackOpen() {
         if (!_CreateFileW) return;
-        try { _CreateDirectoryW(Memory.allocUtf16String(SRAM_DIR), ptr(0)); } catch (e) {}  // ignore if exists
+        try { _CreateDirectoryW(Memory.allocUtf16String(SRAM_DIR), ptr(0)); } catch (e) {}  // 既存なら無視
         var wpath = Memory.allocUtf16String(SRAM_PATH);
-        // OPEN_ALWAYS: opens or creates. GetLastError == ERROR_ALREADY_EXISTS → file pre-existed.
+        // OPEN_ALWAYS: 開くか作成する。GetLastError == ERROR_ALREADY_EXISTS → ファイルは既存だった。
         sramBackFile = _CreateFileW(wpath, GENERIC_RW, 0, ptr(0), OPEN_ALWAYS, FILE_ATTR_NORMAL, ptr(0));
         if (sramBackFile.equals(ptr(-1))) {
             logMsg('RINGEDGE', 'mxsram: SRAM will be memory-backed and not syncronised! (open failed)');
             sramBackFile = ptr(-1); return;
         }
-        // Reliable existence via file size (fresh OPEN_ALWAYS file has size 0).
+        // ファイルサイズで存在を確実に判定する（新規の OPEN_ALWAYS ファイルはサイズ 0）。
         var existedBefore = (_SetFilePointer(sramBackFile, 0, ptr(0), FILE_END) >>> 0) >= SRAM_SIZE;
         var nbuf = Memory.alloc(4);
         if (existedBefore) {
-            // Load existing image into sramBuf.
+            // 既存イメージを sramBuf に読み込む。
             _SetFilePointer(sramBackFile, 0, ptr(0), FILE_BEGIN);
             var ok = _ReadFile(sramBackFile, sramBuf, SRAM_SIZE, nbuf, ptr(0));
             logMsg('RINGEDGE', 'mxsram: loaded sram.bin (' + (ok ? nbuf.readU32() : 0) + ' bytes)');
         } else {
-            // New file: persist the 0xFF-initialised buffer (micetools build_sram → 0xFF).
+            // 新規ファイル: 0xFF 初期化済みバッファを永続化する（micetools build_sram → 0xFF）。
             _SetFilePointer(sramBackFile, 0, ptr(0), FILE_BEGIN);
             _WriteFile(sramBackFile, sramBuf, SRAM_SIZE, nbuf, ptr(0));
             logMsg('RINGEDGE', 'mxsram: created blank sram.bin (' + SRAM_SIZE + ' bytes, 0xFF)');
         }
     }
-    // Write-through a region [off, off+len) of sramBuf to the backing file.
+    // sramBuf の領域 [off, off+len) をバッキングファイルへ write-through する。
     function sramBackWrite(off, len) {
         if (sramBackFile.equals(ptr(-1)) || !_WriteFile) return;
         try {
@@ -284,15 +283,15 @@
     }
     sramBackOpen();
 
-    // ── AT24C64AN EEPROM store (micetools smb_at24c64an.c: 8 KB, 0xFF init, file-backed) ──
-    // amEeprom (SMBUS vaddr 0x57) backing for amBackup STATIC/CREDIT/NETWORK/HISTORY records.
-    var EEPROM_SIZE = 0x2000;  // 8 KB (64 kbit)
+    // ── AT24C64AN EEPROM ストア（micetools smb_at24c64an.c: 8 KB, 0xFF 初期化, ファイルバック）──
+    // amBackup の STATIC/CREDIT/NETWORK/HISTORY レコード用の amEeprom（SMBUS vaddr 0x57）バッキング。
+    var EEPROM_SIZE = 0x2000;  // 8 KB（64 kbit）
     var EEPROM_PATH = 'C:\\src\\nrs-util\\data\\nvram\\eeprom.bin';
     var eepromBuf = Memory.alloc(EEPROM_SIZE);
     eepromBuf.writeByteArray(new Array(EEPROM_SIZE).fill(0xFF));
     var eepromBackFile = ptr(-1);
 
-    // amiCrc32R == standard CRC32 (poly 0xEDB88320, init/final ~). micetools lib/ami/amiCrc.c.
+    // amiCrc32R == 標準 CRC32（poly 0xEDB88320, init/final ~）。micetools lib/ami/amiCrc.c。
     function crc32(arr) {
         var crc = 0xFFFFFFFF;
         for (var i = 0; i < arr.length; i++) {
@@ -302,17 +301,17 @@
         }
         return (~crc) >>> 0;
     }
-    // Seed the AM_SYSDATAwH_STATIC record (region/serial) with a valid CRC at REG+DUP.
-    // Blank (0xFF) STATIC makes amlib_storage_init_all reset region→0 and take the
-    // "serial != SBVA" reformat path (FUN_0089d090) → boot stalls. Real hardware has a
-    // factory STATIC record; we mirror micetools build_eeprom for STATIC only (others self-heal).
-    // Layout: m_Crc[4] Rsv[8] m_Region@0xC m_Rental@0xD Rsv@0xE m_strSerialId[17]@0xF (size 0x20).
+    // AM_SYSDATAwH_STATIC レコード（region/serial）を REG+DUP に有効な CRC 付きで seed する。
+    // 空（0xFF）の STATIC だと amlib_storage_init_all が region→0 にリセットし、
+    // "serial != SBVA" の再フォーマットパス（FUN_0089d090）に入る → ブート停止。実機には
+    // 工場出荷の STATIC レコードがある。micetools build_eeprom を STATIC のみ踏襲する（他は自己修復）。
+    // レイアウト: m_Crc[4] Rsv[8] m_Region@0xC m_Rental@0xD Rsv@0xE m_strSerialId[17]@0xF（size 0x20）。
     function seedStatic(off) {
         var rec = new Array(0x20); for (var i = 0; i < 0x20; i++) rec[i] = 0;
-        rec[0xC] = 0x01;                     // m_Region = JAPAN (matches region.js forced value)
-        var serial = 'SBVA-01A99999999';     // must start with "SBVA" (binary strncmp check)
+        rec[0xC] = 0x01;                     // m_Region = JAPAN（region.js の強制値と一致）
+        var serial = 'SBVA-01A99999999';     // "SBVA" で始まる必要あり（バイナリの strncmp チェック）
         for (var s = 0; s < serial.length && s < 16; s++) rec[0xF + s] = serial.charCodeAt(s);
-        var crc = crc32(rec.slice(4));       // CRC over bytes [4..0x20)
+        var crc = crc32(rec.slice(4));       // バイト [4..0x20) の CRC
         rec[0] = crc & 0xff; rec[1] = (crc >>> 8) & 0xff; rec[2] = (crc >>> 16) & 0xff; rec[3] = (crc >>> 24) & 0xff;
         eepromBuf.add(off).writeByteArray(rec);
     }
@@ -324,8 +323,8 @@
             logMsg('RINGEDGE', 'mxsmbus: EEPROM will be memory-backed and not syncronised! (open failed)');
             eepromBackFile = ptr(-1); return;
         }
-        // Reliable existence check via file size (GetLastError-after-NativeFunction is
-        // unreliable under Frida): a fresh OPEN_ALWAYS file has size 0.
+        // ファイルサイズで存在を確実に判定する（NativeFunction 後の GetLastError は Frida 下では
+        // 信頼できない）: 新規の OPEN_ALWAYS ファイルはサイズ 0。
         var existed = (_SetFilePointer(eepromBackFile, 0, ptr(0), FILE_END) >>> 0) >= EEPROM_SIZE;
         var nbuf = Memory.alloc(4);
         _SetFilePointer(eepromBackFile, 0, ptr(0), FILE_BEGIN);
@@ -333,7 +332,7 @@
             var ok = _ReadFile(eepromBackFile, eepromBuf, EEPROM_SIZE, nbuf, ptr(0));
             logMsg('RINGEDGE', 'mxsmbus: loaded eeprom.bin (' + (ok ? nbuf.readU32() : 0) + ' bytes)');
         } else {
-            // New file: seed STATIC (region/serial) at REG(0x000)+DUP(0x200), then persist.
+            // 新規ファイル: REG(0x000)+DUP(0x200) に STATIC（region/serial）を seed し、永続化する。
             seedStatic(0x000);
             seedStatic(0x200);
             _WriteFile(eepromBackFile, eepromBuf, EEPROM_SIZE, nbuf, ptr(0));
@@ -361,11 +360,11 @@
     }
     eepromBackOpen();
 
-    // W83791D bank state for mxsuperio hwmon emulation
+    // mxsuperio hwmon エミュレーション用の W83791D bank 状態
     var w83791dBank = 0;
 
-    // ── DeviceIoControl hook (additional attachment) ──
-    // Proper IOCTL dispatch per micetools reference (not just zero-fill).
+    // ── DeviceIoControl フック（追加の attach） ──
+    // micetools 参照実装に沿った正式な IOCTL ディスパッチ（単なるゼロ埋めではない）。
     var fakeDicCounts = {};
     Object.keys(FAKE).forEach(function(k) { fakeDicCounts[k] = 0; });
 
@@ -392,26 +391,26 @@
                 var dev = this.devName, ioctl = this.ioctl;
                 var out = this.outBuf, outLen = this.outLen;
 
-                // ── mxsram: faithful micetools mxsram_DeviceIoControl ──────────────
-                // Only PING / GET_SECTOR_SIZE / GET_DRIVE_GEOMETRY succeed; everything
-                // else (incl. IOCTL_DISK_GET_LENGTH_INFO) returns FALSE. lpBytesReturned
-                // is set; only GEOMETRY zeroes its output buffer.
+                // ── mxsram: micetools mxsram_DeviceIoControl に忠実 ──────────────
+                // 成功するのは PING / GET_SECTOR_SIZE / GET_DRIVE_GEOMETRY のみ。それ以外
+                //（IOCTL_DISK_GET_LENGTH_INFO 含む）は FALSE を返す。lpBytesReturned は
+                // 設定する。出力バッファをゼロ埋めするのは GEOMETRY だけ。
                 if (dev === 'mxsram') {
                     var okSram = true, nret = 0;
-                    if (ioctl === 0x9c406000) {            // IOCTL_MXSRAM_PING → version
+                    if (ioctl === 0x9c406000) {            // IOCTL_MXSRAM_PING → バージョン
                         if (out && !out.isNull() && outLen >= 4) {
                             try { out.writeU32(0x01000001); } catch(e) {}
                         }
                         nret = 4;
-                    } else if (ioctl === 0x9c406004) {     // IOCTL_MXSRAM_GET_SECTOR_SIZE → 512 (RE1)
+                    } else if (ioctl === 0x9c406004) {     // IOCTL_MXSRAM_GET_SECTOR_SIZE → 512（RE1）
                         if (out && !out.isNull() && outLen >= 4) {
                             try { out.writeU32(512); } catch(e) {}
                         }
                         nret = 4;
-                    } else if (ioctl === 0x00070000) {     // IOCTL_DISK_GET_DRIVE_GEOMETRY (24 B)
+                    } else if (ioctl === 0x00070000) {     // IOCTL_DISK_GET_DRIVE_GEOMETRY（24 B）
                         if (out && !out.isNull() && outLen >= 24) {
                             try {
-                                out.writeByteArray(new Array(24).fill(0));  // memset (geometry only)
+                                out.writeByteArray(new Array(24).fill(0));  // memset（geometry のみ）
                                 out.writeU32(256);          // Cylinders.LowPart
                                 out.add(8).writeU32(12);    // MediaType = FixedMedia
                                 out.add(12).writeU32(2);    // TracksPerCylinder
@@ -421,7 +420,7 @@
                         }
                         nret = 24;
                     } else {
-                        okSram = false;                    // unhandled → FALSE
+                        okSram = false;                    // 未処理 → FALSE
                     }
                     if (okSram && this.bytesRet && !this.bytesRet.isNull()) {
                         try { this.bytesRet.writeU32(nret); } catch(e) {}
@@ -435,15 +434,15 @@
                     return;
                 }
 
-                // ── mxsmbus: amEeprom (AT24C64AN @0x57) via SMBUS I2C/REQUEST ───────
-                // micetools mxsmbus.c + smb_at24c64an.c. METHOD_BUFFERED: in/out packet.
+                // ── mxsmbus: SMBUS I2C/REQUEST 経由の amEeprom（AT24C64AN @0x57） ───────
+                // micetools mxsmbus.c + smb_at24c64an.c。METHOD_BUFFERED: in/out パケット。
                 if (dev === 'mxsmbus') {
                     var okSmb = true, nretSmb = 0, dbg = '';
                     if (ioctl === 0x9c406008) {            // IOCTL_MXSMBUS_GET_VERSION
                         if (out && !out.isNull() && outLen >= 4) { try { out.writeU32(0x01020001); } catch(e) {} }
                         nretSmb = 4; dbg = 'GET_VERSION';
                     } else if (ioctl === 0x9c40200c || ioctl === 0x9c402004) {
-                        var isI2C = (ioctl === 0x9c40200c);  // I2C(0x27): WORD addr/code; REQUEST(0x25): BYTE
+                        var isI2C = (ioctl === 0x9c40200c);  // I2C(0x27): WORD の addr/code; REQUEST(0x25): BYTE
                         var inb = this.inBuf;
                         try {
                             if (inb && !inb.isNull() && out && !out.isNull()) {
@@ -455,7 +454,7 @@
                                 if (vaddr === 0x57) {            // AT24C64AN EEPROM
                                     if (cmd === 9)      eepromRead(code, out.add(dataOff), nbytes);        // READ_BLOCK
                                     else if (cmd === 8) eepromWrite(code, inb.add(dataOff), nbytes);       // WRITE_BLOCK
-                                    else                out.add(dataOff).writeU8(0);                       // byte read → ready/0
+                                    else                out.add(dataOff).writeU8(0);                       // byte read → ready/0 を返す
                                 }
                                 dbg = (isI2C ? 'I2C' : 'REQ') + ' cmd=' + cmd + ' addr=0x' + vaddr.toString(16) +
                                       ' code=0x' + code.toString(16) + ' n=' + nbytes;
@@ -463,7 +462,7 @@
                         } catch(e) { dbg = 'parse-err ' + e; }
                         nretSmb = outLen;
                     } else {
-                        okSmb = false; dbg = 'unhandled';
+                        okSmb = false; dbg = 'unhandled';   // 未処理
                     }
                     if (okSmb && this.bytesRet && !this.bytesRet.isNull()) { try { this.bytesRet.writeU32(nretSmb); } catch(e) {} }
                     ret.replace(okSmb ? 1 : 0);
@@ -475,18 +474,18 @@
                     return;
                 }
 
-                // ── other fake devices (mxsuperio etc.): generic zero-fill + success ──
+                // ── 他の fake デバイス（mxsuperio 等）: 汎用のゼロ埋め + 成功 ──
                 if (out && !out.isNull() && outLen > 0 && outLen <= 4096) {
                     try { out.writeByteArray(new Array(outLen).fill(0)); } catch(e) {}
                 }
                 if (dev === 'mxsuperio') {
                     if (ioctl === 0x9c406000) {
-                        // IOCTL_MXSUPERIO_PING → version 0x01000001
+                        // IOCTL_MXSUPERIO_PING → バージョン 0x01000001
                         if (out && !out.isNull() && outLen >= 4) {
                             try { out.writeU32(0x01000001); } catch(e) {}
                         }
                     } else if (ioctl === 0x9c40200c) {
-                        // IOCTL_MXSUPERIO_HWMONITOR_LPC_READ → W83791D register read
+                        // IOCTL_MXSUPERIO_HWMONITOR_LPC_READ → W83791D レジスタ読み出し
                         if (this.inBuf && !this.inBuf.isNull() && this.inLen >= 3 &&
                             out && !out.isNull() && outLen >= 3) {
                             try {
@@ -516,7 +515,7 @@
                             } catch(e) {}
                         }
                     } else if (ioctl === 0x9c40a010) {
-                        // IOCTL_MXSUPERIO_HWMONITOR_LPC_WRITE → update bank state
+                        // IOCTL_MXSUPERIO_HWMONITOR_LPC_WRITE → bank 状態を更新
                         if (this.inBuf && !this.inBuf.isNull() && this.inLen >= 3) {
                             try {
                                 var wrReg  = this.inBuf.add(1).readU8();
@@ -526,7 +525,7 @@
                         }
                     }
                 }
-                ret.replace(1);  // TRUE = success
+                ret.replace(1);  // TRUE = 成功
                 var n = ++fakeDicCounts[dev];
                 if (n <= 3 || n % 100 === 0) {
                     logMsg('RINGEDGE', 'DIC[' + n + '] ' + dev +
@@ -536,8 +535,8 @@
         });
     }
 
-    // ── mxsram SetFilePointer / ReadFile / WriteFile hooks ──
-    // Game accesses SRAM via file ops on the fake handle (micetools pattern).
+    // ── mxsram の SetFilePointer / ReadFile / WriteFile フック ──
+    // ゲームは fake ハンドルへのファイル操作で SRAM にアクセスする（micetools のパターン）。
     var sfpAddr;
     try { sfpAddr = Module.getGlobalExportByName('SetFilePointer'); } catch(e) {}
     if (sfpAddr) {
@@ -591,7 +590,7 @@
                 if (this.lpNread && !this.lpNread.isNull()) {
                     try { this.lpNread.writeU32(n); } catch(e) {}
                 }
-                ret.replace(1);  // micetools mxsram_ReadFile always returns TRUE
+                ret.replace(1);  // micetools mxsram_ReadFile は常に TRUE を返す
                 logMsg('RINGEDGE', 'ReadFile(mxsram) req=' + this.reqLen + ' got=' + n + ' pos=' + sramPtrGet(this.h));
             }
         });
@@ -617,14 +616,14 @@
                 if (n > 0 && this.buf && !this.buf.isNull()) {
                     try {
                         sramBuf.add(pos).writeByteArray(this.buf.readByteArray(n));
-                        sramBackWrite(pos, n);          // #1 write-through to sram.bin
+                        sramBackWrite(pos, n);          // #1 sram.bin へ write-through
                         sramPtrSet(this.h, pos + n);
                     } catch(e) { n = 0; }
                 }
                 if (this.lpNwrit && !this.lpNwrit.isNull()) {
                     try { this.lpNwrit.writeU32(n); } catch(e) {}
                 }
-                ret.replace(1);  // micetools mxsram_WriteFile always returns TRUE
+                ret.replace(1);  // micetools mxsram_WriteFile は常に TRUE を返す
                 logMsg('RINGEDGE', 'WriteFile(mxsram) req=' + this.reqLen + ' wrote=' + n + ' pos=' + sramPtrGet(this.h));
             }
         });

@@ -1,7 +1,8 @@
-"""JVS I/O investigation - hook ReadFile/WriteFile for JVS protocol traffic.
+"""JVS I/O 調査 — JVS プロトコルのトラフィックを見るため ReadFile/WriteFile をフックする。
 
-TeknoParrot patches nrs.exe IAT for COM functions. This script hooks the
-underlying kernel functions AND TeknoParrot's exported interface to see JVS data.
+TeknoParrot は COM 関数向けに nrs.exe の IAT をパッチする。本スクリプトは
+その下層のカーネル関数 AND TeknoParrot の export インターフェースをフックして
+JVS データを観測する。
 
 使い方:
     # TeknoParrot ヘッドレス起動と同時に待機（推奨）
@@ -225,7 +226,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--pid', type=int, default=None)
     ap.add_argument('--duration', type=int, default=120)
-    ap.add_argument('--wait', type=int, default=60, help='seconds to wait for nrs.exe to appear')
+    ap.add_argument('--wait', type=int, default=60, help='nrs.exe の出現を待つ秒数')
     a = ap.parse_args()
 
     os.makedirs(CAPTURES_DIR, exist_ok=True)

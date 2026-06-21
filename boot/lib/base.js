@@ -2,16 +2,16 @@
 // persistence: na
 // va:          —
 // ssot:        boot/CONVENTIONS.md ; BUGS.md [ANTI-PATTERN] Frida QuickJS missing globals
-// role:        Shared helpers (logMsg, str/hex readers, hookFn, parseSockAddr) + script-global getStatusRecvDone. MUST load first (every other module depends on these).
+// role:        共通ヘルパ(logMsg, str/hex リーダ, hookFn, parseSockAddr) + script-global getStatusRecvDone。必ず最初にロードする(他の全モジュールが依存)。
 'use strict';
 
-// ── Address resolution ──────────────────────────────────────────────────────
-// THE single boundary where RVA arithmetic exists. Every module addresses nrs.exe
-// by Ghidra static VA (ImageBase 0x400000); va() maps it to the ASLR-shifted runtime
-// address.
-//   va(staticVA)        -> runtime pointer for a Ghidra static VA
-//   rtToVa(runtimePtr)  -> static VA for a runtime pointer (for logging)
-// Never address nrs.exe by raw module base elsewhere; the hygiene checker bans it.
+// ── 番地解決 ────────────────────────────────────────────────────────────────
+// RVA 演算が存在する唯一の境界。各モジュールは nrs.exe を Ghidra static_VA
+// (ImageBase 0x400000) で参照し、va() がそれを ASLR でずれた runtime 番地へ
+// 写像する。
+//   va(staticVA)        -> Ghidra static_VA に対する runtime ポインタ
+//   rtToVa(runtimePtr)  -> runtime ポインタに対する static_VA (ログ用)
+// ここ以外で生のモジュール base から nrs.exe を参照しないこと。hygiene checker が禁止する。
 var NRS_IMAGE_BASE = 0x400000;
 var _nrsBaseCache = null;
 function nrsBaseAddr() {
@@ -60,30 +60,30 @@ function parseSockAddr(sa) {
     } catch(e) { return '?'; }
 }
 
-// Script-global: set by amgfetcher/recv.js when a get_status response arrives via raw
-// recv (port 40113); read+cleared by amgfetcher/getstatus.js (0x98ADC0 hook).
+// Script-global: raw recv (port 40113) で get_status 応答が届いたとき amgfetcher/recv.js が
+// セットし、amgfetcher/getstatus.js (0x98ADC0 hook) が読んでクリアする。
 var getStatusRecvDone = false;
 
-// ── Declarative patch/hook/watch helpers ────────────────────────────────────
-// The standard way to express a boot patch. Modules pass Ghidra static VAs; va()
-// (above) is the sole RVA boundary, so modules never touch nrsBase. See
-// CONVENTIONS.md: simple byte stubs live as rows in patches.json; everything with
-// hook/timer logic stays as a module and uses hook()/watch().
+// ── 宣言的 patch/hook/watch ヘルパ ───────────────────────────────────────────
+// boot patch を表現する標準手段。モジュールは Ghidra static_VA を渡す。va()
+// (上記) が唯一の RVA 境界なので、モジュールは nrsBase に触れない。CONVENTIONS.md
+// 参照: 単純なバイト stub は patches.json の行として置き、hook/timer ロジックを
+// 持つものはモジュールに残して hook()/watch() を使う。
 
-// Common stdcall return stubs as named byte arrays (readable + token-minimal).
+// よく使う stdcall return stub を名前付きバイト配列で(可読 + トークン最小)。
 var RET0 = [0x31, 0xC0, 0xC3];                    // xor eax,eax ; ret        -> return 0
 var RET1 = [0xB8, 0x01, 0x00, 0x00, 0x00, 0xC3];  // mov eax,1 ; ret          -> return 1
 function retImm(n) {                              // mov eax,n ; ret          -> return n (32-bit)
     return [0xB8, n & 0xFF, (n >>> 8) & 0xFF, (n >>> 16) & 0xFF, (n >>> 24) & 0xFF, 0xC3];
 }
-function retN(n) {                                // ret n  (stdcall arg cleanup; eax untouched)
+function retN(n) {                                // ret n  (stdcall の引数掃除。eax は不変)
     return [0xC2, n & 0xFF, (n >>> 8) & 0xFF];
 }
-// Resolve a patches.json `bytes` field:
-//   'RET0' | 'RET1'            named stub
-//   {retImm:n} | {retN:n}      built stub
-//   "31 C0 C3"                 hex byte string (disasm.py convention; most readable)
-//   [0x31,0xC0,0xC3]           raw byte array
+// patches.json の `bytes` フィールドを解決:
+//   'RET0' | 'RET1'            名前付き stub
+//   {retImm:n} | {retN:n}      組み立て stub
+//   "31 C0 C3"                 hex バイト文字列 (disasm.py 規約。最も可読)
+//   [0x31,0xC0,0xC3]           生バイト配列
 function patchBytes(spec) {
     if (Array.isArray(spec)) return spec;
     if (typeof spec === 'string') {
@@ -99,7 +99,7 @@ function patchBytes(spec) {
     }
     throw new Error('unknown patch bytes spec: ' + JSON.stringify(spec));
 }
-// patchCode(static_VA) + read-back verify + log. `bytes` is a byte array.
+// patchCode(static_VA) + read-back 検証 + ログ。`bytes` はバイト配列。
 function patch(staticVA, bytes, note) {
     var p = va(staticVA);
     Memory.patchCode(p, bytes.length, function (code) { code.writeByteArray(bytes); });
@@ -109,12 +109,12 @@ function patch(staticVA, bytes, note) {
            (note ? ' (' + note + ')' : '') + ' verify=' + ok);
     return ok;
 }
-// Interceptor.attach(static_VA) with standardized failure logging.
+// Interceptor.attach(static_VA)。失敗ログを標準化。
 function hook(staticVA, handlers, note) {
     try { Interceptor.attach(va(staticVA), handlers); }
     catch (e) { logMsg('WARN', 'hook 0x' + staticVA.toString(16) + (note ? ' (' + note + ')' : '') + ' fail: ' + e); }
 }
-// setInterval watchdog with try/catch + tag (the runtime-blocker re-forcing pattern).
+// try/catch + tag 付き setInterval watchdog (runtime-blocker の再強制パターン)。
 function watch(intervalMs, fn, note) {
     return setInterval(function () {
         try { fn(); } catch (e) { logMsg('WARN', 'watch' + (note ? ' (' + note + ')' : '') + ': ' + e); }

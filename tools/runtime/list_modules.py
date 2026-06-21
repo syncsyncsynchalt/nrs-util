@@ -1,4 +1,4 @@
-"""List all modules loaded in nrs.exe (32-bit process)."""
+"""nrs.exe（32-bit プロセス）にロードされた全モジュールを列挙する。"""
 import frida, sys, time
 
 PID = 8272

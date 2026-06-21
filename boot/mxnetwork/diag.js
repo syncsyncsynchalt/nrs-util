@@ -3,7 +3,7 @@
 // va: 0x9814E0
 // ssot:        mxnetwork/FACTS.md
 // role:        amNet 応答抽出 0x9814E0 (amNetworkResponseCheck) の native 成否を観測する診断専用
-//              (log-only, no force)。8006 (Network timeout DHCP) は pcpa_server.py の amNet 応答が
+//              （log-only, 強制なし）。8006 (Network timeout DHCP) は pcpa_server.py の amNet 応答が
 //              '&' 区切りなら native 解決する。ret<0 が出たら pcpa amNet 応答フォーマット回帰の疑い。
 //
 // PCP パーサ pcppChangeRequest (FUN_0098bb30 / static 0x98bb30) は '&' をフィールド区切りとし、
@@ -16,14 +16,14 @@
     try { nrsBase = Process.getModuleByName('nrs.exe').base; }
     catch(e) { logMsg('WARN', 'monitorAmNet: nrs.exe not found'); return; }
 
-    var CTX_PTR_VA = 0xCCF448;   // amNet PCPA ctx ptr
+    var CTX_PTR_VA = 0xCCF448;   // amNet PCPA ctx ポインタ
     function getCtx() {
         try { return va(CTX_PTR_VA).readPointer(); } catch(e) { return null; }
     }
 
     var amNetCount = 0;
     try {
-        Interceptor.attach(va(0x9814E0), {   // amNetworkResponseCheck (response extractor)
+        Interceptor.attach(va(0x9814E0), {   // amNetworkResponseCheck（応答抽出器）
             onLeave: function(ret) {
                 amNetCount++;
                 if (amNetCount > 6) return;            // 初回数件のみ（log-only, 非 load-bearing）

@@ -1,8 +1,8 @@
-"""Hook error_scene_render (FUN_006f2730 / RVA 0x2f2730) on a running nrs.exe and
-dump the error descriptor it renders: param_1, errCode(+0x00), msgptr(+0xc)->str,
-errNo(+0x10), flags(+0x16), plus a backtrace. Read-only.
+"""稼働中の nrs.exe で error_scene_render (FUN_006f2730 / RVA 0x2f2730) をフックし、
+描画するエラー descriptor をダンプする: param_1, errCode(+0x00), msgptr(+0xc)->str,
+errNo(+0x10), flags(+0x16) と backtrace。読み取り専用。
 
-Usage: python tools/runtime/hook_error_render.py [pid]
+使い方: python tools/runtime/hook_error_render.py [pid]
 """
 import frida, sys, time, subprocess
 

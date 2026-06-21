@@ -1,24 +1,24 @@
-"""Summarize Frida capture logs from boot/launch.py.
+"""boot/launch.py が出力する Frida capture ログを要約する.
 
-Parses lines written by boot/launch.py's console.log() calls:
+boot/launch.py の console.log() が書く以下の形式の行をパースする:
   [HH:MM:SS.mmm][TAG] message
 
 Usage:
-  python log_analyzer.py <logfile>           # full summary
-  python log_analyzer.py <logfile> --iife X  # filter to one IIFE (e.g. hookPcpa)
-  python log_analyzer.py <logfile> --errors  # show error/exception lines only
-  python log_analyzer.py <logfile> --pcpa    # PCPA request/response table
-  python log_analyzer.py <logfile> --sm      # amDongle SM state transitions
-  python log_analyzer.py <logfile> --jvs     # JVS hook events
-  python log_analyzer.py -                   # read from stdin
+  python log_analyzer.py <logfile>           # 全体要約
+  python log_analyzer.py <logfile> --iife X  # 1 つの IIFE に絞り込む (例: hookPcpa)
+  python log_analyzer.py <logfile> --errors  # error/exception 行のみ表示
+  python log_analyzer.py <logfile> --pcpa    # PCPA request/response テーブル
+  python log_analyzer.py <logfile> --sm      # amDongle SM 状態遷移
+  python log_analyzer.py <logfile> --jvs     # JVS フックイベント
+  python log_analyzer.py -                   # 標準入力から読む
 
-Also accepts raw Frida output (lines starting with "[pid:...] message" or plain text).
+生の Frida 出力 ("[pid:...] message" 形式やプレーンテキスト) も受け付ける。
 """
 import re, sys, collections, textwrap
 from pathlib import Path
 from datetime import datetime
 
-# Frida monitor log line patterns
+# Frida モニタログ行のパターン
 RE_LINE   = re.compile(r'^\[(\d{2}:\d{2}:\d{2}\.\d{3})\]\[([^\]]+)\]\s*(.*)')
 RE_PCPA_REQ = re.compile(r'(?:PCPA|pcpa).*?(?:send|req)[:\s]+(.+)', re.IGNORECASE)
 RE_PCPA_RSP = re.compile(r'(?:PCPA|pcpa).*?(?:recv|rsp|resp)[:\s]+(.+)', re.IGNORECASE)
@@ -79,7 +79,7 @@ def show_pcpa(entries: list[dict]):
         msg = e["msg"]
         if "pcpa" not in tag.lower() and "pcpa" not in msg.lower():
             continue
-        # Group by port if detectable
+        # port を検出できればそれでグループ化
         pm = re.search(r'\b(40\d{3})\b', msg)
         port = pm.group(1) if pm else "?"
         port_sessions.setdefault(port, []).append(e)
@@ -132,7 +132,7 @@ def main():
 
     entries = parse_file(path)
 
-    # IIFE filter
+    # IIFE フィルタ
     iife_filter = None
     for i, a in enumerate(args[1:], 1):
         if a == "--iife" and i < len(args) - 1:

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Generate a headless GhidraScript port of GhidraMCPPlugin.java.
-Converts the GUI Plugin into a GhidraScript that starts the same HTTP server
-using `currentProgram` (no PluginTool / Swing GUI required), so it can run under
-analyzeHeadless and serve the MCP bridge with zero Ghidra GUI."""
+"""GhidraMCPPlugin.java を headless 版 GhidraScript に変換して生成する。
+GUI 用 Plugin を、同じ HTTP サーバを `currentProgram` で起動する GhidraScript に
+変換する（PluginTool / Swing GUI 不要）。これにより analyzeHeadless 上で動かし、
+Ghidra GUI なしで MCP bridge を提供できる。"""
 import os, sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))   # tools/ghidra_mcp
@@ -17,14 +17,14 @@ def sub(old, new, n=1):
     assert c == n, f"expected {n} match, got {c} for:\n{old[:120]!r}"
     s = s.replace(old, new)
 
-# 1. drop package (Ghidra scripts live in the default package)
+# 1. package 宣言を削除（Ghidra スクリプトは default package に置く）
 sub("package com.lauriewired;\n", "")
 
-# 2. swap the Plugin import for the GhidraScript import
+# 2. Plugin import を GhidraScript import に差し替え
 sub("import ghidra.framework.plugintool.Plugin;\n",
     "import ghidra.app.script.GhidraScript;\n")
 
-# 3. remove @PluginInfo and make the class a GhidraScript
+# 3. @PluginInfo を除去し、クラスを GhidraScript にする
 sub(
 '''@PluginInfo(
     status = PluginStatus.RELEASED,
@@ -36,7 +36,7 @@ sub(
 public class GhidraMCPPlugin extends Plugin {''',
 "public class GhidraMCPHeadless extends GhidraScript {")
 
-# 4. constructor -> run() that starts the server and blocks
+# 4. コンストラクタ -> サーバを起動してブロックする run() に置換
 sub(
 '''    public GhidraMCPPlugin(PluginTool tool) {
         super(tool);
@@ -68,14 +68,14 @@ sub(
         while (true) { Thread.sleep(3600000L); }
     }''')
 
-# 5. fixed port instead of tool options
+# 5. tool options ではなく固定ポートを使う
 sub(
 '''        // Read the configured port
         Options options = tool.getOptions(OPTION_CATEGORY_NAME);
         int port = options.getInt(PORT_OPTION_NAME, DEFAULT_PORT);''',
 "        int port = DEFAULT_PORT;")
 
-# 6. getCurrentAddress -> program min address (no CodeViewerService)
+# 6. getCurrentAddress -> program の最小アドレス（CodeViewerService 不使用）
 sub(
 '''    private String getCurrentAddress() {
         CodeViewerService service = tool.getService(CodeViewerService.class);
@@ -90,7 +90,7 @@ sub(
         return program.getMinAddress().toString();
     }''')
 
-# 7. getCurrentFunction -> first function (no CodeViewerService)
+# 7. getCurrentFunction -> 先頭の関数（CodeViewerService 不使用）
 sub(
 '''    private String getCurrentFunction() {
         CodeViewerService service = tool.getService(CodeViewerService.class);
@@ -120,7 +120,7 @@ sub(
             func.getName(), func.getEntryPoint(), func.getSignature());
     }''')
 
-# 8. drop the tool-based getCurrentProgram override; inherit GhidraScript's
+# 8. tool ベースの getCurrentProgram override を削除し、GhidraScript のものを継承
 sub(
 '''    public Program getCurrentProgram() {
         ProgramManager pm = tool.getService(ProgramManager.class);
@@ -130,10 +130,10 @@ sub(
 ''',
 "")
 
-# 9. DataTypeManagerService is GUI-only; null is fine for headless parsing
+# 9. DataTypeManagerService は GUI 専用。headless での parse では null で問題ない
 sub("tool.getService(ghidra.app.services.DataTypeManagerService.class)", "null")
 
-# 10. remove the Plugin.dispose() override (server stop handled by shutdown hook)
+# 10. Plugin.dispose() override を削除（サーバ停止は shutdown hook で処理）
 sub(
 '''    @Override
     public void dispose() {

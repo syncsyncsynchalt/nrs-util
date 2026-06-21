@@ -1,14 +1,14 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
-// amDongleUpdate diagnostic (FUN_00970fc0, RVA 0x570fc0) — per-frame keychip
-// re-validation called by FUN_00459460. Logging only; logs the SM each time ctx+8
-// or the return value changes.
+// amDongleUpdate 診断 (FUN_00970fc0, RVA 0x570fc0) — FUN_00459460 から毎フレーム
+// 呼ばれる keychip 再検証。観測のみ。ctx+8 か戻り値が変わるたびに
+// ステートマシンをログする。
 //
-// Returns non-zero when ctx+4==0 || ctx+8==0 → -0xc (keychip data lost).
-// case-8 MAC/SSD verify clears ctx+8=0 on mismatch ("Verify MAC/SSD NG!!!").
-// Verify runs only when (ctx+0x4c==0 && ctx+0x18==0); if a keychip command
-// (FUN_0096c6c0/c8d0/c920/dbc0/…) returns non-zero, ctx+0x4c!=0 → verify SKIPPED
-// (the intended DS28CN01 bypass).
+// ctx+4==0 || ctx+8==0 のとき非ゼロを返す → -0xc (keychip データ消失)。
+// case-8 の MAC/SSD verify は不一致時に ctx+8=0 をクリアする ("Verify MAC/SSD NG!!!")。
+// verify は (ctx+0x4c==0 && ctx+0x18==0) のときだけ走る。keychip command
+// (FUN_0096c6c0/c8d0/c920/dbc0/…) が非ゼロを返すと ctx+0x4c!=0 → verify は SKIP される
+// (意図した DS28CN01 バイパス)。
 // ─────────────────────────────────────────────────────────────────────────────
 (function diagDongleUpdate() {
     var nrsBase = null;
@@ -42,7 +42,7 @@
                 var f8 = -1, err = 0;
                 try { f8 = c.add(0x8).readU32(); err = c.add(0x44).readS32(); } catch(e) { return; }
                 var r = ret.toInt32();
-                // Log first 20 calls, and any time f8 / ret / err changes.
+                // 最初の 20 回と、f8 / ret / err が変わるたびにログする。
                 if (calls <= 20 || f8 !== lastF8 || r !== lastRet || err !== lastErr) {
                     logMsg('DONGLEUPD', '#' + calls + ' ret=' + r + ' [' + snap(c) + ']');
                     lastF8 = f8; lastRet = r; lastErr = err;

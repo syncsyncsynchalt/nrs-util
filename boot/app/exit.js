@@ -5,11 +5,11 @@
 // role:        終了/exit 経路のフック。
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ExitProcess / TerminateProcess — detect clean exits and forced kills
+// ExitProcess / TerminateProcess — clean exit と強制 kill を検出する
 // ─────────────────────────────────────────────────────────────────────────────
 (function hookExit() {
-    // Write exit info to a file BEFORE Frida's message queue is killed by ExitProcess.
-    // Uses raw NativeFunction so the data is captured even if logMsg is lost.
+    // ExitProcess で Frida のメッセージキューが落ちる前に、終了情報をファイルへ書き出す。
+    // logMsg が失われても捕捉できるよう生の NativeFunction を使う。
     var _WriteFile = null, _CreateFileW = null, _CloseHandle = null;
     try {
         _WriteFile   = new NativeFunction(Module.getGlobalExportByName('WriteFile'),   'bool',    ['pointer','pointer','uint32','pointer','pointer']);
@@ -17,8 +17,8 @@
         _CloseHandle = new NativeFunction(Module.getGlobalExportByName('CloseHandle'), 'bool',    ['pointer']);
     } catch(e) {}
 
-    // Output path is taken from NRS_CAPTURES_DIR (injected by launch.py into nrs.exe's environment
-    // at spawn time) so no absolute repo path is hardcoded here; falls back to %TEMP% when attaching.
+    // 出力パスは NRS_CAPTURES_DIR（launch.py が spawn 時に nrs.exe の環境変数へ注入）から取得する。
+    // リポジトリの絶対パスをハードコードしないため。attach 時は %TEMP% にフォールバックする。
     var _exitFilePath = (function resolveExitPath() {
         function getEnv(name) {
             try {
@@ -65,7 +65,7 @@
     try { hookFn('ExitProcess',       logExit('ExitProcess'),       null); } catch(e) {}
     try { hookFn('TerminateProcess',  logExit('TerminateProcess'),  null); } catch(e) {}
     try { hookFn('ExitThread',        logExit('ExitThread'),        null); } catch(e) {}
-    // NtTerminateProcess: direct ntdll call that bypasses kernel32 ExitProcess hook
+    // NtTerminateProcess: kernel32 の ExitProcess フックを迂回する ntdll 直接呼び出し
     try {
         var ntTermAddr = null;
         try { ntTermAddr = Module.getGlobalExportByName('NtTerminateProcess'); } catch(e) {}

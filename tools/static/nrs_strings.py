@@ -1,7 +1,7 @@
-"""Extract filtered strings from nrs.exe relevant to BBS investigation.
+"""BBS 調査に関係する文字列を nrs.exe から抽出し、フィルタして出力する。
 
-Usage:
-  python nrs_strings.py [--all]   -- omit --all to show only high-interest strings
+使い方:
+  python nrs_strings.py [--all]   -- --all を省くと注目度の高い文字列のみ表示
 """
 import os, re, sys
 

@@ -1,4 +1,4 @@
-"""Thread PC inspector - attaches to running nrs.exe and shows all thread states."""
+"""スレッド PC インスペクタ — 稼働中の nrs.exe に attach し全スレッドの状態を表示する。"""
 import frida, sys, time
 
 SCRIPT = r"""

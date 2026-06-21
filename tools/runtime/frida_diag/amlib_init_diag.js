@@ -1,15 +1,15 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DIAGNOSTIC: amlib init SM FUN_0089a010 (RVA 0x49a010) state tracer. Logging only.
+// 診断: amlib init ステートマシン FUN_0089a010 (RVA 0x49a010) の state トレーサ。観測のみ。
 //
-// FUN_0089a010(param_1): param_1+4 = state, param_1+8 = substate.
+// FUN_0089a010(param_1): param_1+4 = state、param_1+8 = substate。
 //   state 2 = IC CARD R/W (FUN_004f6330)
 //   state 3 = FUN_008b3b00/b40  → errCode 0x16
 //   state 4 = device (FUN_0072dce0/deviceMgr type-0x20) → errCode 0x14 + bitmask _DAT_016f5af4
-//   state 6 = network servers (LOCAL/ALL.NET GAME SERVER/UPLOAD/AUTH)
-//   state 9 = ERROR (sets DAT_016f5af0 errCode; scene system maps → errNo+msg)
+//   state 6 = ネットワークサーバ (LOCAL/ALL.NET GAME SERVER/UPLOAD/AUTH)
+//   state 9 = エラー (DAT_016f5af0 に errCode を設定。scene system が errNo+msg にマップ)
 //
-// On state 9 captures errCode + bitmask + backtrace to pinpoint the failing device.
+// state 9 で errCode + bitmask + backtrace を取得し、失敗した device を特定する。
 // ─────────────────────────────────────────────────────────────────────────────
 (function diagAmlibInit() {
     var nrsBase = null;
@@ -17,11 +17,11 @@
     catch(e) { logMsg('WARN', 'diagAmlibInit: nrs.exe not found'); return; }
 
     var errCodeAddr = nrsBase.add(0x12f5af0);   // DAT_016f5af0 (amlib master errCode)
-    var errMaskAddr = nrsBase.add(0x12f5af4);   // _DAT_016f5af4 (failure detail bitmask)
+    var errMaskAddr = nrsBase.add(0x12f5af4);   // _DAT_016f5af4 (失敗詳細の bitmask)
 
-    // FUN_0072b450(void) → comm/device-manager ptr (type-0x20 device).
-    // deviceMgr+0x1d4[idx] = per-sub-device/server status (FUN_0072dce0 reads these);
-    // deviceMgr+0x1ec = aggregate error word (state-6 checks & 0x5f3 → errCode 0x14 → 8005).
+    // FUN_0072b450(void) → comm/device-manager ptr (type-0x20 device)。
+    // deviceMgr+0x1d4[idx] = sub-device/server ごとの status (FUN_0072dce0 が読む)。
+    // deviceMgr+0x1ec = エラー集約ワード (state 6 が & 0x5f3 をチェック → errCode 0x14 → 8005)。
     var getDevMgr = null;
     try { getDevMgr = new NativeFunction(nrsBase.add(0x32b450), 'pointer', []); } catch(e) {}
     function dumpDevMgr() {
@@ -56,7 +56,7 @@
                     logMsg('AMLIBINIT', '#' + calls + ' state ' + lastState + '->' + st +
                            ' sub=' + sub + ' errCode=' + ec + '(0x' + ec.toString(16) + ')' +
                            ' mask=0x' + em.toString(16));
-                    // Network states: dump comm device-manager statuses (deviceMgr+0x1ec bits 2-4 =0x1c → 8005).
+                    // ネットワーク state: comm device-manager の status をダンプ (deviceMgr+0x1ec bits 2-4 =0x1c → 8005)。
                     if ((st === 6 || st === 7 || st === 8) && loggedS6 < 8) {
                         loggedS6++;
                         logMsg('AMLIBINIT', 'NET state' + st + ' ' + dumpDevMgr());

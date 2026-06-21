@@ -2,7 +2,7 @@
 // persistence: monitor
 // va: 0x96EEC0, 0x96F1A0, 0x96EFC0, 0x96F290 (am* getters) ; 0x457500/0x457810/0x457822/0x457910/0x978450/0x975E00 (SM)
 // ssot:        FACTS.md §hookAmDongleSM Monitor RVAs
-// role:        Log-only Interceptors over amDongle getters + dongle/keychip state machines (no modification). Persistent patches live in amdongle/patch.js.
+// role:        amDongle getter + dongle/keychip ステートマシンへのログ専用 Interceptor（無改変）。Persistent パッチは amdongle/patch.js にある。
 (function hookAmDongle() {
     var nrsBase = null;
     try { nrsBase = Process.getModuleByName('nrs.exe').base; }
@@ -40,20 +40,20 @@
     logMsg('INIT_AMDONGLE', 'amDongle getter hooks attached');
 })();
 
-// amDongle / keychip state-machine monitors (log-only; persistent patches live in
-// amdongle/patch.js [0x975E00, 0x457AF0]).
+// amDongle / keychip ステートマシンのモニタ（ログ専用; persistent パッチは
+// amdongle/patch.js [0x975E00, 0x457AF0] にある）。
 (function hookAmDongleSM() {
     var nrsBase = null;
     try { nrsBase = Process.getModuleByName('nrs.exe').base; }
     catch(e) { logMsg('WARN', 'amDongleSM: nrs.exe not found'); return; }
 
     var SM = {
-        dongleInit:    0x457500,  // top-level orchestrator: outer SM until state==7, then keychipSM
-        outerTick:     0x457810,  // inner tick: amDongleTick7 + amDongleBusy
-        outerSM:       0x457822,  // 6-state orchestrator (dhcp/nic/mac + amDongle queries)
-        keychipSM:     0x457910,  // keychip verification SM (9 states)
-        amDongle7:     0x978450,  // amDongle 7-state dispatcher (reads [CCF0EC]+0x18)
-        amDongleBusy2: 0x975E00,  // amDongleBusy (also patchCode'd in amdongle/patch.js)
+        dongleInit:    0x457500,  // 最上位オーケストレータ: state==7 まで外側 SM、その後 keychipSM
+        outerTick:     0x457810,  // 内側 tick: amDongleTick7 + amDongleBusy
+        outerSM:       0x457822,  // 6 状態オーケストレータ（dhcp/nic/mac + amDongle クエリ）
+        keychipSM:     0x457910,  // keychip 検証 SM（9 状態）
+        amDongle7:     0x978450,  // amDongle 7 状態ディスパッチャ（[CCF0EC]+0x18 を読む）
+        amDongleBusy2: 0x975E00,  // amDongleBusy（amdongle/patch.js でも patchCode 済み）
     };
 
     var smCounts = {};

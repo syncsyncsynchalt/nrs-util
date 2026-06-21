@@ -9,23 +9,23 @@ KEY=binascii.unhexlify("6ACB8DC90049927AEACF71C9740B6FF9")
 IV =binascii.unhexlify("A47A668EC0DA675E10E3A3EBE5328CF0")
 def ap(b): return ''.join(chr(x) if 32<=x<127 else '.' for x in b)
 
-# decrypt boot id region: vol 512.. (abs 1856), 128 sectors reserved
+# boot id 領域を復号: vol 512.. (abs 1856), 予約 128 セクタ
 out=bytearray()
 with open(ISO,'rb') as f:
     for sec in range(1856, 1856+128):
         f.seek(sec*S); d=f.read(S)
-        out += AES.new(KEY,AES.MODE_CBC,IV).decrypt(d)   # per-sector IV reset
+        out += AES.new(KEY,AES.MODE_CBC,IV).decrypt(d)   # セクタ毎に IV リセット
 
-# trim trailing zeros for display
+# 表示用に末尾のゼロを切り詰め
 n=len(out)
 while n>0 and out[n-1]==0: n-=1
 print(f"Boot ID plaintext: {len(out)} bytes, non-zero up to {n}")
-# hexdump first non-zero region
+# 最初の非ゼロ領域を hexdump
 for off in range(0, min(n+16, len(out)), 16):
     chunk=out[off:off+16]
     if not any(chunk) and off>0 and not any(out[off-16:off]) and off+16<n:
         continue
     print(f"{off:05x}  {binascii.hexlify(chunk).decode():32}  {ap(chunk)}")
-# save full plaintext
+# 平文全体を保存
 open(r"C:\src\nrs-util\tools\iso\bootid_plain.bin","wb").write(bytes(out))
 print("saved bootid_plain.bin")

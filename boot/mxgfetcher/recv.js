@@ -2,9 +2,9 @@
 // persistence: runtime
 // va: recv (winsock export)
 // ssot:        mxgfetcher/FACTS.md
-// role:        recv() hook sets the script-global getStatusRecvDone when a "response=get_status"
-//              packet arrives (port 40113 uses raw winsock, not pcpaRecvResponse). Pairs with
-//              amgfetcher/getstatus.js 0x98ADC0 completion fix. Interceptor → reverts on detach.
+// role:        recv() フックが "response=get_status" パケット到着時にスクリプトグローバルの
+//              getStatusRecvDone を立てる（ポート 40113 は pcpaRecvResponse ではなく raw winsock）。
+//              amgfetcher/getstatus.js の 0x98ADC0 完了 fix と対。Interceptor → detach で revert。
 (function amGfetcherRecv() {
     hookFn('recv',
         function(args) {

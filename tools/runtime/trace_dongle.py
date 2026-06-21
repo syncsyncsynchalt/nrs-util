@@ -1,5 +1,5 @@
-"""Trace amDongle/amNet state machine on running nrs.exe.
-Usage: python trace_dongle.py [--pid PID] [--duration SEC]
+"""稼働中の nrs.exe で amDongle/amNet ステートマシンをトレースする。
+使い方: python trace_dongle.py [--pid PID] [--duration SEC]
 """
 import frida, sys, time, argparse
 

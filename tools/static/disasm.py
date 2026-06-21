@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
-"""nrs.exe static analysis — STATIC VA dialect (matches Ghidra MCP).
+"""nrs.exe 静的解析 — STATIC VA 方言（Ghidra MCP と一致）。
 
-EVERY address argument is a Ghidra static VA (ImageBase 0x400000), always hex.
-No RVA mode — one dialect, no conversion. RVA exists only inside the runtime
-va() helper and never appears at a tool boundary.
+番地引数は全て Ghidra の static VA（ImageBase 0x400000）で、常に hex。
+RVA モードは無し — 単一方言・変換なし。RVA は runtime の va() helper の
+内部にのみ存在し、ツール境界には一切出ない。
 
-Usage:
-  disasm.py <VA>                     disassemble 20 instructions
-  disasm.py <VA> -n 40              disassemble 40 instructions
-  disasm.py <VA> -x [N]             hex dump N bytes (default 64)
-  disasm.py <VA> -b [N]            byte array for patchCode (default 16) + va()-ready +
-                                    MANIFEST patch-site cross-ref
-  disasm.py <VA> -r [N]            read C string (default max 256)
-  disasm.py <VA> --xrefs           find all CALL/JMP targeting this VA
-  disasm.py -s 31C0C390             search byte pattern (hex, no spaces)
-  disasm.py -S "RingEdge"          search ASCII string
-  disasm.py --imports [FILTER]     list imports
-  disasm.py --sections             list PE sections
-Add --json to -x/-b/-n/--xrefs/-s/-S for machine-readable output.
+使い方:
+  disasm.py <VA>                     20 命令を disassemble
+  disasm.py <VA> -n 40              40 命令を disassemble
+  disasm.py <VA> -x [N]             N バイトを hex ダンプ（既定 64）
+  disasm.py <VA> -b [N]            patchCode 用のバイト配列（既定 16）+ va() 形式 +
+                                    MANIFEST patch-site の相互参照
+  disasm.py <VA> -r [N]            C 文字列を読む（既定 最大 256）
+  disasm.py <VA> --xrefs           この VA を指す CALL/JMP を全て探す
+  disasm.py -s 31C0C390             バイトパターンを検索（hex、空白なし）
+  disasm.py -S "RingEdge"          ASCII 文字列を検索
+  disasm.py --imports [FILTER]     imports を列挙
+  disasm.py --sections             PE の section を列挙
+-x/-b/-n/--xrefs/-s/-S に --json を付けると機械可読出力になる。
 """
 
 import sys, os, json, struct
@@ -45,7 +45,7 @@ def get_pe():
 
 
 def parse_va(s):
-    """Address arg -> static VA. Always hex (every nrs address is hex)."""
+    """番地引数 -> static VA。常に hex（nrs の番地は全て hex）。"""
     s = s.strip()
     if s.lower().startswith("0x"):
         s = s[2:]
@@ -60,9 +60,9 @@ def to_rva(va):
     return va - IMAGE_BASE
 
 
-# ── MANIFEST patch-site cross-reference ──────────────────────────────────────
+# ── MANIFEST patch-site の相互参照 ───────────────────────────────────────────
 def manifest_sites():
-    """Return {static_VA: [module, ...]} from MANIFEST 'va' arrays (best-effort)."""
+    """MANIFEST の 'va' 配列から {static_VA: [module, ...]} を返す（best-effort）。"""
     out = {}
     try:
         with open(MANIFEST, encoding="utf-8") as f:

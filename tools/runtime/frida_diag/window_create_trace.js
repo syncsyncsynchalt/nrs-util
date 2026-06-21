@@ -1,12 +1,12 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CreateWindowEx — log ALL creations + patch WS_POPUP → WS_OVERLAPPEDWINDOW.
+// CreateWindowEx — 全生成をログ + WS_POPUP → WS_OVERLAPPEDWINDOW にパッチ。
 //
-// CreateWindowEx(A/W) argument layout (x86 stdcall):
+// CreateWindowEx(A/W) の引数レイアウト (x86 stdcall):
 //   args[0] = dwExStyle
 //   args[1] = lpClassName
-//   args[2] = lpWindowName (title string)
-//   args[3] = dwStyle          ← WS_POPUP lives here
+//   args[2] = lpWindowName (タイトル文字列)
+//   args[3] = dwStyle          ← WS_POPUP はここ
 //   args[4..7] = x, y, w, h
 // ─────────────────────────────────────────────────────────────────────────────
 (function hookAllWindowCreate() {
@@ -49,9 +49,9 @@
 })();
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Exception / crash detector — resolves module+offset of the fault address and
-// dumps a fuzzy backtrace to distinguish a trigger from a benign first-chance
-// (D3D/shader-cache exceptions are common).
+// 例外 / クラッシュ検出 — fault アドレスの module+offset を解決し、
+// fuzzy backtrace をダンプして、トリガと無害な first-chance を区別する
+// (D3D/shader-cache の例外が多い)。
 // ─────────────────────────────────────────────────────────────────────────────
 function _modOff(addr) {
     try {
@@ -74,13 +74,13 @@ Process.setExceptionHandler(function(details) {
            ' addr=' + _modOff(details.address) +
            ' pc=' + _modOff(details.context.pc) + mem +
            ' bt=[' + _bt(details.context) + ']');
-    // Don't swallow — let the OS handle it
+    // 握り潰さず OS に処理させる
     return false;
 });
 
-// ── RaiseException / RtlRaiseException — catch app-raised (SEH) exceptions ──────
-// Captures dwExceptionCode + raising call site (which Process.setExceptionHandler
-// cannot expose for 'system').
+// ── RaiseException / RtlRaiseException — アプリが投げる (SEH) 例外を捕捉 ──────
+// dwExceptionCode + 発生元の呼び出し箇所を取得する (Process.setExceptionHandler は
+// 'system' についてこれを出せない)。
 //   void RaiseException(DWORD dwExceptionCode, DWORD dwExceptionFlags,
 //                       DWORD nNumberOfArguments, const ULONG_PTR* lpArguments)
 ['RaiseException', 'RtlRaiseException'].forEach(function(fn) {
@@ -94,7 +94,7 @@ Process.setExceptionHandler(function(details) {
                     var flags = args[1].toUInt32();
                     info = 'code=0x' + code.toString(16) + ' flags=0x' + flags.toString(16);
                 } else {
-                    // RtlRaiseException(PEXCEPTION_RECORD): code at [rec+0], flags at [rec+4]
+                    // RtlRaiseException(PEXCEPTION_RECORD): code は [rec+0]、flags は [rec+4]
                     var rec = args[0];
                     var code = '?', flags = '?';
                     try { code  = '0x' + rec.readU32().toString(16); } catch(e) {}

@@ -1,33 +1,33 @@
 #!/usr/bin/env python3
-"""patch_invariance.py — prove a boot/ refactor is behaviour-preserving.
+"""patch_invariance.py — boot/ のリファクタが挙動保存であることを証明する。
 
-The boot shim's ENTIRE observable effect on nrs.exe is the set of:
-  * byte patches   — (static_VA, [bytes]) written via Memory.patchCode
-  * interceptions  — (static_VA) hooked via Interceptor.attach
+boot シムが nrs.exe に与える観測可能な効果の全ては、次の集合だけ:
+  * byte patches   — Memory.patchCode で書く (static_VA, [bytes])
+  * interceptions  — Interceptor.attach でフックする (static_VA)
 
-If a refactor (helper extraction, data-table migration, file split, dir rename)
-is a *pure* refactor, that set is bit-for-bit identical before and after. This
-tool captures it deterministically and diffs two captures.
+リファクタ（helper 抽出、データテーブル移行、ファイル分割、ディレクトリ改名）が
+*純粋な* リファクタなら、この集合は前後でビット単位まで一致する。本ツールは
+それを決定論的に捕捉し、2 つの捕捉結果を diff する。
 
-HOW IT CAPTURES (no game logic runs):
-  nrs.exe is spawned SUSPENDED. We prepend an instrumentation prologue that wraps
-  Memory.patchCode / Interceptor.attach to record every call (reading the bytes
-  back from memory AFTER the real patch applies, so computed writes are captured
-  too), append an epilogue that send()s the recorded set, load the script, grab
-  the set, and KILL the process without ever resuming. So every patch/hook is
-  observed but no game code executes.
+捕捉のしかた（ゲームロジックは一切走らない）:
+  nrs.exe を SUSPENDED で spawn する。計測用 prologue を先頭に付け、
+  Memory.patchCode / Interceptor.attach をラップして全呼び出しを記録し（実際の
+  patch 適用後にメモリからバイトを読み戻すので、計算された書き込みも捕捉される）、
+  記録した集合を send() する epilogue を末尾に付け、スクリプトをロードして集合を
+  取得し、resume せずにプロセスを KILL する。こうして全 patch/hook を観測しつつ
+  ゲームコードは実行しない。
 
-USAGE:
-  # capture the current working tree's effect-set to a file
+使い方:
+  # 現在の作業ツリーの effect-set をファイルに捕捉
   python tools/hygiene/patch_invariance.py --dump cur.json
 
-  # capture a git ref (HEAD) via a throwaway worktree
+  # 使い捨て worktree 経由で git ref（HEAD）を捕捉
   python tools/hygiene/patch_invariance.py --dump head.json --ref HEAD
 
-  # one-shot: capture HEAD and the working tree, diff, exit 1 on any difference
+  # ワンショット: HEAD と作業ツリーを捕捉し diff、差分があれば exit 1
   python tools/hygiene/patch_invariance.py --compare HEAD
 
-Exit 0 = identical effect-set (refactor is pure). Exit 1 = drift (diff printed).
+exit 0 = effect-set が同一（純粋なリファクタ）。exit 1 = drift（diff を出力）。
 """
 import argparse
 import io
@@ -38,7 +38,7 @@ import sys
 import tempfile
 import time
 
-try:  # Windows consoles default to cp932; force UTF-8 so output never crashes.
+try:  # Windows のコンソールは既定 cp932。出力が落ちないよう UTF-8 を強制する。
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 except Exception:
@@ -49,15 +49,14 @@ GAME_DIR = os.environ.get("NRS_GAME_DIR", r"C:\src\bbs")
 GAME_EXE = os.environ.get("NRS_EXE", os.path.join(GAME_DIR, "nrs.exe"))
 GAME_ARGS = ["-wsvga", "-full", "-img"]
 
-# ── Instrumentation injected around the assembled boot script ────────────────
-# Memory.patchCode / Interceptor.attach are read-only, non-configurable props in
-# Frida's QuickJS, so they can't be reassigned directly. BUT the *global bindings*
-# `Memory` and `Interceptor` are writable — so we shadow each with an object that
-# inherits from the real one (other members pass through the prototype, bound to the
-# real receiver, which native Frida bindings require) and overrides only the
-# effect-producing method. Modules reference the globals, so their calls hit the
-# shadows. rtToVa() (from lib/base.js, concatenated right after) is resolved at CALL
-# time, by when it is defined.
+# ── 組み立てた boot スクリプトの周囲に注入する計測コード ─────────────────────
+# Frida の QuickJS では Memory.patchCode / Interceptor.attach は read-only かつ
+# non-configurable なプロパティで、直接は再代入できない。だが *グローバル束縛* の
+# `Memory` と `Interceptor` は writable — そこで各々を、本物を継承する（他のメンバは
+# prototype 経由で本物の receiver に束縛されて通る。native Frida 束縛はこれを要求する）
+# オブジェクトで shadow し、効果を生むメソッドだけを上書きする。モジュールは
+# グローバルを参照するので、その呼び出しは shadow に当たる。rtToVa()（直後に連結される
+# lib/base.js 由来）は CALL 時に解決され、その時点では定義済み。
 _PROLOGUE = r"""
 'use strict';
 var __INV = { patches: [], hooks: [], seq: [] };
@@ -114,16 +113,16 @@ function __stableVa(addr) {
 })();
 """
 
-# Epilogue runs after every module (modules execute synchronously during
-# scr.load()), shipping the recorded effect-set back to the harness.
+# epilogue は全モジュールの後に走り（モジュールは scr.load() 中に同期実行される）、
+# 記録した effect-set をハーネスへ送り返す。
 _EPILOGUE = r"""
 send({ tag: '__inv__', data: __INV });
 """
 
 
 def _assemble(boot_dir: str) -> str:
-    """Concatenate MANIFEST load_order modules exactly as launch.py does, wrapped
-    in the instrumentation prologue/epilogue."""
+    """MANIFEST の load_order モジュールを launch.py と全く同じ順で連結し、計測用の
+    prologue/epilogue で包む。"""
     manifest_path = os.path.join(boot_dir, "MANIFEST.json")
     with open(manifest_path, encoding="utf-8") as f:
         manifest = json.load(f)
@@ -132,8 +131,8 @@ def _assemble(boot_dir: str) -> str:
         mod_path = os.path.join(boot_dir, *entry["module"].split("/"))
         with open(mod_path, encoding="utf-8", newline="") as mf:
             parts.append(mf.read())
-        # Mirror launch.py: inject the data-driven patch table right after base.js
-        # so captured effects include table-applied patches.
+        # launch.py に倣う: base.js の直後にデータ駆動の patch テーブルを注入し、
+        # テーブル適用の patch も捕捉対象に含める。
         if entry["module"] == "lib/base.js":
             tbl = os.path.join(boot_dir, "patches.json")
             try:
@@ -147,18 +146,17 @@ def _assemble(boot_dir: str) -> str:
 
 
 def _canonical(effects: dict) -> dict:
-    """Normal form. Patches/hooks are compared as SETS (a pure refactor may reorder
-    *when* independent patches apply — e.g. data-table collapse — without changing
-    the set). BUT at any address that is BOTH patched and hooked, the patch-vs-hook
-    ORDER is itself behaviour (cf. the 'don't mix patchCode + Interceptor at one
-    address' anti-pattern), so we additionally capture the op sequence per such
-    collision address and compare it order-sensitively."""
+    """正規形。patches/hooks は集合（SET）として比較する（純粋なリファクタは、独立した
+    patch が *いつ* 適用されるかを並べ替えうる — 例: データテーブルの集約 — が、集合は
+    変えない）。ただし patch と hook の両方が当たる番地では、patch と hook の順序それ自体が
+    挙動になる（'1 つの番地で patchCode + Interceptor を混在させない' というアンチパターン
+    参照）。そのため、そうした衝突番地ごとに op 列を別途捕捉し、順序を含めて比較する。"""
     patches = sorted(
         ({"va": p["va"].lower(), "bytes": p["bytes"]} for p in effects.get("patches", [])),
         key=lambda p: (p["va"], tuple(p["bytes"])),
     )
     hooks = sorted({h["va"].lower() for h in effects.get("hooks", [])})
-    # Per-address op sequence, retained only for addresses with >1 distinct op type.
+    # 番地ごとの op 列。op の種類が 2 つ以上ある番地についてのみ保持する。
     seq_by_va: dict = {}
     for ev in effects.get("seq", []):
         seq_by_va.setdefault(ev["va"].lower(), []).append(ev["op"])
@@ -167,8 +165,8 @@ def _canonical(effects: dict) -> dict:
 
 
 def capture(boot_dir: str) -> dict:
-    """Spawn nrs.exe suspended, load the instrumented boot script, capture the
-    effect-set, and kill without resuming."""
+    """nrs.exe を suspended で spawn し、計測済み boot スクリプトをロードして
+    effect-set を捕捉し、resume せずに kill する。"""
     import frida
 
     script_src = _assemble(boot_dir)
@@ -191,13 +189,13 @@ def capture(boot_dir: str) -> dict:
 
         scr = sess.create_script(script_src)
         scr.on("message", on_message)
-        scr.load()  # modules run synchronously here; epilogue send() fires
-        # Give async message delivery a moment to flush.
+        scr.load()  # モジュールはここで同期実行され、epilogue の send() が発火する
+        # 非同期メッセージ配送が flush されるのを少し待つ。
         deadline = time.time() + 3.0
         while "effects" not in captured and time.time() < deadline:
             time.sleep(0.05)
     finally:
-        # Never resume — no game code runs. Just tear down.
+        # 決して resume しない — ゲームコードは走らない。後片付けのみ。
         subprocess.run(["taskkill", "/F", "/IM", "nrs.exe"], capture_output=True)
 
     if "effects" not in captured:
@@ -206,8 +204,8 @@ def capture(boot_dir: str) -> dict:
 
 
 def capture_ref(ref: str) -> dict:
-    """Capture the effect-set of a git ref by checking it out into a throwaway
-    worktree (so the working tree is untouched)."""
+    """git ref の effect-set を、使い捨て worktree にチェックアウトして捕捉する
+    （作業ツリーには手を付けない）。"""
     wt = tempfile.mkdtemp(prefix="nrs-inv-")
     try:
         subprocess.run(["git", "-C", ROOT, "worktree", "add", "--detach", wt, ref],
@@ -220,7 +218,7 @@ def capture_ref(ref: str) -> dict:
 
 
 def _diff(a: dict, b: dict) -> list:
-    """Human-readable differences between two canonical effect-sets."""
+    """2 つの正規化済み effect-set 間の差分を人間可読で返す。"""
     out = []
     ap = {(p["va"], tuple(p["bytes"])) for p in a["patches"]}
     bp = {(p["va"], tuple(p["bytes"])) for p in b["patches"]}
@@ -232,7 +230,7 @@ def _diff(a: dict, b: dict) -> list:
         out.append(f"  - hook only in A: {va}")
     for va in sorted(set(b["hooks"]) - set(a["hooks"])):
         out.append(f"  + hook only in B: {va}")
-    # Ordering drift at addresses that are both patched and hooked.
+    # patch と hook の両方が当たる番地での順序 drift。
     ca, cb = a.get("collisions", {}), b.get("collisions", {})
     for va in sorted(set(ca) | set(cb)):
         if ca.get(va) != cb.get(va):
@@ -243,10 +241,10 @@ def _diff(a: dict, b: dict) -> list:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--dump", metavar="FILE", help="capture effect-set to FILE (JSON)")
-    ap.add_argument("--ref", metavar="GITREF", help="capture this git ref instead of the working tree")
+    ap.add_argument("--dump", metavar="FILE", help="effect-set を FILE に捕捉する（JSON）")
+    ap.add_argument("--ref", metavar="GITREF", help="作業ツリーの代わりにこの git ref を捕捉する")
     ap.add_argument("--compare", metavar="GITREF",
-                    help="capture GITREF and the working tree, diff, exit 1 on any difference")
+                    help="GITREF と作業ツリーを捕捉して diff、差分があれば exit 1")
     args = ap.parse_args()
 
     if args.compare:

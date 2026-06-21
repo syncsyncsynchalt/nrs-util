@@ -1,11 +1,12 @@
-"""Capture a window to PNG via Win32 PrintWindow (ctypes only, no external deps).
+"""Win32 PrintWindow でウィンドウを PNG にキャプチャする（ctypes のみ、外部依存なし）。
 
-Usage:
+使い方:
   python tools/runtime/screenshot_window.py [--pid N | --title SUBSTR] [--out PATH]
 
-Finds the target top-level window (by process id or title substring; default: the
-nrs.exe game window, title "WGL"), renders it with PrintWindow(PW_RENDERFULLCONTENT)
-so GPU/D3D content is captured even when occluded, and writes a PNG.
+対象のトップレベルウィンドウ（プロセス id またはタイトル部分文字列で指定。
+デフォルトは nrs.exe のゲームウィンドウ、タイトル "WGL"）を探し、
+PrintWindow(PW_RENDERFULLCONTENT) で描画して隠れていても GPU/D3D 内容を
+キャプチャし、PNG を書き出す。
 """
 import ctypes, ctypes.wintypes as wt, struct, zlib, sys, argparse, os, datetime
 
@@ -65,14 +66,14 @@ def capture(hwnd, out_path):
     bi = BITMAPINFOHEADER()
     bi.biSize = ctypes.sizeof(BITMAPINFOHEADER)
     bi.biWidth = w
-    bi.biHeight = -h  # top-down
+    bi.biHeight = -h  # トップダウン
     bi.biPlanes = 1
     bi.biBitCount = 32
     bi.biCompression = 0
     buf = (ctypes.c_char * (w * h * 4))()
     gdi32.GetDIBits(mdc, bmp, 0, h, buf, ctypes.byref(bi), DIB_RGB_COLORS)
 
-    # BGRA → RGB rows with PNG filter byte 0
+    # BGRA → RGB 行に変換し PNG filter byte 0 を付ける
     data = bytes(buf)
     raw = bytearray()
     for y in range(h):
@@ -103,7 +104,7 @@ if __name__ == "__main__":
     a = ap.parse_args()
     pid, title = a.pid, a.title
     if pid is None and title is None:
-        title = "WGL"  # nrs.exe game window
+        title = "WGL"  # nrs.exe のゲームウィンドウ
     wins = find_window(pid=pid, title_sub=title)
     if not wins:
         print(f"No window found (pid={pid} title={title})")
