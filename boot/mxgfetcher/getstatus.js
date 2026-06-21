@@ -2,7 +2,7 @@
 // persistence: runtime   // network_role=local
 // va: 0x97718E, 0x9771CB, 0x457FE0, 0x9746C0, 0x974760, 0x9747A0, 0x975140, 0x6FF980, 0x6FF650, 0x9744F0, 0x975857, 0x98ADC0, 0x458271
 // ssot:        mxgfetcher/FACTS.md ; BUGS.md [FIXED] get_status recv / Error 0903
-// role:        get_status/amGfetcher init-flag force + HLSM state7→8 + parser/SM patchCodes + 0x98ADC0 recv-completion fix. Mixed; runtime Interceptors → reverts on detach. Pairs with amgfetcher/recv.js.
+// role:        get_status/amGfetcher init-flag force + HLSM state7→8 + parser/SM patchCodes + 0x98ADC0 recv-completion fix. load-bearing のみ（純診断フックは diag.js へ分離）。runtime; detach で revert。Pairs with mxgfetcher/recv.js。
 
 // ─────────────────────────────────────────────────────────────────────────────
 // amGfetcher SM diagnostic + force
@@ -186,32 +186,6 @@
         logMsg('PATCH', 'FUN_006FF650 → patchCode(mov eax,1; ret) persistent, verify=' + ok650);
     } catch(e) { logMsg('WARN', '0x2FF650 patchCode: ' + e); }
 
-    // ── Diagnostic: FUN_00974B00 (get_status result parser) ───────────────────
-    var diag974b00 = 0;
-    try {
-        Interceptor.attach(va(0x974B00), {
-            onLeave: function(ret) {
-                diag974b00++;
-                if (diag974b00 <= 5 || diag974b00 % 200 === 0)
-                    logMsg('DIAG_974B00', '#' + diag974b00 + ' ret=' + ret.toInt32());
-            }
-        });
-        logMsg('INIT_DIAG', '0x974B00 hooked');
-    } catch(e) { logMsg('WARN', '0x974B00: ' + e); }
-
-    // ── Diagnostic: FUN_00974820 (status string→int) ──────────────────────────
-    var diag974820 = 0;
-    try {
-        Interceptor.attach(va(0x974820), {
-            onLeave: function(ret) {
-                diag974820++;
-                if (diag974820 <= 10 || diag974820 % 200 === 0)
-                    logMsg('DIAG_974820', '#' + diag974820 + ' statusInt=' + ret.toInt32());
-            }
-        });
-        logMsg('INIT_DIAG', '0x974820 hooked');
-    } catch(e) { logMsg('WARN', '0x974820: ' + e); }
-
     // ── FIX: FUN_009744F0 (TCP SM done check) → patchCode (PERSISTENT, hang-safe) ─
     // Root cause: sub-state 8 cleanup closes the stream ([0x1286FF0]=0). The next
     // call to 9744F0 sees [0x1286FF0]=0 and returns -3 instead of [0x1287000]=0,
@@ -261,74 +235,6 @@
         logMsg('PATCH', '0x9744F0 patchCode (persistent hang-safe, ' + code.length + 'b): stream==0→ret0; else r!=0→ret1; r==0→reset+ret0');
     } catch(e) { logMsg('WARN', '0x9744F0 patchCode: ' + e); }
 
-    // ── Diagnostic: FUN_00975A70 (get_status sender) ──────────────────────────
-    var diag975a70 = 0;
-    try {
-        Interceptor.attach(va(0x975A70), {
-            onLeave: function(ret) {
-                diag975a70++;
-                if (diag975a70 <= 5 || diag975a70 % 200 === 0)
-                    logMsg('DIAG_975A70', '#' + diag975a70 + ' ret=' + ret.toInt32());
-            }
-        });
-        logMsg('INIT_DIAG', '0x975A70 hooked');
-    } catch(e) { logMsg('WARN', '0x975A70: ' + e); }
-
-    // ── Diagnostic: FUN_00975320 (TCP sub-state 4 handler: response parser) ─────
-    var diag975320 = 0;
-    try {
-        Interceptor.attach(va(0x975320), {
-            onLeave: function(ret) {
-                diag975320++;
-                if (diag975320 <= 10 || diag975320 % 100 === 0)
-                    logMsg('DIAG_975320', '#' + diag975320 + ' ret=' + ret.toInt32());
-            }
-        });
-        logMsg('INIT_DIAG', '0x975320 (sub-state4 parser) hooked');
-    } catch(e) { logMsg('WARN', '0x975320: ' + e); }
-
-    // ── Diagnostic: FUN_00975700 (TCP SM step, called when busy=1) ──────────────
-    // Called by outer HLSM every tick when tcpBusy=1 (after state-9 success).
-    // If this isn't being called, the busy=1 path in the HLSM doesn't go here.
-    var diag975700 = 0;
-    try {
-        Interceptor.attach(va(0x975700), {
-            onLeave: function(ret) {
-                diag975700++;
-                var subState = va(0x1286FF4).readU32();
-                if (diag975700 <= 10 || diag975700 % 500 === 0)
-                    logMsg('DIAG_575700', '#' + diag975700 + ' subState=' + subState + ' ret=' + ret.toInt32());
-            }
-        });
-        logMsg('INIT_DIAG', '0x975700 (TCP SM step) hooked');
-    } catch(e) { logMsg('WARN', '0x975700: ' + e); }
-
-    // ── Diagnostic: FUN_00975830 (state-9 pause request SM) ──────────────────
-    // Called by state 9 handler with arg=1. Sends request=pause, checks FUN_974560.
-    // Returns 0 = done (state 9 success: next=0, busy=1); non-zero = pending/error.
-    // Also reads [0x1286FF0] (stream ptr) and [0x1286FF4] (stream busy flag).
-    var diag975830 = 0;
-    try {
-        Interceptor.attach(va(0x975830), {
-            onEnter: function(args) {
-                this.arg0 = args[0].toInt32();
-                try {
-                    // 0x1286FF0 = Ghidra VA; RVA = 0x1286FF0 - 0x400000 = 0xE86FF0
-                    var streamPtr  = va(0x1286FF0).readU32();
-                    var streamBusy = va(0x1286FF4).readU32();
-                    this.streamInfo = ' strPtr=0x' + streamPtr.toString(16) + ' strBusy=' + streamBusy;
-                } catch(e) { this.streamInfo = ''; }
-            },
-            onLeave: function(ret) {
-                diag975830++;
-                if (diag975830 <= 10 || diag975830 % 200 === 0)
-                    logMsg('DIAG_575830', '#' + diag975830 + ' arg=' + this.arg0 +
-                           this.streamInfo + ' ret=' + ret.toInt32());
-            }
-        });
-        logMsg('INIT_DIAG', '0x975830 (pause SM) hooked');
-    } catch(e) { logMsg('WARN', '0x975830: ' + e); }
-
     // ── FIX: FUN_00975830 pause SM strBusy stuck ─────────────────────────────
     // Root cause: pre-HLSM init call to 975830(arg=0) does full sync pause exchange
     // and leaves [0x1286FF4]=1. State=9 handler calls 975830(arg=1) and sees
@@ -343,19 +249,6 @@
         });
         logMsg('PATCH', '0x975857 patched: bypass strBusy check in pause SM');
     } catch(e) { logMsg('WARN', '0x975857 patch: ' + e); }
-
-    // ── Diagnostic: FUN_00974560 (TCP SM completion check, called from 575830) ─
-    var diag974560 = 0;
-    try {
-        Interceptor.attach(va(0x974560), {
-            onLeave: function(ret) {
-                diag974560++;
-                if (diag974560 <= 10 || diag974560 % 200 === 0)
-                    logMsg('DIAG_574560', '#' + diag974560 + ' ret=' + ret.toInt32());
-            }
-        });
-        logMsg('INIT_DIAG', '0x974560 (pause done-check) hooked');
-    } catch(e) { logMsg('WARN', '0x974560: ' + e); }
 
     // ── FIX: 0x98ADC0 (PCPA recv poll) → force ret=1 after get_status recv ──
     // Root cause: port 40113 uses raw winsock recv(). 0x98DAB0 never returns 1

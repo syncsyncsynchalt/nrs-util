@@ -126,6 +126,22 @@
       "network_role": "local"
     },
     {
+      "module": "mxgfetcher/diag.js",
+      "subsys": "mxgfetcher",
+      "persistence": "monitor",
+      "va": [
+        "0x974B00",
+        "0x974820",
+        "0x975A70",
+        "0x975320",
+        "0x975700",
+        "0x975830",
+        "0x974560"
+      ],
+      "ssot": "mxgfetcher/FACTS.md",
+      "network_role": "local"
+    },
+    {
       "module": "amjvs/state.js",
       "subsys": "amjvs",
       "persistence": "persistent",
