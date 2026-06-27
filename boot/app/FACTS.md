@@ -7,6 +7,17 @@
 - `no_selfshutdown.js`: ルートシステムシーンの self-shutdown を無力化（patchCode persistent）。
 固定 RVA なし（API/エクスポートフック中心）以外は各モジュールのヘッダ参照。
 
+## ログコンソール表示 [F]
+
+ブートログ（`[TAG] msg` 群: RINGEDGE/HLSM/AMDBG/pcpa send/recv 等）は **nrs.exe 側ではなく
+`launch.py` が frida `send` を受けて print している**。よって「全ログを1つのコンソールに出す」=
+ランチャのコンソールに集約するのが正。`launch.py`:
+- 端末なし起動（pythonw/ダブルクリック）でも `_ensure_console()`（`AllocConsole`）でログ窓を出す。
+- `pcpa_server.py` は本流コンソールを継承して起動（別窓にしない）→ keychip/PCPA ログも同じ窓に出る。
+- frida.spawn された nrs.exe はランチャのコンソールを継承するため、ゲームの native stdout も同じ窓へ。
+  （nrs 自前の `AllocConsole` は「既にコンソール接続済み」で失敗するので行わない。
+   `amDebugOut` 0x55C7E0 は `_vsnprintf` 後に出力破棄＝amDebug は `amdebug/diag.js` のフック経由で出す。）
+
 ## ルートシーン self-shutdown [S/F]
 
 | static_VA | 内容 |

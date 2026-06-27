@@ -384,7 +384,28 @@ def _create_tp_jvs_shm():
     print(f'[JVS_SHM] TeknoParrot_JvsState: 8 bytes at 0x{view:X} (all zeros)')
     return (h, view)  # handle を生かし続ける
 
+class _SafeStdout:
+    """stdout が pipe で取り込まれている場合（launch.py の GUI/console）、取り込み側が先に終了して
+    pipe が閉じても print で BrokenPipeError で落ちないようにするラッパ。keychip サーバはゲーム継続中
+    生き続ける必要があるため、ログ書き込み失敗は黙って捨てる。"""
+    def __init__(self, w):
+        self._w = w
+    def write(self, s):
+        try:
+            return self._w.write(s)
+        except Exception:
+            return len(s)
+    def flush(self):
+        try:
+            self._w.flush()
+        except Exception:
+            pass
+
+
 if __name__ == '__main__':
+    import sys as _sys
+    _sys.stdout = _SafeStdout(_sys.stdout)  # pipe 切断でも落ちない
+
     _jvs_shm = _create_tp_jvs_shm()  # このプロセスの生存中ずっと生かしておく必要あり
 
     for p in PORTS:

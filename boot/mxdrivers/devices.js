@@ -2,7 +2,7 @@
 // persistence: runtime   // network_role=local
 // va: —
 // ssot:        mxdrivers/FACTS.md
-// role:        mxsram/mxsuperio/mxhwreset/jvs_pipe/mxsmbus を CreateFile/NtCreateFile/DeviceIoControl フックでダミー成功。mxsram(micetools mxsram.c) + mxsmbus(AT24C64AN eeprom, SetupAPI 発見) は micetools 準拠で data/nvram/{sram,eeprom}.bin に永続。runtime
+// role:        mxsram/mxsuperio/mxhwreset/jvs_pipe/mxsmbus/columba を CreateFile/NtCreateFile/DeviceIoControl フックでダミー成功。mxsram(micetools mxsram.c) + mxsmbus(AT24C64AN eeprom, SetupAPI 発見) は micetools 準拠で data/nvram/{sram,eeprom}.bin に永続。columba(SEGA DMI 読取) は micetools columba.c/dmi.c 準拠で RINGEDGE2 の DMI を返し board type=3 を解決(amBackup error(-21) 解消)。runtime
 
 // RingEdge デバイスエミュレーション: mxhwreset / mxsuperio / mxsram / jvs_pipe
 //
@@ -31,11 +31,12 @@
         mxsuperio: CreateEventA(NULL_PTR, 0, 0, NULL_PTR),
         mxsram:    CreateEventA(NULL_PTR, 0, 0, NULL_PTR),
         mxsmbus:   CreateEventA(NULL_PTR, 0, 0, NULL_PTR),  // amEeprom (AT24C64AN) のバッキング
+        columba:   CreateEventA(NULL_PTR, 0, 0, NULL_PTR),  // SEGA DMI/SMBIOS 読取（board type 判定）
     };
     logMsg('RINGEDGE', 'fake handles: jvs_pipe=' + FAKE.jvs_pipe +
            ' mxhwreset=' + FAKE.mxhwreset +
            ' mxsuperio=' + FAKE.mxsuperio + ' mxsram=' + FAKE.mxsram +
-           ' mxsmbus=' + FAKE.mxsmbus);
+           ' mxsmbus=' + FAKE.mxsmbus + ' columba=' + FAKE.columba);
 
     // 高速 lookup 用に、fake ハンドルの文字列表現の集合を作る
     var fakeSet = {};
@@ -48,6 +49,7 @@
         if (p.indexOf('mxsuperio')       >= 0) return 'mxsuperio';
         if (p.indexOf('mxsram')          >= 0) return 'mxsram';
         if (p.indexOf('mxsmbus')         >= 0) return 'mxsmbus';
+        if (p.indexOf('columba')         >= 0) return 'columba';
         return null;
     }
 
@@ -358,6 +360,63 @@
     }
     eepromBackOpen();
 
+    // ── columba (SEGA DMI/SMBIOS 物理メモリ読取ドライバ) の DMI テーブル ─────────
+    // 正: micetools dll/drivers/columba.c + lib/mice/dmi.c + lib/am/amOemstring.c。
+    // nrs.exe の amOemstring/amPlatformGetBoardType(FUN_00988c10) が
+    //   CreateFileW("\\.\columba") → DeviceIoControl(IOCTL_COLUMBA_READ=0x9c406104)
+    // で物理メモリ(DMI領域)を読み、System Manufacturer と OEM 文字列から board type を決める。
+    // columba が無い(本来は SEGA ドライバ)と:
+    //   ① OEM 読取が成功せず DAT_01296158 がキャッシュされない → 毎回 columba を開き直す(洪水)
+    //   ② board type 不明 → amBackup_getAreaDescriptor(0x982f40) が null → amBackupRecordWriteDup error(-21)
+    // RINGEDGE2(本機 v63.01.10) の DMI を返すと board type=3 に解決し、両症状が消える。
+    // 物理アドレス: 0xF0000 → "_DMI_" アンカーヘッダ / 0xF1000 → DMI テーブル本体。
+    var DMI_HEADER_PHYS = 0xF0000;
+    var DMI_TABLES_PHYS = 0xF1000;
+
+    // micetools dmi_append_with_strings 相当: 整形領域(struct)+各文字列(null終端)+末尾null。
+    function dmiSection(structBytes, strings) {
+        var out = structBytes.slice();
+        for (var i = 0; i < strings.length; i++) {
+            for (var c = 0; c < strings[i].length; c++) out.push(strings[i].charCodeAt(c) & 0xff);
+            out.push(0);                  // 各文字列の null 終端
+        }
+        out.push(0);                      // セクション末尾の double-null
+        return out;
+    }
+    // micetools dmi_build_default() の MICE_PLATFORM_RINGEDGE2 分岐そのもの。
+    // パーサ(amiOemstringLoadStrings)は header->Length で整形領域を飛ばす。System/String は
+    // Length==sizeof なので文字列 index がそのまま一致する（Manufacturer=#0, OEM=#0..4）。
+    // BIOS は Length=0x12 < struct 22B（micetools と同一の版差。board type には無関係）。
+    var dmiBios = dmiSection(
+        [0x00, 0x12, 0x00,0x00, 0x01, 0x02, 0x00,0x00, 0x03, 0x00,
+         0x1f,0x00,0x00,0x00,0x00,0x00,0x00,0x00, 0x08, 0x0f, 0xff, 0xff],
+        ['American Megatrends Inc.', '080015 ', '07/28/2011']);
+    // System(type1): Manufacturer 文字列(#0) = "NEC"（RINGEDGE2 の System Manufacturer）。
+    var dmiSystem = dmiSection(
+        [0x01, 0x08, 0x01,0x00, 0x01, 0x02, 0x03, 0x04],
+        ['NEC', 'To Be Filled By O.E.M.', 'To Be Filled By O.E.M.', 'To Be Filled By O.E.M.']);
+    // OEM strings(type11): #2="AAL"(platform id) / #4="AAL2"(board type)。
+    // nrs amPlatformGetBoardType は ("AAL"&&"NEC"&&"AAL2") → board type=3 と判定する。
+    var dmiStrings = dmiSection(
+        [0x0b, 0x05, 0x02,0x00, 0x05],
+        ['DAC-BJ02', 'DAC-BJ02', 'AAL', 'Advantech', 'AAL2']);
+    var dmiTableBytes = dmiBios.concat(dmiSystem).concat(dmiStrings);
+    var dmiLen = dmiTableBytes.length;    // = 0xC0 (192)
+
+    // "_DMI_" アンカー(16B): Signature/Checksum/StructLength@6/StructAddr@8/NumStructs@12。
+    // 探索側(amiOemstringLocateDMITable)は "_DMI_" と +6 length / +8 base のみ参照（checksum 不問）。
+    var dmiHeaderBytes = [0x5f,0x44,0x4d,0x49,0x5f, 0x00,
+                          dmiLen & 0xff, (dmiLen >>> 8) & 0xff,
+                          DMI_TABLES_PHYS & 0xff, (DMI_TABLES_PHYS >>> 8) & 0xff,
+                          (DMI_TABLES_PHYS >>> 16) & 0xff, (DMI_TABLES_PHYS >>> 24) & 0xff,
+                          0x20, 0x00, 0x00, 0x00];
+
+    // 出力ゼロ埋め用の事前確保バッファ（micetools の memset 相当。table 読取は 0x10000B 固定）。
+    var dmiZero = Memory.alloc(0x10000);
+    dmiZero.writeByteArray(new Array(0x10000).fill(0));
+    logMsg('RINGEDGE', 'columba DMI built (' + dmiLen +
+           ' B; RINGEDGE2 Manufacturer=NEC platform=AAL board=AAL2 -> boardType 3)');
+
     // mxsuperio hwmon エミュレーション用の W83791D bank 状態
     var w83791dBank = 0;
 
@@ -468,6 +527,46 @@
                     if (nm <= 10 || nm % 200 === 0) {
                         logMsg('RINGEDGE', 'DIC[' + nm + '] mxsmbus ioctl=0x' + ioctl.toString(16) +
                                ' ' + dbg + (okSmb ? '' : ' -> FALSE'));
+                    }
+                    return;
+                }
+
+                // columba: SEGA DMI/SMBIOS 物理メモリ読取（micetools columba_DeviceIoControl 準拠）
+                // IOCTL_COLUMBA_READ(0x9c406104) のみ処理。AM_COLUMBA_REQUEST(0x10B):
+                //   physAddr(LE u64)@0 / elementSize@8 / elementCount@0xc。
+                if (dev === 'columba') {
+                    var okCol = false, nretCol = 0, dbgCol = '';
+                    if (ioctl === 0x9c406104 && this.inBuf && !this.inBuf.isNull() &&
+                        out && !out.isNull()) {
+                        try {
+                            var physLo   = this.inBuf.readU32();           // physAddr.LowPart
+                            var elemSize = this.inBuf.add(8).readU32();
+                            var elemCnt  = this.inBuf.add(0xc).readU32();
+                            var zlen = outLen < 0x10000 ? outLen : 0x10000; // micetools: memset 全体
+                            if (zlen > 0) out.writeByteArray(dmiZero.readByteArray(zlen));
+                            if (physLo === DMI_HEADER_PHYS) {
+                                if (outLen >= dmiHeaderBytes.length) out.writeByteArray(dmiHeaderBytes);
+                                nretCol = (elemSize * elemCnt) >>> 0;       // 要求バイト数を返す
+                                okCol = true; dbgCol = 'DMI header';
+                            } else if (physLo === DMI_TABLES_PHYS) {
+                                if (outLen >= dmiLen) out.writeByteArray(dmiTableBytes);
+                                nretCol = 0x10000;                          // table 読取は固定 0x10000
+                                okCol = true; dbgCol = 'DMI tables';
+                            } else {
+                                dbgCol = 'unmapped 0x' + physLo.toString(16); // micetools: FALSE
+                            }
+                        } catch(e) { dbgCol = 'parse-err ' + e; }
+                    } else {
+                        dbgCol = 'ioctl=0x' + ioctl.toString(16);
+                    }
+                    if (okCol && this.bytesRet && !this.bytesRet.isNull()) {
+                        try { this.bytesRet.writeU32(nretCol); } catch(e) {}
+                    }
+                    ret.replace(okCol ? 1 : 0);
+                    var nc = ++fakeDicCounts[dev];
+                    if (nc <= 6 || nc % 100 === 0) {
+                        logMsg('RINGEDGE', 'DIC[' + nc + '] columba ' + dbgCol +
+                               (okCol ? ' -> ok' : ' -> FALSE'));
                     }
                     return;
                 }

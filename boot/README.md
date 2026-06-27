@@ -41,11 +41,18 @@ dir = RingEdge 実行ファイル(`mx*.exe`)/ ライブラリ(`am*`)。単純固
 
 ```powershell
 $py="$env:LOCALAPPDATA\Programs\Python\Python313\python.exe"
-& $py boot\launch.py --spawn --duration 90
+& $py boot\launch.py --spawn                       # 既定: GUI ログ窓（プレイ中は開いたまま）
+& $py boot\launch.py --spawn --no-gui --duration 90  # console（ヘッドレス/定時キャプチャ）
 ```
 `launch.py` が `boot\mxkeychip\server\pcpa_server.py` を自動起動し、**nrs.exe を `frida.spawn` で
 サスペンド起動 → MANIFEST 順に全モジュールをロード → `frida.resume`** → capture。
-attract 到達後 detach しても persistent モジュールは有効。
+監視は窓を閉じる（または `--duration`/Ctrl+C）まで継続し、**終了時に nrs.exe と pcpa_server を
+自動終了**する（残して観察を続けるなら `--keep`）。
+
+**ログ表示（既定 GUI）**: frida ブートログ＋pcpa サーバログを 1 つの窓に時刻付きで集約（`boot/log_gui.py`、
+Tkinter・依存なし）。ソース別カラー／部分一致フィルタ／I-O ノイズ(NtCreateFile)非表示／エラーのみ／
+検索／一時停止／表示分の JSONL 書出。全ログは `captures/frida-*.txt`（人間用）と
+`captures/frida-*.jsonl`（AI 解析用・`{ts,src,lvl,msg}` 構造化）に保存。Tk 不在環境や `--no-gui` では console。
 
 **サスペンド起動**: `frida.spawn` でサスペンド起動することで、nrs.exe 最初期の init
 （amlib/amSram/amEeprom/amBackup のデバイス init）より前に全フックを効かせる。これにより

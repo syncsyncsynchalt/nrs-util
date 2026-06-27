@@ -7,15 +7,35 @@
   },
   "tasks": [
     {
-      "label": "nrs: launch (spawn 90s)",
+      "label": "nrs: launch (GUI)",
       "type": "shell",
       "command": "${env:PY}",
-      "args": ["boot/launch.py", "--spawn", "--duration", "90"],
+      "args": ["boot/launch.py", "--spawn"],
       "options": { "cwd": "${workspaceFolder}" },
       "problemMatcher": [],
       "group": { "kind": "build", "isDefault": true },
       "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
-      "detail": "MANIFEST.json の load_order でモジュールを連結ロードし nrs.exe を spawn。pcpa_server は自動起動。"
+      "detail": "既定。nrs.exe を spawn し、全ログ（frida + pcpa）を GUI ログ窓に時刻付きで集約表示（プレイ中は開いたまま）。窓を閉じると nrs.exe / pcpa を自動終了。ログ: captures/frida-*.txt + frida-*.jsonl。"
+    },
+    {
+      "label": "nrs: launch (GUI, keep alive)",
+      "type": "shell",
+      "command": "${env:PY}",
+      "args": ["boot/launch.py", "--spawn", "--keep"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "detail": "GUI 起動。窓を閉じても nrs.exe / pcpa_server を残す（観察継続用）。"
+    },
+    {
+      "label": "nrs: launch (console capture 90s)",
+      "type": "shell",
+      "command": "${env:PY}",
+      "args": ["boot/launch.py", "--spawn", "--no-gui", "--duration", "90"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "detail": "ヘッドレス/定時キャプチャ。90 秒採取して console に出し、終了時に nrs.exe / pcpa を自動終了。CI・自動化向け。"
     },
     {
       "label": "logs: tail (filtered)",
@@ -26,7 +46,17 @@
       "problemMatcher": [],
       "isBackground": true,
       "presentation": { "reveal": "always", "panel": "dedicated" },
-      "detail": "主要イベント（REGION_CHK / ERRCODE / HLSM / Error 09）を追尾表示。"
+      "detail": "主要イベント（REGION_CHK / ERRCODE / HLSM / Error 09）を captures/frida-*.txt から追尾表示。"
+    },
+    {
+      "label": "logs: errors (latest jsonl)",
+      "type": "shell",
+      "command": "${env:PY}",
+      "args": ["-c", "import glob,os,json; f=max(glob.glob('captures/frida-*.jsonl'),key=os.path.getmtime); print('latest:',f); [print(r['ts'],'[%s]'%r['src'],r['msg']) for r in (json.loads(l) for l in open(f,encoding='utf-8') if l.strip()) if r.get('lvl')=='error']"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "detail": "直近 JSONL から lvl=error のみ抽出（AI 解析・トリアージ向け）。"
     },
     {
       "label": "logs: session summary",
@@ -47,7 +77,7 @@
       "problemMatcher": [],
       "group": "test",
       "presentation": { "reveal": "always", "panel": "shared" },
-      "detail": "MANIFEST の rva 実在性 / base.js 先頭 / persistence 整合を機械検証。"
+      "detail": "MANIFEST/モジュールヘッダ va / base.js 先頭 / dialect guard / persistence 整合を機械検証。"
     },
     {
       "label": "ghidra: start headless MCP",

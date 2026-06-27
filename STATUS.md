@@ -51,10 +51,13 @@ device-scene latch（display struct `DAT_016f5a80` への errCode 固着）は *
 
 ```powershell
 $py="$env:LOCALAPPDATA\Programs\Python\Python313\python.exe"
-& $py boot\launch.py --spawn --duration 90
+& $py boot\launch.py --spawn                      # 既定で GUI ログ窓（プレイ中は開いたまま）
+& $py boot\launch.py --spawn --no-gui --duration 90  # ヘッドレス/定時キャプチャ（console）
 # MANIFEST.json の load_order でモジュールを連結ロード（数値順固定。順序変更厳禁＝BUGS.md 参照）
-# pcpa_server (boot\mxkeychip\server\pcpa_server.py) は launch.py が自動起動（既存なら skip）
-# attract 到達後 detach → patchCode/pcpa_server で継続
+# pcpa_server は launch.py が毎回 fresh に起動し stdout を pipe で取り込む（全ログ 1 窓に集約）
+# 終了: 窓を閉じる / --duration 経過 / Ctrl+C で監視終了 → nrs.exe と pcpa を自動終了（残すなら --keep）
+# ログ: captures\frida-*.txt（人間用） + captures\frida-*.jsonl（AI 解析用・構造化）
+# GUI 機能: ソース別カラー / 部分一致フィルタ / I-O ノイズ非表示 / エラーのみ / 検索 / 一時停止 / JSONL 書出
 ```
 
 ## ログ確認
