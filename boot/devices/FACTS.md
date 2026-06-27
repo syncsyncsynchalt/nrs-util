@@ -28,3 +28,26 @@ boot 後に居座る「Error NNNN」は**ゲームアプリのエラーシーン
   正は `./presence.js`（subsys=devices）。
 - 回避: `DAT_016b88dc>=1`(+ `DAT_016b88e0<=1 && DAT_016b88e4==1`) かつ `DAT_016b8670==0`、または `DAT_016b8b50==8`。
   `DAT_016014a3!=0` でも skip するが mxkeychip/dongle 派生(`FUN_00459220/459460`)なので force 非推奨。
+
+### Dipsw / board index = board-table check (errCode 0xa / 0xb) [S+F]
+- **dipsw read** `FUN_0045a0e0`（唯一の writer）: `amDipswReadByte` 経由で byte2/byte3 を読み、
+  そこから派生:
+  - `byte2` ← `FUN_00984190`（成功時 `*p=3` とハードコード）。`DAT_01601951`＋flag bit 0x1/0x2。
+  - `byte3` ← `FUN_00984130`→`FUN_00983bb0(0)`→`FUN_009836e0`（実 dipsw バイト）。`DAT_01601950`＋
+    `index = (byte3>>4)&7`（`0x45A18E SHR AL,4; AND AL,7`）＋flag bits（test/service スイッチ群）。
+  - flag `DAT_0160194c` bit↔reader: 0x1/0x2=`FUN_0089b230`(入力カウンタ) / 0x4=`FUN_006c3730`(log level) /
+    0x8=`FUN_0045a4c0`(タイマ) / **0x20=`amlib_storage_board_check`(errCode 0xb)**。0x80 は unread。
+- **board index reader は2つ** — `amlib_storage_board_check`(`FUN_00679cb0`) と `FUN_006c5470`。
+- **board-table** `DAT_00b84554` はバイナリ内の静的定数（writer 無し、8×u32）:
+  `[FFFFFFFF, 01, 08, 03, 0F, 04, 0A, 10]`。**index 2 のみ値 8（=有効基板コード）**。
+- `amlib_storage_board_check`（`FUN_006c3730` が amlib_master_init 後に**無条件呼び出し**、amHm フラグ非依存）:
+  `table[index]!=8 && errCode==0` → `DAT_016f5af0=10`(0xa) を `0x00679dae`／
+  `DAT_0160194c&0x20 && errCode==0` → `=0xb` を `0x00679dc1`。errCode 0xa を消すと latch race で 0xb が surface。
+- `FUN_006c5470`: 同テーブルを `switch`、case 8 以外で `DAT_016f5ac0=0x11/0x1e`。
+- スタンドアロンは dipsw ドライバ不在で読み失敗 → bytes garbage → index/flag が不定 → errCode 0xa/0xb が
+  画面ラッチ race の種になる。
+- **適用 patch**（実基板の clean 値を源流供給）: `0x45A0F5`（byte2 ロード→`MOV CL,3`）＋
+  `0x45A0F9`（byte3 ロード→`MOV AL,0x20`）。byte3=0x20 で既存 `SHR/AND` が index 2 を自然算出し
+  table[2]=8 を満たす（0xa 解消）＋ bit 0x8(=flag 0x20)=0（0xb 解消）。byte2=3 は実基板値で
+  bit 0x1/0x2 を実機同様に供給。両 reader（0xa / 0xb / FUN_006c5470 の 0x11/0x1e）を源流で恒久解消。
+  正は `./presence.js`（subsys=devices）。
