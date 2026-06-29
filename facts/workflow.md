@@ -95,4 +95,4 @@ triage・日付つき訂正・推測で機構を当てない。
 ## 脱 Python 移植
 
 tools/ の Python 依存を native 化中。control_panel は C 化完了（`loader.exe` = 統合 GUI に吸収。起動/終了/再起動・FreePlay/TEST/Windowed・入力設定/テスト・ログ tail を担う）。
-残りツールの移植も同方針。`tools/static/` の disasm.py 等はまだ Python。
+残りツールの移植も同方針。Python が残るのは `tools/ghidra_mcp/`（bridge / build_headless）程度。

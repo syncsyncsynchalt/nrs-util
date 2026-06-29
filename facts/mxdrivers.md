@@ -1,8 +1,8 @@
 # mx ドライバ層 FACTS（co-located）
 
-横断定数 `../ARCH.md` / 索引 repo ルート `FACTS.md`。
+索引 `_index.md` / 横断知見 `workflow.md`。
 
-RingEdge の mx* デバイスドライバを emulate（`devices.js`、persistence=runtime）:
+RingEdge の mx* デバイスドライバを emulate（`src/logic/driver/mxdevices.c`）:
 `mxsram` / `mxsuperio` / `mxhwreset` / `mxsmbus` / `columba` / `\\.\pipe\teknoparrot_jvs` を
 `CreateFileA/W` ＋ `NtCreateFile` でダミーハンドル化し、`DeviceIoControl` を成功させる
 （mxsram/mxsmbus/columba は micetools 準拠の実データ応答、他は出力ゼロ埋め）。
@@ -35,7 +35,7 @@ amEeprom は STATIC/CREDIT/NETWORK/HISTORY/ALPB レコードの backing（amBack
 **SetupAPI デバイスインターフェース GUID 列挙**でデバイスを探す:
 
 - **GUID** `{5C49E1FE-3FEC-4B8D-A4B5-76BE7025D842}`（実 mxsmbus.sys offset 0x20bc で確認）。
-  `devices.js` が SetupDiGetClassDevsA/EnumDeviceInterfaces/GetDeviceInterfaceDetailA/DestroyDeviceInfoList を
+  `mxdevices.c` が SetupDiGetClassDevsA/EnumDeviceInterfaces/GetDeviceInterfaceDetailA/DestroyDeviceInfoList を
   hook し、この GUID のときだけ偽装インターフェース（DevicePath=`\\.\mxsmbus`）を1件返す。他列挙は素通り。
 - `CreateFileA("\\.\mxsmbus")` → fake handle（classify 済み）。
 - **DeviceIoControl**（FILE_DEVICE_SEGA=0x9c40, METHOD_BUFFERED, lpBytesReturned 設定）:
@@ -64,8 +64,8 @@ amEeprom は STATIC/CREDIT/NETWORK/HISTORY/ALPB レコードの backing（amBack
 
 eeprom が成功すると amlib storage init が通り、ゲームが実機運用パスへ進む。その結果ルート
 システムシーン callback(0x6C3F10)→`FUN_0089e880`(amApp_shouldShutdown)→`FUN_0089df40`(amApp_shutdown_now)
-が `DAT_016f5aa0`(shutdown flag) を立て ATTRACT 前に ExitProcess するため、`boot/app/no_selfshutdown.js` が
-0x6C3F20 の `je`→`jmp` patch で無力化する。詳細は `app/FACTS.md` の「ルートシーン self-shutdown」。
+が `DAT_016f5aa0`(shutdown flag) を立て ATTRACT 前に ExitProcess するため、`src/logic/patches.c` が
+0x6C3F20 の `je`→`jmp` patch で無力化する。詳細は `app.md` の「ルートシーン self-shutdown」。
 `ENABLE_EEPROM=false` にすると eeprom を発見不可にし degraded パス（records -3）へ戻せる。
 
 ## amBackup 層スタック [S]
@@ -76,7 +76,7 @@ mxsram/mxsmbus の上位 am 層。`amlib_storage_init_all`(FUN_004597c0) で **2
 - STATIC/CREDIT/NETWORK/HISTORY/ALPB → amEeprom → mxsmbus → AT24C64AN @0x57（`data/nvram/eeprom.bin`、上記 mxsmbus 節）
 
 mxsram/mxsmbus が micetools 準拠＋永続化されているため native amBackup パスが実データで成立する
-（init がフック後に走るよう launch.py をサスペンド起動。`boot/README.md`）。
+（init がフック後に走るよう host が CREATE_SUSPENDED で注入＝`loader.exe`/GUI の ▶起動）。
 
 呼出階層（static_VA, ImageBase 0x400000）:
 
@@ -198,5 +198,5 @@ OEM getter `FUN_00988e70`(System Manufacturer) / `FUN_00988dd0`(OEM string #0..4
 旧症状の機序（参考）: `\??\columba` open `0xc0000034`(NOT_FOUND) → `FUN_00988c10` が成功時しか `DAT_01296158`
 をキャッシュせず毎回再 open（洪水）→ board type 不明 → getAreaDescriptor null → -21。
 
-エミュ: `devices.js` が micetools `dmi_build_default()` の RINGEDGE2 分岐を JS で再現（DMI 192B）し、
+エミュ: `mxdevices.c` の `build_dmi` が micetools `dmi_build_default()` の RINGEDGE2 分岐を再現（DMI 192B）し、
 0xF0000→ヘッダ / 0xF1000→テーブルを返す。`DAT_01296158`/`DAT_00ccf450` がキャッシュされ洪水・-21 とも解消。

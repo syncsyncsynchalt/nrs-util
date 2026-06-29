@@ -1,13 +1,15 @@
 # amGfetcher FACTS（co-located）
 
-このサブシステムの事実（アドレス/構造体/RVA）。横断定数は `../ARCH.md`、索引は repo ルート `FACTS.md`。
-confidence: [F]=Frida確認 [S]=静的解析 [I]=推論
+このサブシステムの事実（アドレス/構造体/RVA）。索引 `_index.md` / 横断知見 `workflow.md`。
+confidence: [S]=静的解析 [L]=ライブ実走 [I]=推論 [F]=旧 Frida 計装(履歴・再取得は Ghidra/実走)
 
 ---
 
-### patchAmGfetcher IIFE: get_status recv completion fix [S]
+### amGfetcher get_status [S]
 
-番地は static_VA。load-bearing は `boot/mxgfetcher/getstatus.js`、純診断は `boot/mxgfetcher/diag.js`。
+**現行 native は serve-it**: `src/host/keychip_server.c` が 40113 を bind し本物の get_status 交換で SM を自然前進させ、
+`src/logic/patches.c` は 0x6FF980→ret1（state0 gate）＋ JL2JMP 3 個のみ。下の fake-it パッチ群は **native 未使用**
+（旧 Frida `getstatus.js`。実機で 40113 接続が失敗した場合のフォールバック記録。詳細 `port_status.md`「fake-it → serve-it」）。
 
 get_status (port 40113) uses raw winsock recv(), NOT pcpaRecvResponse. The normal PCPA completion
 state ([stream+0x21C]) is never updated → 0x98B260 never returns 1 → SM loops endlessly.
@@ -27,7 +29,7 @@ call-chain（参照のみ。patch 対象は下表）:
 | 0x98B260 | PCPA recv checker | calls 0x98DAB0→0x98ADC0; writes [stream+0x21C]=ret; returns 1 iff 0x98ADC0=1 |
 | 0x98DAB0 | PCPA recv state reader | reads recv buffer state; returns 1 iff recv complete |
 
-load-bearing patch/hook（`getstatus.js`。runtime; detach で revert）:
+fake-it パッチ群（旧 Frida `getstatus.js`、**native 未使用＝フォールバック参照**）:
 
 | static_VA | 機構 | Function | 内容 |
 |---|---|---|---|
@@ -42,7 +44,7 @@ load-bearing patch/hook（`getstatus.js`。runtime; detach で revert）:
 | 0x98ADC0 | Interceptor onLeave | PCPA recv poll | getStatusRecvDone フラグで ret=1 を一度だけ強制 → 同 tick で [0x1287000]=0 + 0x458271 NOP×3 を適用 |
 | 0x458271 | patchCode (動的) | state=0 advance | `NOP×3`（`89 5D 18`=ctx.next=1 を塞ぐ。DAT_210B508 + counter-timeout の再 boot 防止。0x98ADC0 hook 内で適用） |
 
-gfetcherDiag Monitor static_VA（`diag.js`、log only, no modification）:
+get_status SM 関数（参考・RE 観測用）:
 
 | static_VA | Function |
 |---|---|

@@ -1,23 +1,21 @@
 # amPlatform FACTS（co-located）
 
-このサブシステムの事実（アドレス/構造体/RVA）。横断定数は `../ARCH.md`、索引は repo ルート `FACTS.md`。
-confidence: [F]=Frida確認 [S]=静的解析 [I]=推論
+このサブシステムの事実（アドレス/構造体/RVA）。索引 `_index.md` / 横断知見 `workflow.md`。
+confidence: [S]=静的解析 [L]=ライブ実走 [I]=推論 [F]=旧 Frida 計装(履歴・再取得は Ghidra/実走)
 
 ---
 
-### hookAmPlatform IIFE
+### amPlatform gate と期待値（静的パッチは撤去済み＝エミュ供給）
 
-| static_VA | Function | Injected Value |
+| static_VA | Function | 期待値（gate 通過に必要） |
 |---|---|---|
-| 0x981D60 | amPlatformGetOsVersion | "WindowsXP" |
-| 0x981FF0 | amPlatformGetPlatformId | "AAL" (ハードウェア board ID。比較先 "AAL"/"AAM"/"NEC" と一致させる。"RingEdge" は表示名で NG) |
-
-Implementation: `Memory.patchCode`（`patchPlatformFunc` ヘルパー）で関数先頭を
-永続パッチ。`mov eax,[esp+4]; byte-by-byte write; xor eax,eax; ret 4`（stdcall, ret 4 確認済）。
-Interceptor ではないため Frida detach 後も有効。`args[1]` (bufLen) はスタックゴミ（観測値 1,3）なので読まない。
+| 0x981D60 | amPlatformGetOsVersion | 非ゼロ parse で戻り 0（値自体は捨てられる。下記） |
+| 0x981FF0 | amPlatformGetPlatformId | "AAL"（board ID。比較先 "AAL"/"AAM"/"NEC" と一致。"RingEdge" は表示名で NG） |
 
 platform gate `FUN_0045a6f0`（不一致で errCode 2/3 を latch）が読むのは **PlatformId と OsVersion のみ**。
-Error 0901/AAL latch の真因もこの `FUN_0045a6f0`。
+Error 0901/AAL latch の真因もこの `FUN_0045a6f0`。**2026-06-29 に両関数の静的パッチ（旧 Frida 注入 "AAL"/"WindowsXP"）を
+撤去しエミュ供給へ移行**: PlatformId は columba DMI、OsVersion は仮想 `SystemVersion.txt`（下記）。`args[1]`(bufLen) は
+スタックゴミなので無視。
 
 ### patch しない関数（誤 patch 防止の注記）
 - **amPlatformGetBoardType (0x982C50)**: patch 不要。AAL gate `FUN_0045a6f0` は BoardType を参照しない
@@ -33,7 +31,7 @@ Error 0901/AAL latch の真因もこの `FUN_0045a6f0`。
 nrs 内の SEGA 関連文字列は AM Library バナー・フォント名・"RingEdge-BorderBreak/4.5" のみ）。
 → RING\LIBRARY\VERSION はシステム層（mx*/amLib）が消費する値で、**nrs.exe が見るのは board ID "AAL"**。
 本サブシステムの "AAL" 注入で十分で、RINGEDGE2 レジストリ供給は不要。実機イメージが RINGEDGE2 世代である
-ことの確認のみが裏取り成果（`docs/ringedge_system.md`）。なお nrs.exe は **OpenSSL 0.9.8i** を静的リンク
+ことの確認のみが裏取り成果（`ref.md` の RingEdge 純正イメージ）。なお nrs.exe は **OpenSSL 0.9.8i** を静的リンク
 （ビルドパス文字列 `...\ring\openssl\openssl-0.9.8i\crypto\ec\ec2_smpt.c` で確認）。
 
 ---

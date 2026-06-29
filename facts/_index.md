@@ -1,33 +1,39 @@
-# FACTS 索引（事実は co-located）
+# FACTS 索引
 
-nrs.exe の事実（アドレス/構造体/プロトコル）は**各サブシステムのコードに co-locate** してある。
-このファイルは索引のみ。1 サブシステムの作業は当該ディレクトリ閉で完結する（巨大 FACTS 全読み不要）。
+nrs.exe で確定した事実（アドレス/構造体/プロトコル）をサブシステム別に置く。
+1 サブシステムの作業は当該ファイル閉で完結する（全読み不要）。**正は実装**＝値は使う前に
+Ghidra(static_VA)／micetools／実走ログで裏取りする（`../CLAUDE.md` 鉄則）。
 
-confidence 凡例: [F]=Frida確認 [S]=静的解析 [I]=推論
+confidence 凡例: [S]=静的解析(Ghidra) [L]=ライブ実走確認 [I]=推論
+[F]=旧 Frida 計装で確認（**履歴的来歴**。Frida は破棄済み＝再取得は Ghidra/実走で行う）
 
-## 横断（全サブシステム共通）
-- [workflow.md](workflow.md)：作業方法論と運用知見（自律ゲームテストの正しい起動法 / 実体再導出 / パッチ監査の read-fake vs action-block / 静的パッチ clobber / パッチ削減の定石 / 日本語清書 / 脱Python移植）。旧ユーザー単位メモリの移管先。
-- [boot/ARCH.md](boot/ARCH.md)：バイナリ base / static_VA・va() 規約 / PCP ポート・ワイヤ形式 / 静的ライブラリ / TeknoParrot パッチ
+## 横断
 
-## サブシステム別 FACTS（コードと同階層）
-| subsys | facts | boot dir |
+- [workflow.md](workflow.md)：作業方法論・運用知見（自律ゲームテスト起動法 / 実体再導出 / パッチ監査 read-fake vs action-block / 静的パッチ clobber / パッチ削減の定石 / 日本語清書 / 脱 Python 移植）
+- [bugs.md](bugs.md)：live bug / RISK / ANTI-PATTERN（解決済みは `git log`）
+- [port_status.md](port_status.md)：旧 Frida 動的群を native で移植「しなかった」理由（serve-it / root-cause 静的化）
+
+## サブシステム別
+
+| subsys | facts | 主な native 実装 |
 |---|---|---|
-| amNet（DHCP/NIC/種別） | [boot/mxnetwork/FACTS.md](boot/mxnetwork/FACTS.md) | `boot/mxnetwork/` |
-| keychip / PCP | [boot/mxkeychip/FACTS.md](boot/mxkeychip/FACTS.md) | `boot/mxkeychip/` |
-| amJvs / amJvsp | [boot/amjvs/FACTS.md](boot/amjvs/FACTS.md) | `boot/amjvs/` |
-| amDongle | [boot/amdongle/FACTS.md](boot/amdongle/FACTS.md) | `boot/amdongle/` |
-| mx ドライバ層 / amBackup 層（mxsram/mxsmbus + am 層スタック） | [boot/mxdrivers/FACTS.md](boot/mxdrivers/FACTS.md) | `boot/mxdrivers/` |
-| amPlatform | [boot/amplatform/FACTS.md](boot/amplatform/FACTS.md) | `boot/amplatform/` |
-| amGfetcher | [boot/mxgfetcher/FACTS.md](boot/mxgfetcher/FACTS.md) | `boot/mxgfetcher/` |
-| ALL.Net Plus Billing（alpbEx, `boot/ambilling/status.js` 0xA065C0） | [boot/ambilling/FACTS.md](boot/ambilling/FACTS.md) | `boot/ambilling/` |
-| storage presence（`boot/mxstorage/presence.js` 0x4FDA50） | [boot/mxstorage/FACTS.md](boot/mxstorage/FACTS.md) | `boot/mxstorage/` |
-| 周辺デバイス presence 連鎖 | [boot/devices/FACTS.md](boot/devices/FACTS.md) | `boot/devices/` |
-| amlib SYSTEM STARTUP | [boot/mxsegaboot/FACTS.md](boot/mxsegaboot/FACTS.md) | `boot/mxsegaboot/` |
+| amJvs / amJvsp（JVS over COM4） | [amjvs.md](amjvs.md) | `src/logic/driver/mxjvs.c` `input.c` ＋ `api.c` |
+| 周辺デバイス presence・COM map（touch/card/dipsw） | [devices.md](devices.md) | `src/logic/patches.c` `driver/touch.c` ＋ `api.c` |
+| mx ドライバ層 / amBackup（columba/mxsram/mxsmbus eeprom） | [mxdrivers.md](mxdrivers.md) | `src/logic/driver/mxdevices.c` ＋ host `on_set_file_pointer` |
+| keychip / PCP | [mxkeychip.md](mxkeychip.md) | `src/host/keychip_server.c` ＋ `patches.c`（region） |
+| amNet（DHCP/NIC/ALL.Net 接続段） | [mxnetwork.md](mxnetwork.md) | `src/logic/patches.c` |
+| amlib SYSTEM STARTUP | [mxsegaboot.md](mxsegaboot.md) | `src/logic/patches.c` |
+| amPlatform（platform id / os version） | [amplatform.md](amplatform.md) | `api.c`（columba DMI / 仮想 SystemVersion.txt） |
+| amGfetcher（get_status） | [mxgfetcher.md](mxgfetcher.md) | `keychip_server.c`（40113 serve-it） |
+| ALL.Net Plus Billing（alpbEx） | [ambilling.md](ambilling.md) | `src/logic/patches.c`（stub→5） |
+| storage presence | [mxstorage.md](mxstorage.md) | `src/logic/patches.c` |
+| amDongle | [amdongle.md](amdongle.md) | `src/logic/patches.c` |
+| amRtc | [amrtc.md](amrtc.md) | `gamehook.c` ＋ `api.c on_rtc_get` |
+| amDebug ロギング | [amdebug.md](amdebug.md) | `src/host/dbglog.c` |
+| ゲーム窓 / self-shutdown | [app.md](app.md) | `src/host/windowed.c` ＋ `patches.c` |
 
-## boot 構成・運用
-- ロード順 / persistence / va（static_VA）/ network_role → [boot/MANIFEST.json](boot/MANIFEST.json)（boot 構成の単一ソース）
-- アドレス表記は全て **static_VA**（一方言）。RVA/runtime_VA は `boot/lib/base.js` の `va()` 内部のみ → [boot/ARCH.md](boot/ARCH.md)
-- 全体像・起動コマンド → [boot/README.md](boot/README.md) ／ 規約 → [boot/CONVENTIONS.md](boot/CONVENTIONS.md)
-- 逆コンパイル C / xref → Ghidra MCP `mcp__ghidra__decompile_function_by_address`
-- 参照実装 → `docs/teknoparrot.md` / `docs/micetools.md` / `docs/bsnk_ringedge.md`
-- バグ・アンチパターン → `BUGS.md`
+## 外部オラクル・ツール
+
+- 外部オラクル（micetools / TeknoParrot / RingEdge 純正イメージ）の所在 → `../ref.md`
+- 関数名/型の正（Ghidra へ適用） → `../data/known_names.json`
+- 静的解析 = Ghidra MCP（`mcp__ghidra__*`, static_VA）。起動 `tools/ghidra_mcp/start_headless.ps1`

@@ -1,9 +1,8 @@
 # mxstorage FACTS（co-located）
 
-mxstorage.exe（ストレージ管理 / TrueCrypt・geminifs マウント）相当。横断定数は `../ARCH.md`、
-索引は repo ルート `FACTS.md`。confidence: [F]/[S]/[I]。
+mxstorage.exe（ストレージ管理 / TrueCrypt・geminifs マウント）相当。索引 `_index.md` / 横断知見 `workflow.md`。confidence: [S]=静的 [L]=実走 [I]=推論。
 
-## 現状（stub）。実装は `./presence.js`
+## 現状（stub）。実装 `src/logic/patches.c`
 | static_VA | 内容 |
 |---|---|
 | 0x4FDA50 | `FUN_004fda50`(is-DVD-boot-mode predicate) → 0(非DVD/storage OK) 固定。SYSTEM STARTUP state5 / Error 913 "Game Program Not Found on Storage Device" 回避 |

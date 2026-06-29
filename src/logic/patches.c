@@ -13,6 +13,7 @@ typedef struct { uint32_t va; const uint8_t *b; int n; const char *note; } CodeP
 /* --- byte patches（静的VA, 上書きバイト） --- */
 static const uint8_t P_billing[]   = {0xB8,0x05,0x00,0x00,0x00,0xC3};        /* alpbExGetExecStatus -> 5 */
 static const uint8_t RET0[]        = {0x31,0xC0,0xC3};                       /* xor eax,eax;ret */
+static const uint8_t RET8_0[]      = {0x31,0xC0,0xC2,0x08,0x00};             /* xor eax,eax;ret 8（__thiscall の 8B スタック引数を callee で掃除） */
 static const uint8_t RET1[]        = {0xB8,0x01,0x00,0x00,0x00,0xC3};        /* mov eax,1;ret */
 static const uint8_t P_zero1[]     = {0x00};                                 /* imm 0 */
 /* P_dipsw2/P_dipsw3 は撤去（dipsw は api.c dipsw_force_ready + mxdev_ioctl で OS 境界エミュ。下の CODE[] 注記参照）。 */
@@ -31,7 +32,7 @@ static const CodePatch CODE[] = {
     {0xA065C0, P_billing, 6, "alpbExGetExecStatus->5 (billing offline)"},
     /* amdongle/patch.js */
     {0x975E00, RET0, 3, "amDongleBusy->0 (outerSM advances)"},
-    {0x457AF0, RET0, 3, "delete_directory_recursive nop: blocks keychipSM_FSM case4 recursive dir delete on appdata mismatch (DO NOT REMOVE; facts/bugs.md)"},
+    {0x457AF0, RET8_0, 5, "delete_directory_recursive nop: blocks keychipSM_FSM case4 recursive dir delete on appdata mismatch. __thiscall(this,arg1,arg2)=callee-clean ゆえ ret 8 必須(関数の 0x457fd1=RET 0x8 / call site 0x4579F4 に add esp 無し)。bare ret はスタック破壊→発火時クラッシュ。(DO NOT REMOVE; facts/bugs.md, facts/amdongle.md)"},
     /* amjvs: forgery 撤去。native JVS 経路（COM4 = mxjvs.c エミュ）を実駆動する方針へ移行（facts/amjvs.md）。
        0x67AFA0(reinit ret)/0x987590(specCheck)/0x9883D3(acksw) と node BSS data write 群は撤去:
        - amJvspInit→FUN_00987550 が specCheck の前提 ctx[0]=1 を自前で立てるため specCheck パッチ不要。
