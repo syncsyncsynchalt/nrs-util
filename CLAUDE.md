@@ -1,136 +1,88 @@
-# nrs-util Claude 操作ガイド（ルーター）
+# nrs-edge — Claude 操作ガイド（ルーター）
 
-nrs.exe (NRS, x86-32, SEGA RingEdge) を Frida でパッチ・フックして
-スタンドアロン起動させる RE リポジトリ。**このファイルは索引。事実は単一ソースに置く。**
+`nrs.exe`（**Border Break / BBS**, x86-32, SEGA RingEdge）を**無改変**でスタンドアロン起動させる
+**native C** プロジェクト。**OS 境界で RingEdge ハードウェアを仮想化**する（ゲームメモリパッチは原則ゼロ＝
+CrackProof 残置のみ）。**Frida は使わない。** 旧 Frida 実装は破棄済み（git 履歴に残る）。
 
-構成は2分: **`boot/`** = 成果物（nrs.exe を起動させる frida モジュール + keychip サーバ。RingEdge
-サブシステム別。構成は `boot/MANIFEST.json`）／ **`tools/`** = 解析・開発ツールのみ。
+## 鉄則（最優先）
 
-## 鉄則（最優先・毎作業）
+1. **ドキュメントは参考。正は実装。** 値/アドレス/フォーマット/シーケンスは使う前に必ず実体で裏取り:
+   - **nrs.exe** → Ghidra MCP（`mcp__ghidra__*`, static_VA）。手計算・推測禁止。
+   - **micetools**（RingEdge クリーンルームの正。lift 元） → `C:\src\micetools\` 直読。所在は `ref.md`。
+   - **TeknoParrot / RingEdge 純正イメージ** → `ref.md` 参照。
+2. **二層写像を守る**: `src/logic/system/`=mx* デーモン（PCP/TCP 傍受）、`src/logic/driver/`=segadriver+
+   シリアル（DeviceIoControl/シリアル傍受）。実 RingEdge の境界＝エミュ戦略の境界。
+3. **値・プロトコルは micetools と TeknoParrot の両方を正として参照**し推測で決めない。
 
-1. **ドキュメントは参考。正は実装。** docs/*.md・FACTS は要約で陳腐化しうる。値・フォーマット・
-   シーケンス・アドレスは使う前に必ず**実体で裏取り**する。実体の所在:
-   - **nrs.exe** → Ghidra MCP（`mcp__ghidra__*`、static_VA）。手計算・推測禁止。
-   - **micetools**（RingEdge `am*`/PCP/keychip の C クリーンルーム実装＝最も低レイヤの正） →
-     ローカル `C:\src\micetools\` を**直読**。`docs/micetools.md` はその要約。
-   - **TeknoParrot**（BBS 設定値・JVS・起動シーケンスの正） → ローカル `C:\src\TPBootstrapper\`。
-     ただし `TeknoParrot.dll` は VMProtect で静的不可 → **実行時 API フック観測**で裏取り
-     （`tools/runtime/frida_diag/*.js` + `tools/runtime/*.py`）。`docs/teknoparrot.md` はその要約。
-   - **RingEdge 純正システムイメージ**（v63.01.10/RINGEDGE2。`mxkeychip.exe`=keychip デーモンの実装の正、
-     `mxsegaboot.exe`=ブート、ringmaster 鍵、ブート手順） → ローカル `C:\src\ringedge_system_63.01.10\`。
-     `mxkeychip.exe` は**非パック＝Ghidra 静的解析可**（CrackProof=Htsysm は runtime kernel ドライバで on-disk PE は素）。
-     `docs/ringedge_system.md` はその要約。
-2. **segatools は参照しない**（`docs/` 化もしない）。Nu/ALLS 世代（amdaemon, x64）で RingEdge
-   （x86-32, `am*`+PCP keychip）とは別物。混同は誤実装を招く（ユーザー決定）。
-3. 値・プロトコルは TeknoParrot と micetools の**両方**を正として参照し、推測で決めない。
+## 構成
 
-| 知りたいこと | 見る場所 |
+| 知りたいこと | 場所 |
 |---|---|
-| 横断定数（バイナリ base / static_VA・va() 規約 / PCP ポート / ワイヤ形式 / 静的lib） | `boot/ARCH.md` |
-| サブシステム別の事実（アドレス/構造体） | `boot/<subsys>/FACTS.md`（索引は `FACTS.md`） |
-| バグ・根本原因・アンチパターン（live: OPEN/RISK/ANTI-PATTERN） | `BUGS.md`（解決済み FIXED の履歴は `git log`） |
-| 現在地・次の一手・起動コマンド | `STATUS.md` |
-| 関数の逆コンパイル C・xref を調べる | Ghidra MCP（下記） |
-| ブートシム本体（1 サブシステム=1 ディレクトリ） | `boot/<subsys>/<file>.js`（構成 `boot/MANIFEST.json`、規約 `boot/CONVENTIONS.md`） |
-| ブートシムの全体像・起動コマンド | `boot/README.md` |
-| keychip / PCPA サーバ | `boot/mxkeychip/server/pcpa_server.py`（応答は本体に inline 実装） |
-| 独自ランチャー設計（北極星・ロードマップ） | `docs/architecture.md` / `docs/standalone_launcher.md` |
-| TeknoParrot 設定値/JVS/起動の要約（正は `C:\src\TPBootstrapper\`） | `docs/teknoparrot.md` |
-| keychip/amDongle/PCP/KCF の要約（正は `C:\src\micetools\` 直読） | `docs/micetools.md` |
-| RingEdge 純正システムバイナリ（mxkeychip/mxsegaboot 等）・ブート手順・ringmaster鍵の要約（正は `C:\src\ringedge_system_63.01.10\` 実バイナリ） | `docs/ringedge_system.md` |
-| RingEdge セキュリティ/PCP/DS28CN01/billing/ALL.Net の散文解説 | `docs/bsnk_ringedge.md`（micetools 作者の裏取り。`/nu_alls/` keychip は非該当） |
-| SBVA(DVR-5001) ISO/SSD 抽出の背景（TrueCrypt 復号。正は `tools/iso/` の実出力） | `docs/iso_extraction.md` |
-| 解析ツール一覧 | `tools/README.md` |
+| RE で確定した事実（アドレス/構造体/プロトコル/COM map） | `facts/<subsys>.md`（索引 `facts/_index.md`、live bug `facts/bugs.md`）|
+| 関数名/型（Ghidra へ適用される正） | `data/known_names.json` |
+| 外部オラクルの所在と権威範囲 | `ref.md` |
+| 製品ソース（host + reloadable logic） | `src/`（下記） |
+| ビルド/反復/起動 | `CMakeLists.txt` / VSCode タスク(`.vscode/tasks.json`) / `loader.exe`(GUI＋CLI) / 下記 |
+| 現在地・次の一手 | `STATUS.md` |
 
-**横断的事実の正本（散在ビューは引用・編集はここを直す＝drift 防止）**:
-- **起動シーケンス**（SYSTEM STARTUP `FUN_0089a010` の state→check→satisfy）＝ `boot/mxsegaboot/FACTS.md`。
-  他 FACTS は自 subsystem の slice のみ持ち、全体像はそこを引用する。
-- **エラー→fix 対応**（どの patch/module が満たすか）＝ 各モジュールヘッダの `// va:` ＋ `patch()` note。
-  静的バイトパッチは**所属サブシステムのモジュール**に `patch()` で置く（各 note に errNo。中央テーブルなし、旧 patches.json/static_patches.js は廃止）。
-  一覧監査は `python tools/static/patch_audit.py`（起動不要のオフライン横断走査）。
-  STATUS/BUGS/各 FACTS の error 表は読み用ビュー。**impl 列の正はこの2つ**（過去ここが drift して stale 化した）。
-- **トークン規律（AI向け）**: `docs/*.md`（計~1700行）は外部ソースの**要約で正ではない**。per-task で全読せず、
-  値/フォーマット/シーケンスが要るときだけ各行「正は」の実ソースを直読する。重複表を見たら上記 SSOT を信じる。
+```
+src/
+  host/    安定層（注入一度）: host.c hook.c log.c reload.c ／ loader.c=統合 GUI（in-process 注入+ログ tail+設定+入力）
+  logic/   差し替え対象(logic.dll)= 実 RingEdge 二層写像
+    abi.h api.c crackproof.c
+    driver/  mxjvs.c [columba.c dipsw.c smbus.c superio.c hwreset.c touch.c card.c]  (DeviceIoControl/serial)
+    system/  [mxkeychip.c mxnetwork.c mxmaster.c mxgfetcher.c]                        (PCP/TCP)
+```
 
-## バイナリ定数
+## アーキテクチャ（host + reloadable logic）
 
-- Path `C:\src\bbs\nrs.exe`、x86-32、ImageBase `0x400000`、ASLR 有（nrs base は実行毎に変動）
-- **番地は全て static_VA（Ghidra の番地そのもの、ImageBase 0x400000）で扱う。一方言のみ。**
-  人間/ツール/コードが触る番地は全部 static_VA。RVA・runtime_VA は **`boot/lib/base.js` の `va()` helper の
-  内部だけ**に存在し、境界には出さない。手計算・変換は不要（する場面が無い設計）。
-- 各サーフェスの dialect（全て static_VA）:
-  - **Ghidra MCP** `mcp__ghidra__*` … 引数も出力も static_VA（不変・基準）
-  - **`tools/static/disasm.py`** … 引数は static_VA のみ（旧 RVA モード/自動判定は撤去）。`-b` は
-    `va(0xSTATIC)`+バイト列+patch-site 相互参照（各モジュールヘッダ `// va:` 由来）を出力。`--json` で機械可読。
-  - **boot シム** … `va(0xSTATIC)` で番地参照（`nrsBase.add(rva)` は checker が禁止）。番地はモジュール先頭
-    ヘッダ `// va:` 行で宣言（番地の唯一ソース。MANIFEST は va を持たない）。runtime addr の
-    ログは `rtToVa(ptr)` で static_VA に逆換算。
-  - **モジュールヘッダ `// va:`**、**`data/known_names.json`** キー、**FACTS/ARCH/BUGS** … static_VA
-  - 唯一の変換式 `runtime = (static_VA − 0x400000) + nrsBase` は `va()` の中だけ（`base.js`）。
+- **host**（注入時一度ロード）: MinHook で Win32 API を**一度だけ**フック。**状態アリーナ(arena)を所有**。
+  `logic.dll` をロードし `LogicApi` テーブルを保持。フック発火時 `api->on_*(state,…)` を呼ぶ。
+  `reload.c` が `logic.dll` 変更を検知し **FreeLibrary→LoadLibrary→テーブル差し替え**（ゲーム起動したまま swap）。
+- **logic**（差し替え対象）: `abi.h` の契約**のみ**に依存。`logic_get_api()` だけを export。
+  状態は host から渡される arena に置く（**永続 global を持たない**）。device handler を実装。
+- **契約 `abi.h`**: HostServices(log/arena/orig) + LogicApi(bind/on_create_file/on_read_file/on_device_iocontrol…)。
+  **`abi.h` を変えると host+logic 両方再ビルド＋restart**。それ以外の logic 変更は **hot-reload**。
 
----
+## ビルド・反復（Frida 無し）
 
-## 静的解析 = Ghidra MCP 一本（推測の前に必ず使う）
+- **ビルド**: CMake + **MSBuild(VS2022)**, **Win32(x86)**, 静的CRT。
+  `cmake -B build -G "Visual Studio 17 2022" -A Win32` → `cmake --build build --config Debug --target logic`。
+- **反復ループ**:
+  - 人間: VSCode タスク **「👤 ビルドして GUI を開く」**（全ビルド→統合 GUI `loader.exe` 起動）。GUI が ▶起動=in-process 注入 / ログタブ=JSONL tail を担う。
+  - 自律テスト: **`loader.exe start --wait` / `status` / `stop`**（headless CLI。JSON+exit code。`facts/workflow.md`「自律ゲームテスト」）。logic 変更は **host が auto-swap**（再起動不要）。
+  - 観測は **logic の JSONL ログ**（自前コードを自由に計装）＋集約 `nrsedge.status.json`。ゲーム内部は Ghidra 静的 + 稀に cdb。
+- 制約: 永続 struct レイアウト変更時のみ restart。MinHook を `third_party/` に vendor（host のみ依存）。
 
-全関数の逆コンパイル・xref・リネームは **`mcp__ghidra__*`** で取得する。引数は static_VA。
+## 静的解析 = Ghidra MCP 一本（推測の前に必ず使う・書き戻す）
 
 | やること | ツール |
 |---|---|
-| 番地から逆コンパイル C | `mcp__ghidra__decompile_function_by_address` (static_VA) |
-| 名前で関数検索 | `mcp__ghidra__search_functions_by_name` |
-| 逆コンパイル C 全文検索（エラーコード・文字列・変数名） | `mcp__ghidra__search_decompiled` |
-| 呼び出し元/先・データ参照 | `mcp__ghidra__get_xrefs_to` / `get_xrefs_from` / `get_function_xrefs` |
-| 文字列・インポート・データ | `mcp__ghidra__list_strings` / `list_imports` / `list_data_items` |
-| 永続リネーム | `rename_function_by_address` + `data/known_names.json` に追記（下記） |
+| 逆コンパイル C / xref / 文字列 | `mcp__ghidra__decompile_function_by_address`(static_VA) / `get_xrefs_to` / `list_strings` |
+| 逆コンパイル全文検索 | `mcp__ghidra__search_decompiled` |
+| **書き戻し**（複利化・小コンテキスト化） | `rename_function_by_address` / `set_function_prototype` / `set_local_variable_type` / `set_decompiler_comment` |
+| 地金 disasm / imports / segments | `mcp__ghidra__disassemble_function_by_address`(static_VA) / `list_imports` / `list_segments` |
 
-- サーバ未起動で `mcp__ghidra__*` が connection refused のときは
-  `powershell -File tools\ghidra_mcp\start_headless.ps1`（冪等・既起動なら no-op）。詳細 `docs/ghidra_mcp_setup.md`。
-- `search_decompiled` は初回にサーバ側で全関数を逆コンパイルしキャッシュ構築（数分）。
-  "cache building: N/total" が返ったら少し待って再試行。
-- **名前の永続化**: analyzeHeadless はリネームを保存しない。恒久的な名前は
-  `data/known_names.json`（static_VA→名）に追記する。起動スクリプトが次回起動時に Ghidra へ適用する。
-- 手作業の生バイト読み（PowerShell `$exe[$off..]` 等）は禁止。ランタイムのレジスタ/BP 確認が要る時のみ
-  x32dbg（`...\WinGet\Packages\x64dbg.x64dbg_*\release\x32\x32dbg.exe`）。それ以外は MCP と Frida で足りる。
+- **RE 効率の核 = Ghidra DB への書き戻し**。解いた関数は名前/型/コメントを即 DB へ → 次の decompile が
+  自己説明的になり読む量が減る。恒久名は **`data/known_names.json`**（static_VA→名）に追記
+  （`tools/ghidra_mcp/start_headless.ps1` が次回適用）。表せない事実だけ `facts/<subsys>.md` に terse 追記。**二度解かない。**
+- サーバ起動: `powershell -File tools\ghidra_mcp\start_headless.ps1`（冪等）。bridge は `.mcp.json`。
+- 1 関数単位で取得、全読み禁止、grep 先行。decompiler が reg/暗黙引数を隠したら `disassemble_function_by_address` + `set_function_prototype`。
 
----
+## RE ループ
 
-## Frida パッチ・フック ルール
-
-作業前: ①該当関数を MCP で逆コンパイル ②`get_xrefs_to` で影響範囲 ③`FACTS.md` でアドレス
-④`BUGS.md` でアンチパターン ⑤**`docs/teknoparrot.md` と `docs/micetools.md` の両方で正準値・プロトコル・
-構造体を確認**（値/フォーマット/シーケンスは推測せず両参照実装を正とする）、を確認してから設計する。
-
-- **patchCode = 永続**（Frida detach 後も有効）。critical fix に使う。`writeByteArray([...])` で書く
-  （`code[i]=v` は QuickJS では書き込まれない）。書込後は `ptr.add(i).readU8()` で必ず検証。
-- **Interceptor.attach = detach で消える**。ロギング/一時上書き専用。
-- **同一番地に Interceptor.replace と patchCode を併用しない**（detach 時に replace が原本復元し patchCode を上書き）。
-- 呼出規約 x86-32: stdcall（callee が `RET N` でスタック解放、N はC末尾の return 型/引数数で確認）、
-  thiscall は ECX=this。`onEnter` の `args[i]` はスタック引数。
-- アンチパターン全量は `BUGS.md` の `[ANTI-PATTERN]` 群。
-
-**ドキュメント同期（必須）**: モジュールの追加・削除・分割・機構変更（Interceptor↔patchCode）は、
-**同一コミットで `boot/MANIFEST.json`（subsys/persistence/network_role）・モジュール先頭ヘッダ（`// va:` 等）・
-該当 `boot/<subsys>/FACTS.md` を更新**する。MANIFEST が boot 構成（構成と順序）の単一ソース、番地は各ヘッダが正。
-STATUS だけ直して MANIFEST/ヘッダ/FACTS を放置すると陳腐化する（過去に commit 56cb7b2/7f69740/38ffd45 で発生）。
-- 整合チェッカ: `python tools/hygiene/check_doc_sync.py`（各モジュールヘッダ `// va:`（static_VA）が当該モジュール本体に
-  実在するか、base.js が先頭か、**生 `nrsBase.add(`/`nb.add(` が無いか（dialect guard）**、known_names キーが
-  static_VA か、persistence と実機構が矛盾しないかを機械検証。INFO で runtime=スタンドアロン残課題、
-  serve=将来ネットワーク層も併記）。
-- 自動化: `git config core.hooksPath tools/git_hooks` を一度設定すると、`boot/**`(js/json)・FACTS/STATUS/BUGS.md
-  を含むコミットで pre-commit が同チェッカを実行し、不整合があればコミットを止める（緊急時 `--no-verify`）。
-- モジュール先頭の5行ヘッダ（subsys/persistence/va/ssot/role）を必ず付ける（規約 `boot/CONVENTIONS.md`）。
-
-patchCode テンプレ（stdcall 引数なし → return 0。番地は static_VA を `va()` に渡す）:
-```javascript
-Memory.patchCode(va(0xSSSSSS), 3, code => {           // 0xSSSSSS = Ghidra static_VA
-    code.writeByteArray([0x31,0xC0, 0xC3]);  // xor eax,eax; ret  （ret N なら 0xC2,N,0x00）
-});
 ```
-バイト列と `va()` 呼び出しは `python tools/static/disasm.py 0xSSSSSS -b N` がそのまま出力する。
+位置特定: facts/ と data/known_names.json を grep → 無ければ Ghidra search_decompiled/list_strings
+読む:    decompile（1関数）。隠れたら mcp__ghidra__disassemble_function_by_address
+確証:    micetools/ringedge を狙い撃ち grep（ref.md）。必要時のみ cdb
+書き戻し: Ghidra rename + set_function_prototype/型 + comment、data/known_names.json に追記
+記録:    名前で表せない事実だけ facts/<subsys>.md に terse 追記
+```
 
----
+## 確定済みの要点（詳細は facts/）
 
-## 新しい関数名が判明したとき
-
-`data/known_names.json` の `functions` に **static_VA キー**（Ghidra の番地そのもの）で追記 → MCP 再起動で
-反映（オフライン再構築は不要）。`ApplyKnownNames.java` がキーを絶対 VA として適用する。
+- **JVS = シリアル COM4**（115200 8N1 overlapped, `amJvstThreadInit` 0x989B10, 文字列 "COM4"@0xAE11F0）。
+- **COM map**: touch=COM1(kdserial で COM3) / card=COM2 / JVS=COM4。選択器 `serial_select_com_index`(0x67C360)。
+- **columba = DMI/物理メモリ読取**ドライバ（JVS ではない）。
+- ネイティブ JVS 経路は**実データを与えれば安全**（旧クラッシュは捏造成功の自滅。`facts/bugs.md`）。
+- 実バトル開始ブロッカー = **タッチ device**（COM1）。

@@ -1,32 +1,48 @@
-# 実行時生成アーティファクト
+# ── ビルド成果物（CMake/MSBuild, x86-32, 再生成可能）─────────────
+# build/ = cmake -B build の全出力（loader.exe の正もここ）
+build/
+third_party/minhook/build/
+# *.exe = loader.exe / nrs_strings.exe / pe-sieve32.exe（産物 or 再取得可能）
+*.exe
+# *.dll = host.dll / logic.dll / logic_live.dll（host が生成）
+*.dll
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+.vs/
+*.user
+
+# ── 実行時生成物 ─────────────────────────────────────────────
+# captures/ = 画面/トレースキャプチャ, nrsedge.log = logic の JSONL ログ
 captures/
+nrsedge.log
 
-# 使い捨てデバッグプローブ
-tools/_dbg_probe.py
-
-# disasm / find スクリプトの出力テキスト
-tools/jvs_test*.txt
-tools/jvs_trace*.txt
-
-# 解析データ (Ghidra生成・大容量・再生成可能) — known_names.json のみ追跡
+# ── 解析データ（Ghidra 生成・大容量・再生成可能）─────────────
+# known_names.json のみ追跡（Ghidra へ適用される正）
 data/*
 !data/known_names.json
 
-# pe-sieve バイナリ（GitHub releases から再取得可能）
-tools/re/pe-sieve32.exe
-
-# Ghidra MCP 拡張 zip（GitHub releases から再取得可能・バイナリ）— bridge は追跡
+# ── 外部ツール／ベンダ成果物（GitHub releases 等から再取得）───
 tools/ghidra_mcp/*.zip
-# Ghidra MCP ビルド中間物（再生成可能）
 tools/ghidra_mcp/build*/
 tools/ghidra_mcp/src/target/
 *.class
+# .github/modernize/ = コードモダナイズツールの生成ログ（CI 設定ではない）
+.github/modernize/
 
-# Python キャッシュ
+# ── Python キャッシュ ────────────────────────────────────────
 __pycache__/
 *.pyc
 *.pyo
 
-# エディタ
+# ── エディタ／OS ─────────────────────────────────────────────
 *.swp
 *~
+Thumbs.db
+*.DS_Store
+
+# ── ローカル設定（マシン固有・他クローンでも除外）────────────
+.claude/settings.local.json
+.claude/scheduled_tasks.lock

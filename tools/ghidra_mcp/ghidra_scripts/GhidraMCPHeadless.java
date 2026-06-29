@@ -910,7 +910,10 @@ public class GhidraMCPHeadless extends GhidraScript {
     private boolean setCommentAtAddress(String addressStr, String comment, int commentType, String transactionName) {
         Program program = getCurrentProgram();
         if (program == null) return false;
-        if (addressStr == null || addressStr.isEmpty() || comment == null) return false;
+        if (addressStr == null || addressStr.isEmpty()) return false;
+
+        // comment が null/空なら「コメント削除」とみなす（setComment(addr,type,null) でクリア）
+        final String text = (comment == null || comment.isEmpty()) ? null : comment;
 
         AtomicBoolean success = new AtomicBoolean(false);
 
@@ -919,12 +922,15 @@ public class GhidraMCPHeadless extends GhidraScript {
                 int tx = program.startTransaction(transactionName);
                 try {
                     Address addr = program.getAddressFactory().getAddress(addressStr);
-                    program.getListing().setComment(addr, commentType, comment);
+                    program.getListing().setComment(addr, commentType, text);
                     success.set(true);
                 } catch (Exception e) {
+                    success.set(false);
                     Msg.error(this, "Error setting " + transactionName.toLowerCase(), e);
                 } finally {
-                    success.set(program.endTransaction(tx, success.get()));
+                    // endTransaction の戻り値は「setComment が成功したか」ではない
+                    // （commit 済み・DB 変更有無等のマネージャ状態）。success を上書きしない。
+                    program.endTransaction(tx, success.get());
                 }
             });
         } catch (InterruptedException | InvocationTargetException e) {

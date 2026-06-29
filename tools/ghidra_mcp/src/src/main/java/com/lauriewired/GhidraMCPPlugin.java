@@ -940,7 +940,10 @@ public class GhidraMCPPlugin extends Plugin {
     private boolean setCommentAtAddress(String addressStr, String comment, int commentType, String transactionName) {
         Program program = getCurrentProgram();
         if (program == null) return false;
-        if (addressStr == null || addressStr.isEmpty() || comment == null) return false;
+        if (addressStr == null || addressStr.isEmpty()) return false;
+
+        // A null/empty comment means "clear the comment" (setComment(addr,type,null) removes it).
+        final String text = (comment == null || comment.isEmpty()) ? null : comment;
 
         AtomicBoolean success = new AtomicBoolean(false);
 
@@ -949,12 +952,15 @@ public class GhidraMCPPlugin extends Plugin {
                 int tx = program.startTransaction(transactionName);
                 try {
                     Address addr = program.getAddressFactory().getAddress(addressStr);
-                    program.getListing().setComment(addr, commentType, comment);
+                    program.getListing().setComment(addr, commentType, text);
                     success.set(true);
                 } catch (Exception e) {
+                    success.set(false);
                     Msg.error(this, "Error setting " + transactionName.toLowerCase(), e);
                 } finally {
-                    success.set(program.endTransaction(tx, success.get()));
+                    // endTransaction's return value is NOT "did setComment succeed"
+                    // (it reflects transaction-manager state). Don't clobber success.
+                    program.endTransaction(tx, success.get());
                 }
             });
         } catch (InterruptedException | InvocationTargetException e) {

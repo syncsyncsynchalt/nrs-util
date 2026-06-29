@@ -1,93 +1,116 @@
 {
   "version": "2.0.0",
-  "options": {
-    "env": {
-      "PY": "${command:python.interpreterPath}"
-    }
-  },
+  "_doc": "nrs-util タスク（native C: host + reloadable logic.dll、Frida 無し）。👤=人間が使うビルド＋GUI 起動。🤖=自律テスト用ヘッドレス CLI（loader.exe <verb>。JSON on stdout + 機械可読 exit code。AI の起動/終了/状態把握はこれを使う）。🔨=ビルド、🔧=構成、🧰=静的解析/補助。ログは host が書く JSONL nrsedge.log、集約状態は nrsedge.status.json（既定 C:\\src\\bbs。NRS_GAME_DIR で変更可）。logic 変更は host が auto-swap（再起動不要）。",
   "tasks": [
     {
-      "label": "nrs: launch (GUI)",
-      "type": "shell",
-      "command": "${env:PY}",
-      "args": ["boot/launch.py", "--spawn"],
+      "label": "👤 ビルドして GUI を開く",
+      "type": "process",
+      "command": "${workspaceFolder}/build/Debug/loader.exe",
+      "args": [],
       "options": { "cwd": "${workspaceFolder}" },
       "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "dependsOrder": "sequence",
+      "dependsOn": ["🔨 ビルド: 全ターゲット (logic/host/loader)"],
+      "detail": "全ターゲットをビルドしてから統合 GUI loader.exe を起動（人間用の正規エントリ）。GUI で 起動/終了/TEST/FreePlay（nrsedge.cfg に書き host が反映）・入力バインド編集/ライブテスト・ログ（色分け/フィルタ/検索/JSONL書出）。▶起動で host.dll/logic.dll を game dir にコピーし in-process 注入。初回や build/ が無い時は先に『🔧 設定: CMake 構成』。自律テストは 🤖 CLI タスク。"
+    },
+
+    {
+      "label": "🤖 nrs: 起動→ready待ち (start --wait)",
+      "type": "process",
+      "command": "${workspaceFolder}/build/Debug/loader.exe",
+      "args": ["start", "--wait=60"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "detail": "ヘッドレス CLI: nrs.exe を起動+注入し host.ready まで block。最終 status JSON を出力。exit 0=ready / 2=timeout / 3=注入失敗 / 4=早期exit。【自律テストの起動は必ずこれ】（GUI ▶起動の PostMessage ハックは廃止）。既に走っていれば already_running。"
+    },
+    {
+      "label": "🤖 nrs: 状態 (status)",
+      "type": "process",
+      "command": "${workspaceFolder}/build/Debug/loader.exe",
+      "args": ["status"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "detail": "nrsedge.status.json（phase/errors/patches/subsys ready）+ プロセス存在を 1 ショット集約出力。exit 0=ready / 5=未ready / 6=未起動。80k 行ログのパース不要。"
+    },
+    {
+      "label": "🤖 nrs: 終了 (stop)",
+      "type": "process",
+      "command": "${workspaceFolder}/build/Debug/loader.exe",
+      "args": ["stop"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "detail": "nrs.exe を taskkill し status.json を消す。exit 0。明示停止=phase なし(none) / 自滅=phase exited で区別できる。"
+    },
+    {
+      "label": "🤖 テスト: build(host+logic)→restart→ready",
+      "type": "process",
+      "command": "${workspaceFolder}/build/Debug/loader.exe",
+      "args": ["restart", "--wait=60"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "dependsOrder": "sequence",
+      "dependsOn": ["🔨 ビルド: host+logic"],
+      "detail": "host+logic を再ビルド → restart --wait（stop→start し新 host.dll を注入）→ host.ready 待ち。host/logic/status.c を変えた後の自律再テストの定石。loader.c 自体を変えた時は別途『🔨 ビルド: 全ターゲット』。"
+    },
+
+    {
+      "label": "🔨 ビルド: logic (hot-reload 対象)",
+      "type": "process",
+      "command": "cmake",
+      "args": ["--build", "build", "--config", "Debug", "--target", "logic"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": ["$msCompile"],
       "group": { "kind": "build", "isDefault": true },
-      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
-      "detail": "既定。nrs.exe を spawn し、全ログ（frida + pcpa）を GUI ログ窓に時刻付きで集約表示（プレイ中は開いたまま）。窓を閉じると nrs.exe / pcpa を自動終了。ログ: captures/frida-*.txt + frida-*.jsonl。"
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "detail": "logic.dll のみビルド（最頻の反復）。実行中なら game dir にコピーで host が auto-swap（restart 不要）。abi.h を変えた場合は host+logic 再ビルド＋restart。"
     },
     {
-      "label": "nrs: launch (GUI, keep alive)",
-      "type": "shell",
-      "command": "${env:PY}",
-      "args": ["boot/launch.py", "--spawn", "--keep"],
+      "label": "🔨 ビルド: host+logic",
+      "type": "process",
+      "command": "cmake",
+      "args": ["--build", "build", "--config", "Debug", "--target", "host", "logic"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": ["$msCompile"],
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "detail": "host.dll + logic.dll をビルド（status.c/abi.h/フック等を変えた時）。反映には restart が要る（host は注入時一度ロード。auto-swap は logic のみ）。"
+    },
+    {
+      "label": "🔨 ビルド: 全ターゲット (logic/host/loader)",
+      "type": "process",
+      "command": "cmake",
+      "args": ["--build", "build", "--config", "Debug"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": ["$msCompile"],
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "detail": "全ターゲット（logic.dll / host.dll / loader.exe / nrs_strings.exe）。loader.c 変更時・初回フルビルドに。loader.exe(GUI) を開いたままだと上書きに失敗するので閉じてから。"
+    },
+    {
+      "label": "🔧 設定: CMake 構成 (初回 / build 無い時)",
+      "type": "process",
+      "command": "cmake",
+      "args": ["-B", "build", "-G", "Visual Studio 17 2022", "-A", "Win32", "-S", "."],
       "options": { "cwd": "${workspaceFolder}" },
       "problemMatcher": [],
-      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
-      "detail": "GUI 起動。窓を閉じても nrs.exe / pcpa_server を残す（観察継続用）。"
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "detail": "VS2022 / Win32(x86) / 静的CRT で build/ を生成。build/ が無い・CMakeLists 変更時に1回。"
     },
     {
-      "label": "nrs: launch (console capture 90s)",
-      "type": "shell",
-      "command": "${env:PY}",
-      "args": ["boot/launch.py", "--spawn", "--no-gui", "--duration", "90"],
-      "options": { "cwd": "${workspaceFolder}" },
-      "problemMatcher": [],
-      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
-      "detail": "ヘッドレス/定時キャプチャ。90 秒採取して console に出し、終了時に nrs.exe / pcpa を自動終了。CI・自動化向け。"
-    },
-    {
-      "label": "logs: tail (filtered)",
-      "type": "shell",
-      "command": "${env:PY}",
-      "args": ["tools/logs/read_log.py", "-f", "(REGION_CHK|ERRCODE|HLSM|Error 09)"],
-      "options": { "cwd": "${workspaceFolder}" },
-      "problemMatcher": [],
-      "isBackground": true,
-      "presentation": { "reveal": "always", "panel": "dedicated" },
-      "detail": "主要イベント（REGION_CHK / ERRCODE / HLSM / Error 09）を captures/frida-*.txt から追尾表示。"
-    },
-    {
-      "label": "logs: errors (latest jsonl)",
-      "type": "shell",
-      "command": "${env:PY}",
-      "args": ["-c", "import glob,os,json; f=max(glob.glob('captures/frida-*.jsonl'),key=os.path.getmtime); print('latest:',f); [print(r['ts'],'[%s]'%r['src'],r['msg']) for r in (json.loads(l) for l in open(f,encoding='utf-8') if l.strip()) if r.get('lvl')=='error']"],
-      "options": { "cwd": "${workspaceFolder}" },
-      "problemMatcher": [],
-      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
-      "detail": "直近 JSONL から lvl=error のみ抽出（AI 解析・トリアージ向け）。"
-    },
-    {
-      "label": "logs: session summary",
-      "type": "shell",
-      "command": "${env:PY}",
-      "args": ["tools/logs/session_summary.py"],
-      "options": { "cwd": "${workspaceFolder}" },
-      "problemMatcher": [],
-      "presentation": { "reveal": "always", "panel": "dedicated" },
-      "detail": "直近セッションの要約を出力。"
-    },
-    {
-      "label": "hygiene: check doc sync",
-      "type": "shell",
-      "command": "${env:PY}",
-      "args": ["tools/hygiene/check_doc_sync.py"],
-      "options": { "cwd": "${workspaceFolder}" },
-      "problemMatcher": [],
-      "group": "test",
-      "presentation": { "reveal": "always", "panel": "shared" },
-      "detail": "MANIFEST/モジュールヘッダ va / base.js 先頭 / dialect guard / persistence 整合を機械検証。"
-    },
-    {
-      "label": "ghidra: start headless MCP",
-      "type": "shell",
+      "label": "🧰 ghidra: MCP サーバ起動 (冪等)",
+      "type": "process",
       "command": "powershell",
-      "args": ["-File", "tools/ghidra_mcp/start_headless.ps1"],
+      "args": ["-NoProfile", "-File", "tools/ghidra_mcp/start_headless.ps1"],
       "options": { "cwd": "${workspaceFolder}" },
       "problemMatcher": [],
       "presentation": { "reveal": "always", "panel": "shared" },
-      "detail": "Ghidra MCP サーバを起動（冪等・既起動なら no-op）。"
+      "detail": "Ghidra MCP(mcp__ghidra__*) を起動。既起動なら no-op。connection refused 時に実行。data/known_names.json を次回適用。"
     }
-  ]
+  ],
+  "inputs": []
 }
