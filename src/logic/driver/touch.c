@@ -30,7 +30,8 @@ void touch_sample_mouse(TouchPanel *t, HWND win) {
         t->x = (uint16_t)((long long)cx * TOUCH_MAX / (w > 1 ? w - 1 : 1));
         t->y = (uint16_t)((long long)cy * TOUCH_MAX / (h > 1 ? h - 1 : 1));
     }
-    t->pressed = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) ? 1 : 0;
+    /* 押下 = マウス左ボタン または T キー(VK 0x54)。座標はどちらでも現カーソル位置。 */
+    t->pressed = ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) || (GetAsyncKeyState('T') & 0x8000)) ? 1 : 0;
 }
 
 /* 現座標の 'T' 座標フレームを out[10] に構築。X/Y は LE12bit, Z=筆圧, byte2=status(押下フラグ)。*/

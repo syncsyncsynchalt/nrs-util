@@ -72,7 +72,7 @@ nrs.exe の I/O 周辺は **amlib device list `DAT_016db564`**（linked-list, ne
 | COM | 用途 | amlib class | open 元（static_VA） | 設定 | 本 boot での状態 |
 |---|---|---|---|---|---|
 | **COM1** | タッチパネル | 0x22,0x22 | `FUN_008b2450`（touch driver init） | — | open 失敗 `0xc0000034`（未エミュレート） |
-| **COM2** | カードリーダー(Aime/IC) | 0x21,0x21 | `FUN_004f2990`→`FUN_00674ad0`→`FUN_00884e80` | — | open 失敗 `0xc0000034`（未エミュレート） |
+| **COM2** | IC Card R/W（SEGA独自, **Aime非該当**） | 0x21,0x21 | `cardrw_object_dispatch`(0x4f2990)→`serial_dev2_init_wrapper`(0x674ad0)→`serial_dev2_init`(0x884e80) | 8E1 / 9600 | open 失敗 `0xc0000034`（未エミュレート） |
 | **COM4** | JVS I/O | amJvst（別系統） | `amJvspInit`(0x986720)→`amJvstThreadInit`(0x989B10) `CreateFileA("COM4")` | 115200 / 8N1 | **開く**＝host が仮想ハンドル化し `src/logic/driver/mxjvs.c` が JVS ボードをエミュ（旧 forgery+node 直書きは撤去。`amjvs.md`） |
 
 - ポート名はいずれもハードコード。**JVS = 静的文字列 `"COM4"`**(`43 4F 4D 34 00` @ static_VA `0xAE11F0`,
@@ -164,21 +164,109 @@ device の handshake コマンド('p'/'P')に応答できず +0x28=0 のまま t
 build_T は byte[2]=pressed?1:0 / Z(byte7:8)=pressed?0xFF:0 を送る。**live 検証: タッチで `touch.event`
 `active=1 status=1 edge=1 x234=507(中央)` の完全シーケンス取得＝押下・座標・離しすべて正しく消費側へ到達**。
 
-- **未確定（touch device は完動だが、ゲーム flow が進まない）**: attract「画面をタッチしてください」を touch しても
-  scene が進まない（21 CREDIT 表示・touch.event は発火するが card/login/scene メッセージ無し）。BBS は**カードベース**で
-  touch 後に **Aime カードリーダー(COM2/class 0x21)** を要求するが COM2 は presence 詐称のみで**実 I/O 未エミュ**
-  （下記カードリーダー節）。よって touch 自体は完全動作。ゲーム実起動には COM2 card reader emulation が次の前提。
+- **touch device は完動だが、ゲーム flow が進まない理由＝RE+実走で確定（2026-06-30, 詳細は下記カードリーダー節
+  「ゲーム開始フローのゲート」）**: attract で touch すると `advertise_demo_controller`(0x725d60)がデモページを切替えるのみ
+  ＝「画面をタッチしてください」はデモのプロンプトで開始トリガではない。ゲーム実起動は **① カード(class 0x21, entry scene
+  0x5e6200 の card[4] bit10 ゲート・コード確定) ＋ ② ALL.Net ゲームサーバー(起動 `ALL.NET GAME SERVER` 未完了・
+  【全国対戦受付終了】・実走観察)** の両方が前提。touch・クレジット(21, `amCredit_check_enough` 0x97cf80)は満たす。
 
 **前提ブロッカー（解消済）**: touch device context は COM1 open で生成。serial handshake は上記フレーム組立修正で完了し
 device は operational(mode1)。**ゲーム実バトル開始 = コイン + 画面タッチ + (推定)Aime カード**。
 
-### カードリーダー（COM2 / class 0x21）[S+F]
-| static_VA | 役割 |
-|---|---|
-| `FUN_004f2990` | card オブジェクト(class 0x21)操作の起点（`FUN_0089dcb0(0x21,0x21,1)`→method 呼出）→ COM2 を開く |
-| `FUN_00674ad0`→`FUN_00884e80` | card のシリアル補助 → COM2 open（`FUN_00884e80` が CreateFile 経路） |
-| `FUN_004f3e30` | card context getter（device list を class 0x21 で検索。約100関数が参照する大サブシステム 0x4f3-0x4f8） |
-| `0x4F6310` | IC Card R/W ready（`*ctx>>1 &1`。boot で `RET1` patch＝presence 詐称、Error 5101／state2 解消） |
+### カードリーダー（COM2 / class 0x21）= SEGA 独自 IC Card R/W [S+F]
 
-カードリーダーは **presence のみ詐称**で実 I/O 未実装（INPUT TEST「CARD IN」未対応と整合）。実機 Aime RWM 相当。
-amlib エラーメッセージテーブルでは `0xbd0374` IC Card R/W（上記「エラーメッセージテーブル」参照）。
+**素性の確定（2026-06-30, Ghidra 実体 sweep）**: nrs.exe に `Aime`/`felica`/`IDm`/vendor バナー文字列は**ゼロ**。
+ゲーム自称は **"IC Card R/W"** のみ（`"IC Card R/W Not Found"`@0xbd0374, `"CHECKING IC CARD R/W"`@0xc811a0）。
+`JcvCard`(.?AVJcvCard@@) は**ゲームデータ class**（`Jcv*` 接頭辞群の一員、HW 無関係）。
+→ **Aime/FeliCa リーダではない**。bare-byte command/ACK プロトコルの **SEGA 独自 IC カード R/W ファミリ**（RingEdge 筐体世代）。
+エミュ対象は「ブランド」ではなく **class 0x21 のシリアル I/O**。
+
+**Transport**（`serial_open_comport` 0x67be20 の DCB / `serial_dev2_init` 0x884e80 の config）:
+**9600 baud / 8 data / EVEN parity / 1 stop（8E1）**、XON/XOFF、0x200B リングバッファ×2。
+baud は `baud_table_00B40714[1]`（raw 未読、fallback 9600。我々は OS 境界で仮想化ゆえ baud は物理無関係）。
+
+**Framing**: **裸のコマンドバイト**（length field 無し・**checksum/CRC 無し**）。
+各 opcode に固定 1 バイトの期待 ACK（`card_cmd_ack_expected` 0x8850c0）。
+レスポンスは**ステータスバイト** `*`(0x2a)→3 / `:`(0x3a)→4 / `J`(0x4a)→5 / `Z`(0x5a)→6 / `0xcb`→7 / `0x1a`→busy を
+`card_rx_status_decode`(0x66f8a0) でデコード（内部 0=pending, 1=OK）。多バイトは `card_frame_append2`(0x884bb0,+2B)/
+`card_frame_append4_be`(0x884c00,+4B BE)。送信は `card_serial_send_frame`(0x884c60)→`card_serial_write`(0x884b50)→
+`serial_write_txring`(0x67c210)。**注**: `_DAT_01265714=0x46('F')` はフレーム同期バイトではなく**タイムアウトカウンタ**（直後 0x884b50 で 10000 上書き）。
+
+**コマンド体系**（証明済みバイト定数）:
+
+| Code | 機能(文脈推定) | 期待ACK | Builder(static_VA) |
+|---|---|---|---|
+| `0xF7` | Reset / open | — | `card_cmd_reset_0xF7` 0x66fb80 |
+| `0x28` | Init / session 開始 | `\n`(0x0a) | `card_cmd_init_0x28` 0x66fcc0（→0xF7 finalize） |
+| `0x4D` | Poll / カード検出 | `\v`(0x0b) | `card_cmd_poll_0x4D` 0x670040 |
+| `0x0D` | 属性ブロック read(+2B addr) | `+`(0x2b) | `card_cmd_read_attr_0x0D` 0x6704e0 |
+| `0x2D` | データブロック read(+8B addr/len BE) | `0x8b` | `card_cmd_read_data_0x2D` 0x670300 |
+| `0x8D` | データブロック read(variant,+2B) | `0x8b` | `card_cmd_read_data_0x8D` 0x6708e0 |
+| `0xAD` | データブロック write(+4B BE) | `0x8b` | `card_cmd_write_0xAD` 0x670dd0 |
+| `0x38` | Status / verify | `\n`(0x0a) | `card_cmd_status_0x38` 0x66fe60（→0xF7 finalize） |
+| `0x68` | スロット addressed cmd(`0x68,1,slot`) | `\n`(0x0a) | `card_send_addressed_cmd_0x68` 0x884f40 |
+| `0x6D` | スロット選択 | `K`(0x4b) | (ACK表のみ) |
+| `0x1D,0x88,0xB8,0x48,0x58,0xCD,0xED` | 予約/他 | 各 | (0x8850c0 ACK表) |
+
+低ニブルが操作種別を符号化（`0x?D` 系=read/write）。**最大 7 スロット** addressing（`slot_addr_table_00b40bf4[0..6]`、
+`card_slot_next`0x66f7d0/`card_slot_cycle`0x66f800 で 0→6 巡回）。
+
+**デバイス識別（核心）**: ファームウェア/バージョン照会も vendor バナーも**送らない**。
+カード種別は**リーダーが返す 1 バイト**で判定 → 容量にマップ（`card_type_to_datalen` 0x66f690）:
+**`0x36`→0x7c0(1984B) / `0xc9`→0x3c0(960B) / `0xff`→0xfc0(4032B)**。同バイト 0x36/0xff が RX callback `card_rx_status_callback`(0x674a70) をゲート。
+カードヘッダは **64B(16dword) を BE byte-swap**（`card_header_byteswap_be` 0x66f6d0）→ UID/属性取得 → whitelist(`DAT_016a55b0[]`,count`DAT_016a55ad`)照合。
+
+**状態機械**:
+- transport pump `card_transport_pump`(0x674530): sub-state `DAT_016ae53c` 0/1=init, 2/3=enum+read, 4/5=write, 10=READY/idle。`DAT_016ae538=1`=device found。
+- op dispatcher `card_op_dispatch`(0x674b30): `DAT_016ae5c8` cmd class 2=poll/read(len 0xfc0), 3=write(0x1008B image), 0=idle。
+- high-level FSM `cardrw_highlevel_fsm`(0x4f2d40): state3 0=wait-slot("card slot ok" when `016ae5c8==1 && 016ae5cc==-1`), 3/4=read, 5=write→成功で image コピー＋callback。
+- object update `cardrw_object_update_sm`(0x4f2ad0): state2 0=poll→1=detect/read(`cardrw_advance_to_present`0x4f6810)→2=hold/present(hold-timer `[0x1588]`減算→0復帰)。
+- **ready bit** `cardrw_ready_bit1`(0x4f6310): `card_flags>>1 &1`。boot "CHECKING IC CARD R/W"(state2) が読む。err bit `cardrw_rw_error_bit4`(0x4f6330): `>>4 &1`。
+- context getter `cardrw_device_status_ptr`(0x4f3e30): device list を class(0x21,0x21) で検索。約100関数が参照する大サブシステム 0x4f3-0x4f8。
+
+カードコンテキストは **0x6720B/device, ストライド 0x6714**（`cardrw_ctx_init` 0x4f2910 が memset）。
+
+**実装状況**（2026-06-30）:
+- 旧: presence のみ詐称（`cardrw_ready_bit1` を `RET1` patch＝Error 5101／state2 解消）で実 I/O 未実装。
+- **方針確定 = 仮想カード永続 R/W**（UID+データブロックを持つ仮想 Aime 相当カード, card.bin 永続化。TeknoParrot 流）。
+- **Phase A done + live 検証成功（`src/logic/driver/card.{h,c}` + `api.c` 配線）**: COM2 を `0xC0114003` で仮想化し
+  byte-exact handshake を実装。`loader.exe restart --wait` で実走 → **handshake 完全動作**（`f7→0a`/`68 06 40→0a`/
+  `68 01 dc→0a`/`48→0a`）、**phase=ready・subsys.card=ok・card.read 発火**＝COM2 が実プロトコルで認識され boot 通過。
+  フレーム=`[ACK b0][status b1][payload]` 再同期なし、半二重 turnaround を opcode 長テーブルで実装。CLEAR_ERROR の
+  `cbInQue=card_rx_pending()`。**TX framing 実測確証: 0xF7=1B(trailer無)・0x68=3B(`FUN_00884f40`)・0x48=1B**。
+  init SM=`card_init_handshake_sm`(0x670f70, case10→f7/case0xC→68 06 40/case0x10→48、成功で `DAT_016ae538=1` device-found→substate10)。
+  transport pump=`card_transport_pump`(0x674530: case1=init/case3=poll-read `FUN_00671470`/case5=write `FUN_00671de0`)。
+- **Phase B1 done + live 検証成功（operational init 完走）**: init 最終段 `b8 cf`（0xB8 SET COMM SPEED）を ACK `0a` →
+  **`[game] card slot ok` 発火**＝カードリーダー init が実プロトコルで完全完了（touch「touch panel ok」相当）。
+
+**operational プロトコル（実体確定）**:
+- **コマンド体系**（`card_read_sm` 0x671470 / `card_write_sm` 0x671de0）:
+
+  | opcode | 機能 | 送信 wire | 期待ACK byte0 / frame len | result getter |
+  |---|---|---|---|---|
+  | `0xF7` | reset/open | `F7`(1B) | 0x0A / 1 | — |
+  | `0x68` | init set-param | `68 p1 p2`(3B, `card_send_68` 0x884f40) | 0x0A / 1 | — |
+  | `0x48` | get FW/status | `48`(1B) | 0x0A / 1 | `FUN_0066f940`(byte&0x40 等) |
+  | `0xB8` | **SET COMM SPEED** | `B8 CF`(2B, 0x884ff0) | **0x0A / 1** | →SetCommState(0x67c4c0) |
+  | `0x28` | sense | `28`(1B) | 0x0A / 1 | status |
+  | `0x4D` | **SEARCH(UID read)** | `4D`(1B) | 0x0B / 9 | `card_get_uid_record`(0x885260, 8B byteswap) |
+  | `0x2D` | select(UID) | `2D`+8B(2×append4_be) | 0x8B / 1 | — |
+  | `0x0D` | read block | `0D`(1B, index は DAT_016a0396 事前設定) | 0x2B / 129 | `card_get_read128`(0x8852f0, 128B) |
+  | `0xED` | capacity/free | `ED`(1B) | 0x8B / 3 | `card_get_status2`(0x885350, 2B) |
+  | `0x8D` | read ptr/compare | `8D`(1B) | 0x8B / 3 | `card_get_status2` |
+  | `0xAD` | commit/write | `AD`+4B(append4_be) | 0x8B / 1 | — |
+  | `0x38` | halt/deselect | `38`(1B) | 0x0A / 1 | status |
+
+- **present/absent 極性**（`card_status_decode` 0x66f8a0 + `FUN_008850c0`）: **received byte0 == 期待ACK → decode 1 = present**（byte1 無視）。
+  **nocard = 単バイト `5A`('Z')**（byte0=0x5A は ACK と不一致→cVar1=0、DL に残る 0x5A='Z'→decode 6）。`0B 5A…` は ACK 一致で present 誤認になるので不可。
+- **frame 長則**（`card_frame_len_for` 0x8848d0, **再同期なし**）: byte0 で完成長確定 — 0x0A→{送信0x58:2/0x88:19/他:1}, 0x5A→1, 0x0B→9, 0x2B→129, 0x8B→{0x2D/0xAD:1, 0x8D/0xED:3}。emit は期待ACK 先頭＋表通りちょうど。
+- **read SM フロー**: reset(F7)→sense(28)→`card_read_setup`(0066fff0)→search(4D)[ret6=nocard→halt / ret1=present→UID抽出(`DAT_0169e314`=UID,`DAT_0169e31c`=type)]→select(2D)→read(0D×N: 128B/回, header byteswap 0066f6d0, image=`&DAT_0169f338+slot*0x1008`)→commit(AD)→halt(38)。UID whitelist=`DAT_016a55b0[]`(count `DAT_016a55ad`)。容量=`card_capacity_by_type`(0x66f690)。card image 0x1008B=64Bヘッダ+~4032Bデータ。
+
+- **Phase B2（次・仮想カード挿入＋データ R/W＋永続化）**: attract 中は card を能動 poll しない。SEARCH(0x4D) はゲーム flow が
+  カードを要求した時（coin/touch→card-login）に走る。→ ①ゲームを card-search まで進める ②present=1 で poll に `0B`+8B UID record
+  （**byteswap 順を live 確証**）③0D ヘッダ(2B+128B,UID@+0x04 BE)＋容量分 data ④0xAD write ⑤`card.bin` 永続化（logic 直接 Win32 file I/O, abi 不変）。
+
+amlib エラーメッセージテーブルでは `0xbd0374` IC Card R/W。
+
+> ⚠️ 既知の誤記訂正（2026-06-30）: ready/err/getter を以前 `0x8f6310/0x8f6330/0x8f3e30` と記したのは **4↔8 transposition**。
+> 正は `0x4f...`。`0x8f63xx` は無関係な JcvCard デシリアライザ（`FUN_008f33e0`）。`data/known_names.json` 訂正済み。

@@ -5,6 +5,7 @@
 #include "driver/input.h"
 #include "driver/mxdevices.h"
 #include "driver/touch.h"
+#include "driver/card.h"
 #include "patches.h"
 #include <string.h>
 
@@ -34,7 +35,12 @@ struct LogicState {
     int        touch_opened_logged;  /* read ログ初回フラグ */
     uint8_t    touch_last_press;     /* 押下状態変化検出用 */
     int        touch_winwarn;        /* WGL 窓 not found 警告を1回だけ */
-    /* TODO(P2+): COM2=card / overlapped 対応 / 部分フレーム組立 */
+    /* --- COM2 / card（IC Card R/W, class 0x21）--- */
+    HANDLE     card_handle;
+    CardReader card;
+    int        card_opened_logged;   /* read ログ初回フラグ */
+    int        netauth_logged;       /* netauth.force_ready 初回ログフラグ */
+    /* TODO(P2+): overlapped 対応 / 可変長フレーム組立 */
 };
 
 static void l_bind(HostServices *host, LogicState **state) {
@@ -43,6 +49,7 @@ static void l_bind(HostServices *host, LogicState **state) {
         memset(*state, 0, sizeof(LogicState));
         mxjvs_init(&(*state)->jvs);
         touch_init(&(*state)->touch);
+        card_init(&(*state)->card);
     }
     (*state)->host = host;   /* reload 後の再バインド（jvs 状態は arena 上で生存）*/
     mxdev_init(host);        /* nvram 永続バッキング用に host サービスを渡す（map は初回 IO で遅延）*/
@@ -87,6 +94,16 @@ static HANDLE on_create_file(LogicState *st, const wchar_t *name, DWORD a, DWORD
         st->host->log("info", "{\"ev\":\"touch.open\",\"port\":\"COM1\"}");
         *handled = 1;
         return st->touch_handle;
+    }
+    /* COM2 = IC Card R/W（class 0x21, SEGA 独自・Aime 非該当）。bring-up: 仮想化して open を成功させ、
+       game の TX/RX 生バイトを観測する（フレーミング確証 → protocol logic 確定の順）。 */
+    if (is_com(name, L"COM2") && !is_jvs_com(st, name)) {
+        st->card_handle = (HANDLE)(uintptr_t)0xC0114003;   /* sentinel */
+        card_init(&st->card);
+        st->card_opened_logged = 0;
+        st->host->log("info", "{\"ev\":\"card.open\",\"port\":\"COM2\"}");
+        *handled = 1;
+        return st->card_handle;
     }
     /* C:\System\SystemVersion.txt（amPlatformGetOsVersion 0x981d60 が読む）を仮想化。gate FUN_0045a6f0 は
        OsVersion の戻り 0 のみ要求し値は捨てる（直後の memory size 取得で上書き）。8 バイトが非ゼロ version に
@@ -161,6 +178,19 @@ static BOOL on_write_file(LogicState *st, HANDLE h, const void *buf, DWORD n, DW
         *hd = 1;
         return TRUE;
     }
+    if (h == st->card_handle) {                   /* COM2: game→reader コマンド（生バイト観測）*/
+        {   /* 診断: game が COM2 に書く opcode 列（フレーミング確証用の核データ）*/
+            const uint8_t *b = (const uint8_t *)buf;
+            char m[160]; int o = wsprintfA(m, "{\"ev\":\"card.write\",\"n\":%d,\"hex\":\"", (int)n);
+            for (DWORD i = 0; i < n && i < 16 && o + 3 < (int)sizeof m; i++) o += wsprintfA(m + o, "%02x", b[i]);
+            wsprintfA(m + o, "\"}");
+            if (st->host && st->host->log) st->host->log("info", m);
+        }
+        card_on_write(&st->card, (const uint8_t *)buf, (int)n);
+        if (put) *put = n;                        /* 全消費（serial TX は常に成功）*/
+        *hd = 1;
+        return TRUE;
+    }
     return mxdev_write(h, buf, n, put, hd);   /* mxsram データ面（記録書込み）*/
 }
 
@@ -191,6 +221,21 @@ static BOOL on_read_file(LogicState *st, HANDLE h, void *buf, DWORD n, DWORD *go
                 st->touch_opened_logged = 1;
                 st->touch_last_press = st->touch.pressed;
             }
+        }
+        *hd = 1;
+        return TRUE;
+    }
+    if (h == st->card_handle) {                   /* COM2: reader→game 応答（ACK/status/data）を排出 */
+        int k = card_on_read(&st->card, (uint8_t *)buf, (int)n);
+        if (got) *got = (DWORD)k;
+        if (st->host && st->host->log && (!st->card_opened_logged || k > 0)) {
+            char m[200]; int o = wsprintfA(m, "{\"ev\":\"card.read\",\"bytes\":%d,\"reads\":%u,\"hex\":\"",
+                                           k, st->card.reads);
+            for (int i = 0; i < k && i < 16 && o + 3 < (int)sizeof m; i++)
+                o += wsprintfA(m + o, "%02x", ((uint8_t *)buf)[i]);
+            wsprintfA(m + o, "\"}");
+            st->host->log("info", m);
+            st->card_opened_logged = 1;
         }
         *hd = 1;
         return TRUE;
@@ -226,6 +271,7 @@ static BOOL on_close(LogicState *st, HANDLE h, int *hd) {
     uintptr_t v = (uintptr_t)h;
     if (h == st->jvs_handle) { st->jvs_handle = 0; *hd = 1; return TRUE; }
     if (h == st->touch_handle) { st->touch_handle = 0; *hd = 1; return TRUE; }
+    if (h == st->card_handle) { st->card_handle = 0; *hd = 1; return TRUE; }
     if (v >= 0xD0000001u && v <= 0xD0000005u) { *hd = 1; return TRUE; }  /* mxdev 擬似ハンドル */
     *hd = 0; return FALSE;
 }
@@ -247,6 +293,20 @@ static BOOL on_comm_control(LogicState *st, HANDLE h, int op, void *p1, DWORD p2
             if (p1) *(DWORD *)p1 = 0;                                          /* errors = 0 */
             if (p3) { COMSTAT *cs = (COMSTAT *)p3; memset(cs, 0, sizeof *cs);
                       cs->cbInQue = TOUCH_FRAME_LEN; }                         /* 1 フレーム受信待ち */
+        }
+        return TRUE;
+    }
+    if (h == st->card_handle) {
+        /* COM2 card: serial_open_comport の COM 制御を全成功化（DCB は埋めなくてよい）。
+           card は request/response ゆえ CLEAR_ERROR の cbInQue は「キュー済み応答の残量」を申告する
+           （touch の常時 1 フレームと違い、応答がある時だけ RX ポンプに ReadFile を発行させる）。 */
+        (void)p2;
+        *hd = 1;
+        if (op == COMCTL_GET_MODEM_STATUS) { if (p1) *(DWORD *)p1 = 0; }
+        else if (op == COMCTL_CLEAR_ERROR) {
+            if (p1) *(DWORD *)p1 = 0;                                      /* errors = 0 */
+            if (p3) { COMSTAT *cs = (COMSTAT *)p3; memset(cs, 0, sizeof *cs);
+                      cs->cbInQue = (DWORD)card_rx_pending(&st->card); }   /* 応答残量のみ受信待ち申告 */
         }
         return TRUE;
     }
@@ -327,6 +387,73 @@ static void dipsw_force_ready(LogicState *st) {
     *(uint32_t *)(b + (0xCCF488u - 0x400000u)) = 1;                    /* initFlag（最後に立てる）*/
     if (st->host && st->host->log)
         st->host->log("info", "{\"ev\":\"dipsw.force_ready\",\"dev\":\"mxsmbus\",\"addr\":\"0x20\"}");
+}
+
+/* ALL.Net / alAbEx keychip auth を「成功」詐称（network/matching 層が未実装のため）。
+ * 根本原因: BBS は boot network SM `hlsm_boot_network_sm`(0x457FE0) で alAbEx auth 完了を要求し、
+ * 未完だと attract から credit/card-auth scene へ進めない（"全国対戦の受付を終了しました" 既定状態）。
+ * auth 完了の PROVEN gating reads（RE: facts/amnetwork 参照）を毎フレーム立てる:
+ *   0x210AED0 session / 0x210AED2 auth_ok（→FUN_006ff650 auth ready）/ 0x210AED4 dlinstr /
+ *   0x210B508 auth_complete / 0x16019A5 net_link_up / 0x16019A6 net_ip_match。
+ * region errCode=4 は既存 NOP patch(0x459109/0x45A846, patches.c)で抑止済み。
+ * ※経験的検証中: これで attract→entry/card-auth が開通するか live で確認（不可なら scene 側 guard を追う）。*/
+static void network_auth_force_ready(LogicState *st) {
+    uintptr_t b = (uintptr_t)GetModuleHandleW(NULL);
+    /* (1) alAbEx boot auth（subsys network:ok の前提。scene gate ではないが boot SM 充足）*/
+    *(uint8_t *)(b + (0x210AED0u - 0x400000u)) = 1;   /* g_alabex_started */
+    *(uint8_t *)(b + (0x210AED2u - 0x400000u)) = 1;   /* g_alabex_auth_ok */
+    *(uint8_t *)(b + (0x210AED4u - 0x400000u)) = 1;   /* g_alabex_dlinstr_ok */
+    *(uint8_t *)(b + (0x210B508u - 0x400000u)) = 1;   /* g_alabex_complete */
+    *(uint8_t *)(b + (0x16019A5u - 0x400000u)) = 1;   /* g_net_link_up */
+    *(uint8_t *)(b + (0x16019A6u - 0x400000u)) = 1;   /* g_net_ip_match */
+    /* 注: MMGP input/service gate(DAT_0227fe6c|0x400 等)の強制は 2026-06-30 に試行→ gate は開いたが
+       MMGP は state0 のまま不変（mmgp_diag で確認: credit scene が非 active で mmgp_request_start 未呼出）＝無効、
+       かつ JVS 入力語を触り「メンテ countdown」副作用を誘発したため撤去。真の停止点は credit scene 活性化（上流の
+       scene manager）。facts/gameflow.md 参照。*/
+    if (!st->netauth_logged && st->host && st->host->log) {
+        st->host->log("info", "{\"ev\":\"netauth.force_ready\",\"flags\":\"alabex(aed0/aed2/aed4/b508/19a5/19a6)\"}");
+        st->netauth_logged = 1;
+    }
+}
+
+/* MMGP play-session タスクの状態を診断（attract→credit→card 連鎖のどこで止まるか確定）。
+ * task list(0x16db564) を uid="MMGP"(0x50474d4d) で walk し subobj(node+0x10)を読む:
+ *   subobj[0]=state(0=gate待ち/1=keepalive/2=start-txn) / subobj[1]=substate / +0xc=accept / +0xd=request /
+ *   subobj[2]=msg ptr → msg+0x1ac=txn result, msg+8=msg status。
+ * gate globals: DAT_0227fe6c(&0x700), DAT_0227fe70(&4), amlib_subsystem_state(0x16b8b54), lockout(0x16b8b6b)。*/
+static void mmgp_diag(LogicState *st) {
+    static unsigned n; static int last_state = -99, last_sub = -99;
+    uintptr_t b = (uintptr_t)GetModuleHandleW(NULL);
+    unsigned svc6c = *(uint32_t *)(b + (0x0227FE6Cu - 0x400000u));
+    int svc70 = (*(uint32_t *)(b + (0x0227FE70u - 0x400000u)) & 4) ? 1 : 0;
+    unsigned subsys = *(uint32_t *)(b + (0x16B8B54u - 0x400000u));
+    int lockout = *(uint8_t *)(b + (0x16B8B6Bu - 0x400000u));
+    int state = -1, sub = -1, accept = -1, req = -1, msgres = -2, msgst = -2, found = 0;
+    int *node = *(int **)(b + (0x16DB564u - 0x400000u));
+    for (int guard = 0; node && guard < 64; guard++) {
+        if (node[1] == 0x50474d4d) {                       /* uid "MMGP" */
+            unsigned char *so = (unsigned char *)(uintptr_t)node[4];   /* +0x10 ctx */
+            if (so) {
+                found = 1; state = *(int *)so; sub = *(int *)(so + 4);
+                accept = so[0xc]; req = so[0xd];
+                int msg = *(int *)(so + 8);
+                if (msg) { msgres = *(int *)((uintptr_t)msg + 0x1ac); msgst = *(int *)((uintptr_t)msg + 8); }
+            }
+            break;
+        }
+        node = (int *)(uintptr_t)node[0xf];                /* next +0x3c */
+    }
+    /* state/substate 変化時 ＋ 約2秒毎にログ */
+    if (state != last_state || sub != last_sub || (n++ % 120) == 0) {
+        char m[320];
+        wsprintfA(m, "{\"ev\":\"mmgp.diag\",\"svc6c\":\"%x\",\"gate0x400\":%d,\"svc70_4\":%d,\"subsys\":%u,"
+                     "\"lockout\":%d,\"found\":%d,\"state\":%d,\"sub\":%d,\"accept\":%d,\"req\":%d,"
+                     "\"msgres\":%d,\"msgst\":%d}",
+                  svc6c & 0x700, (svc6c & 0x400) ? 1 : 0, svc70, subsys, lockout, found,
+                  state, sub, accept, req, msgres, msgst);
+        if (st->host && st->host->log) st->host->log("info", m);
+        last_state = state; last_sub = sub;
+    }
 }
 
 /* touch device データ構造体を取得（getter FUN_008b3b90 と同じ: DAT_016d8690 cache or class 0x22 list walk）*/
@@ -454,6 +581,8 @@ static void on_jvs_tick(LogicState *st) {
 
     eeprom_force_ready(st);   /* EEPROM 未 provisioning なら provisioning（amBackup -3 洪水の解消）*/
     dipsw_force_ready(st);    /* dipsw ctx 未 provisioning なら provisioning（board index errCode 0xa/0xb の解消）*/
+    network_auth_force_ready(st); /* ALL.Net alAbEx auth 成功詐称（attract→card-auth 開通の試験）*/
+    mmgp_diag(st);            /* MMGP play-session 連鎖の診断（gate/state/txn のどこで止まるか確定）*/
     touch_diag(st);           /* touch device 内部状態の診断（serial→consumer 到達確認）*/
 
     /* touch_inject(st); — handshake 完了で device が mode1 動作するため bypass 注入は不要。
