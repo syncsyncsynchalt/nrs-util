@@ -55,6 +55,10 @@ command/ACK シリアル（checksum無, 8E1/9600）**。Aime/FeliCa ではない
     alAbEx は scene gate ではないと確定。touch も既知 blocker だったのは `DAT_0227fe6c` を touch/JVS が供給する経路ゆえ。
   - **次（P5 network 層）**: `DAT_0227fe6c|=0x400`＋`DAT_016b8b6b=0`＋**MMGP txn を成功させる**（'E' タスク 0x2206 応答 or txn `+0x1ac=2`）。
     開通すれば credit→card-auth→**card SEARCH(0x4D)** が走り、下記 card data 層を live 検証可。
+  - **scene_diag 計装で形状確定（2026-06-30, `api.c scene_diag/scene.list`）**: title("画面をタッチしてください")の active scene set=35 で安定、
+    credit/card-auth は**未生成**。**touch すると `net_session_task_sm_on_touch`(0x6f42c0, network session SM)が spawn するが credit 不生成・
+    画面は attract demo 別ページへ循環するのみ**（FREE PLAY でも開始しない）。⇒ 開始 gate は**上流の ALL.NET/MMGP ゲームサーバ接続**。
+    attract 命名: `attract_scene_lifecycle`(0x7274d0)/`attract_demo_browser`(0x725fa0)/`attract_exit_input_trigger`(0x728700)。詳細 `facts/gameflow.md`。
 - **Phase B card data 層（MMGP 開通後）**: present=1 で poll に `0B`+8B UID record（byteswap 順 live 確証: UID=DAT_0169e314/type=DAT_0169e31c）
   ＋0D ヘッダ(2B+128B, UID@+0x04 BE)＋容量分の data＋0xAD write＋`card.bin` 永続化（logic から直接 Win32 file I/O, abi 不変）。
 

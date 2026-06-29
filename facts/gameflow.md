@@ -83,6 +83,20 @@ boot network SM `hlsm_boot_network_sm`(0x457fe0) は alAbEx auth flags（`DAT_02
 - alAbEx auth 強制は `network:ok` を出すが scene 遷移には無関係（既述）。MMGP gate 強制(`DAT_0227fe6c|0x400`)は gate を開くが
   state0 のまま無効＋「メンテ countdown」副作用を誘発したため**撤去**（credit scene 活性化後に再検討）。
 
+## 経験的検証その2（2026-06-30, scene_diag 計装）— title scene は demo browser ではない・touch は attract 循環
+
+`api.c scene_diag/scene.list`（task list `DAT_016db564` を walk し各 active node の update slot `+0x24` VA を集計）で実走観測:
+- **title 画面("画面をタッチしてください", FREE PLAY)の active scene set ＝ 35 ノードで安定**。
+  `attract_scene_lifecycle`(0x7274d0)は **active list に居ない**（attract=0）＝**title scene は demo browser(0x7274d0)とは別物**（当初仮説を訂正）。
+  active list に同居: card `cardrw_ctx`(0x4f2930) / `touch_poll_update`(0x8b2750) / `mmgp_task_update`(0x6f3b40) /
+  boot SM `amlib_init_sm`(0x89a010, attract 後も常駐) など。credit(0x5eaae0)/card-auth(0x5e6200)は **未生成（seen=0）**。
+- **touch すると**（`touch.event active=1 status=1 edge=1 x234=507`＝押下完全到達）: active set が変化し
+  **`net_session_task_sm_on_touch`(0x6f42c0, MMGP/network session を vtable 駆動する state0-5 SM)＋thunk 0x4026f0 が spawn**。
+  だが **credit/card-auth は依然未生成**。画面は **attract demo の別ページへ循環するだけ**（背景変化, 「画面をタッチしてください」継続, スクショ実証）。
+- ⇒ **FREE PLAY でも touch でゲーム開始しない**。touch は attract demo を循環させ network keep-alive task を起こすのみ。
+  credit scene は生成されない＝**開始 gate は上流の ALL.NET/MMGP ゲームサーバ接続**（STATUS の「ALL.NET GAME SERVER 未完了・
+  【全国対戦受付終了】」と整合）。matching/credit サーバが「セッション開始可」を返すまで title から進めない。
+
 ## 未解決（要 RE）= attract demo → credit/entry scene の活性化
 
 attract demo browser と credit/card-auth scene を切替える**上位 scene manager**が未特定。これが credit scene を active にすれば

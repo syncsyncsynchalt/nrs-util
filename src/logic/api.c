@@ -515,6 +515,57 @@ static void touch_diag(LogicState *st) {
     }
 }
 
+/* scene_diag — task/scene list(DAT_016db564) を walk し、各ノードの update vtable slot(+0x24) の VA を集める。
+ * 目的: attract→credit→card-auth の scene 活性化を観測する。Phase B2 の停止点は「credit scene が非 active」
+ * （gameflow.md 経験的検証）なので、touch 時に credit(0x5eaae0)/card-auth(0x5e6200) update fn を持つノードが
+ * 生成・active 化されるかを直接見る。ノード: +4=uid tag / +8=flags(&1 active,&2 init,&4 remove) / +0x24=update / +0x3c=next。
+ * 既知 scene update VA: attract=0x7274d0 / credit=0x5eaae0 / card-auth=0x5e6200。変化時＋約2秒毎にログ。 */
+static void scene_diag(LogicState *st) {
+    static unsigned n; static unsigned last_sig = 0xFFFFFFFFu; static int last_flags = -1;
+    uintptr_t b = (uintptr_t)GetModuleHandleW(NULL);
+    unsigned char *node = *(unsigned char **)(b + (0x16DB564u - 0x400000u));
+    unsigned sig = 0; int active_attract = 0, active_credit = 0, active_cardauth = 0, nact = 0;
+    int seen_credit = 0, seen_cardauth = 0;   /* present at all（active 否かに依らず）*/
+    for (int guard = 0; node && guard < 128; guard++) {
+        unsigned flags = *(unsigned *)(node + 8);
+        uintptr_t upd = *(uintptr_t *)(node + 0x24);
+        unsigned va = upd ? (unsigned)(upd - b + 0x400000u) : 0;
+        if (va == 0x5eaae0) { seen_credit = 1; if (flags & 1) active_credit = 1; }
+        if (va == 0x5e6200) { seen_cardauth = 1; if (flags & 1) active_cardauth = 1; }
+        if (va == 0x7274d0 && (flags & 1)) active_attract = 1;
+        if (flags & 1) { nact++; sig = sig * 31u + va; }  /* active set の署名 */
+        node = *(unsigned char **)(node + 0x3c);
+    }
+    int flagbits = active_attract | (active_credit << 1) | (active_cardauth << 2)
+                 | (seen_credit << 3) | (seen_cardauth << 4);
+    if (sig != last_sig || flagbits != last_flags || (n++ % 120) == 0) {
+        char m[256];
+        wsprintfA(m, "{\"ev\":\"scene.diag\",\"nact\":%d,\"sig\":\"%x\",\"attract\":%d,"
+                     "\"credit_active\":%d,\"cardauth_active\":%d,\"credit_seen\":%d,\"cardauth_seen\":%d}",
+                  nact, sig, active_attract, active_credit, active_cardauth, seen_credit, seen_cardauth);
+        if (st->host && st->host->log) st->host->log("info", m);
+        /* sig 変化時のみ active node の update VA 一覧をダンプ（title scene と touch 追加ノードを特定）。 */
+        if (sig != last_sig) {
+            char d[600]; int o = wsprintfA(d, "{\"ev\":\"scene.list\",\"va\":[");
+            node = *(unsigned char **)(b + (0x16DB564u - 0x400000u));
+            int first = 1;
+            for (int guard = 0; node && guard < 128 && o < 540; guard++) {
+                unsigned flags = *(unsigned *)(node + 8);
+                uintptr_t upd = *(uintptr_t *)(node + 0x24);
+                if (flags & 1) {
+                    unsigned va = upd ? (unsigned)(upd - b + 0x400000u) : 0;
+                    o += wsprintfA(d + o, "%s\"%x\"", first ? "" : ",", va);
+                    first = 0;
+                }
+                node = *(unsigned char **)(node + 0x3c);
+            }
+            wsprintfA(d + o, "]}");
+            if (st->host && st->host->log) st->host->log("info", d);
+        }
+        last_sig = sig; last_flags = flagbits;
+    }
+}
+
 /* 実マウス→消費側へ直接注入（SEGA の replay/debug 経路と同じ report_push 機構を自前で駆動）。
  * serial COM1 経路は game 内部の TX ワーカースレッド(FUN_0067c1a0)が touch ポートで動かず handshake 不全。
  * 一方、消費側 report バッファ +0x2b8 → report_promote(+0x30c dirty)→ +0x210/+0x234 は poll_update で毎フレーム
@@ -584,6 +635,7 @@ static void on_jvs_tick(LogicState *st) {
     network_auth_force_ready(st); /* ALL.Net alAbEx auth 成功詐称（attract→card-auth 開通の試験）*/
     mmgp_diag(st);            /* MMGP play-session 連鎖の診断（gate/state/txn のどこで止まるか確定）*/
     touch_diag(st);           /* touch device 内部状態の診断（serial→consumer 到達確認）*/
+    scene_diag(st);           /* attract→credit→card-auth の scene 活性化を観測（Phase B2 停止点の切分け）*/
 
     /* touch_inject(st); — handshake 完了で device が mode1 動作するため bypass 注入は不要。
        実 serial 経路（on_read_file の 'T' フレーム→rx_parse→decode_T_coord）でタッチが流れる。 */
