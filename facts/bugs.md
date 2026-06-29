@@ -6,6 +6,36 @@ Each entry: symptom → root cause → fix/workaround.
 
 ---
 
+## [ANTI-PATTERN] ストリーミング serial デバイス: TX は 1 バイト/WriteFile・RX は cbInQue ゲート
+
+**症状**: COM1 touch を仮想シリアル化したが handshake が完了しない。`touch.read`=0（ReadFile 来ない）、
+あるいは ReadFile は来るが `touch.write`=0 で device が ack を得られず state 0x32 固着（mode0/present0）。
+
+**根本原因（2つ。実体 RE で確定）**:
+1. **RX ポンプ `serial_rx_pump`(0x67C0C0) は `ClearCommError` の `cbInQue!=0` のときだけ ReadFile** する。
+   ストリーミング型 device（host が write せず panel が 'T' を常時送出）は、`on_comm_control` の CLEAR_ERROR で
+   COMSTAT をゼロ化すると cbInQue=0 → ReadFile 永久に来ない。**「常に 1 フレーム受信待ち」と cbInQue を申告**せよ。
+2. **TX フラッシュ `serial_tx_flush`(0x67C070, SerialThread `serial_tx_thread` 0x67C1A0) は TX リングを
+   1 バイトずつ WriteFile** する。`on_write_file` を「10B 一括フレーム」前提で書くと **n=1 で一生処理されず ack ゼロ**。
+   **バイト蓄積→同期ヘッダ始まりの固定長フレーム組立**を必ず実装（`TouchPanel.rx[]`/`rx_len`）。
+
+**教訓**: ①シリアル device の transport は「RX=cbInQue ゲート / TX=バイトストリーム」。JVS(master 駆動 req/resp)とは
+**根本的に異なる**ので JVS の「1 write=1 frame 同期」を流用しない。②「効かない」を patch/hook の抑止と疑う前に、
+**ゲームが実際に何バイト read/write するかを実体ログ**（touch.read/touch.write の hex）で見る — 今回は私自身の
+フレーム組立漏れが原因で、パッチ/フックは無関係だった（ユーザーの「握りつぶし？」への最終回答）。
+
+## [ANTI-PATTERN] loader dual-mode 化後の「クラッシュ」誤診
+
+**症状**: `loader.exe <nrs-path>` でゲームが起動せず nrs:0。logic 変更の「クラッシュ」と誤認しやすい。
+
+**根本原因**: `loader.exe` は 2026-06-29 に **dual-mode 化**（引数なし=GUI / 引数あり=CLI verb）。`loader.exe <path>` は
+**"unknown verb"** で何も起動しない。正: **`loader.exe start --wait=N --freeplay 0 --game-dir DIR`**。
+
+**教訓**: nrs:0 を即「inject 起因 crash」と帰属せず、`nrsedge.log` の有無・loader stdout を先に見る（ログ無し＝
+そもそも起動していない）。host.dll は **loader cwd(nrs-util) と nrs cwd(bbs) 両方**に配置（inject 元 / logic ロード元）。
+
+---
+
 ## [ANTI-PATTERN] デバイスエミュ: IOCTL ハンドシェイクだけ通すと init は成功するがデータ面欠落で I/O 全滅
 
 **症状**: `amBackupRecordRead/WriteDup: error(%d)` が洪水化。columba(DMI)修正で -21 は消えたが別コードが残る。

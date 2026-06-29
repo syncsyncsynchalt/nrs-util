@@ -1,5 +1,36 @@
 # STATUS — 現在地と次の一手
 
+## フェーズ: ★★★タッチパネル(COM1)完動化 + プロセス内蔵 GL キャプチャ枠組み — 2026-06-30
+
+**COM1 タッチパネルを serial プロトコルで完全エミュ・実走検証済み**（`src/logic/driver/touch.c` + api.c 配線）。
+詳細は `facts/devices.md` §タッチパネル。boot まで段階的に3層解決して到達:
+1. **EEPROM SetupDi 修正**（`bugs.md`/`api.c eeprom_force_ready`）で amBackup -3 洪水(14044件)停止 → attract 到達。
+2. **ClearCommError cbInQue 修正**: serial RX ポンプ`FUN_0067c0c0`は `cbInQue!=0` のみ ReadFile。touch handle の
+   CLEAR_ERROR で `cbInQue=10`(常に1フレーム受信待ち)を申告 → ReadFile 発行 → 'T' ストリーム開始。
+3. **★核心: TX フラッシュは 1 バイトずつ WriteFile**（`FUN_0067c070`, SerialThread `FUN_0067c1a0`）。`touch_on_write`
+   が 10B 一括前提だったので n=1 で ack ゼロ → handshake が +0x28=0 で timeout → state 0x32 固着。
+   **修正＝バイト蓄積→'U'始まり10Bフレーム組立**（`TouchPanel.rx[]`）→ 'p'/'P' に 'P'(byte3=6) ack。
+   **live: handshake `present=1/mode=1/hs=0` 完了・「touch panel ok.」発火**。bypass(+0x2b8 注入)は不要化・撤去。
+   touch-active = status byte `+0x166 & 3`、押下エッジ→`+0x210[0]`（`FUN_008b3310` mode1 処理）。
+   **`touch.event` で `active=1 status=1 edge=1 x234=507(中央)` の完全シーケンス取得＝押下・座標・離し全て正常**。
+
+**プロセス内蔵 GL フレームキャプチャ**（`src/host/capture.c`, gdiplus/opengl32 link）: 外部 CopyFromScreen は窓遮蔽・
+GL backbuffer 非取得・Get-Process 間欠失敗で不安定だった。host が SwapBuffers/wglSwapBuffers をフックし、cwd の
+`capture.req` 検知で `glReadPixels`(GL_BGRA)→GDI+ で `capture.png` 原子保存（alpha は 0xFF 不透明化）。
+**テスト枠組み `tools/test/touch_test.ps1`**（ASCII のみ。PS5.1 が UTF-8 BOM無しを CP932 誤読し parse 失敗するため）:
+`-Action shot`(capture.req→png) / `coin -N` / `touch -X -Y -HoldMs`(client比率) / `info`。窓は EnumWindows で title='WGL'。
+
+**残課題（touch 自体は完動）**: attract「画面をタッチしてください」を touch しても scene が進まない（`touch.event` は
+発火するが card/login/scene msg 無し）。BBS はカードベースで touch 後に **Aime カードリーダー(COM2/class 0x21)** を
+要求するが COM2 は presence 詐称のみ・実 I/O 未エミュ。**次=COM2 card reader emulation**（touch と同様 serial protocol）。
+診断ログ（touch.diag/serial.diag/touch.event/touch.write）は api.c に残置（card 作業で有用。不要なら間引き可）。
+
+⚠️ **loader.exe は dual-mode 化済み**（2026-06-29）。起動は `loader.exe start --wait=N --freeplay 0 --game-dir DIR`。
+旧 `loader.exe <nrs-path>` は "unknown verb" でゲーム起動せず（「クラッシュ」と誤認しやすい）。host 変更時は host.dll を
+**nrs-util(loader cwd, inject 元) と bbs(nrs cwd, logic ロード元) 両方**へ配置。logic のみなら bbs へコピーで hot-reload。
+
+---
+
 ## フェーズ: ★パッチ削減（OS 境界エミュ化）+ 自律テスト起動法の確立 — 2026-06-29
 
 **ゲームメモリパッチ削減**: `patches.applied count 29→25`（4 byte-patch 撤去）。鉄則「パッチ原則ゼロ＝OS 境界で仮想化」へ前進。

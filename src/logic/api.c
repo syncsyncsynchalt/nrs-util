@@ -177,7 +177,7 @@ static BOOL on_read_file(LogicState *st, HANDLE h, void *buf, DWORD n, DWORD *go
         return TRUE;
     }
     if (h == st->touch_handle) {                  /* COM1: 現マウス位置→'T' フレームをストリーム */
-        touch_sample_mouse(&st->touch, GetForegroundWindow());
+        { HWND w = FindWindowW(NULL, L"WGL"); touch_sample_mouse(&st->touch, w ? w : GetForegroundWindow()); }
         int k = touch_on_read(&st->touch, (uint8_t *)buf, (int)n);
         if (got) *got = (DWORD)k;
         /* 初回・押下状態変化・約2秒毎にログ（streaming 確認＋座標観測。常時は出さない）*/
@@ -344,6 +344,21 @@ static unsigned char *touch_data_ctx(void) {
 /* touch device の内部状態を ~120 フレーム毎に記録（serial→consumer の到達を診断）。 */
 static void touch_diag(LogicState *st) {
     static unsigned n;
+    unsigned char *c0 = touch_data_ctx();
+    /* per-frame: touch-active(+0x211)/status(+0x166)/down-edge(+0x210[0]) の変化を即ログ（押下到達の確認）*/
+    if (c0) {
+        static int last_act = -1;
+        int act = (c0[0x211] != 0) | ((c0[0x166] & 3) ? 2 : 0) | (c0[0x210] ? 4 : 0);
+        if (act != last_act) {
+            char e[200];
+            wsprintfA(e, "{\"ev\":\"touch.event\",\"active211\":%d,\"status166\":%d,\"edge210\":%d,"
+                         "\"x234\":%d,\"y238\":%d,\"rawX\":%d}",
+                      c0[0x211], c0[0x166], c0[0x210], (int)*(float *)(c0 + 0x234),
+                      (int)*(float *)(c0 + 0x238), *(unsigned short *)(c0 + 0x216));
+            if (st->host && st->host->log) st->host->log("info", e);
+            last_act = act;
+        }
+    }
     if ((n++ % 120) != 0) return;
     unsigned char *c = touch_data_ctx();
     if (!c) { if (st->host && st->host->log) st->host->log("info", "{\"ev\":\"touch.diag\",\"ctx\":0}"); return; }
@@ -355,6 +370,22 @@ static void touch_diag(LogicState *st) {
              c[0x210], *(unsigned short *)(c + 0x216), *(unsigned short *)(c + 0x218),
              (int)*(float *)(c + 0x234), (int)*(float *)(c + 0x238), c[0x30c]);
     if (st->host && st->host->log) st->host->log("info", m);
+
+    /* serial struct 配列 DAT_016b8678（3×0x70）を走査: 各 +4=handle / +0x14=TX count / +0x6c=flags。
+       SerialThread: 0x16b87c8=ready, 0x16b87cc=obj。touch handle(0xC0114001)を持つ struct と TX 滞留を見る。 */
+    {
+        uintptr_t b = (uintptr_t)GetModuleHandleW(NULL);
+        unsigned char *arr = (unsigned char *)(b + (0x16b8678u - 0x400000u));
+        char s[300]; int o = wsprintfA(s, "{\"ev\":\"serial.diag\",\"ready\":%d,\"thr\":\"%08x\",\"ports\":[",
+            *(int *)(b + (0x16b87c8u - 0x400000u)), *(unsigned *)(b + (0x16b87ccu - 0x400000u)));
+        for (int i = 0; i < 3; i++) {
+            unsigned char *sp = arr + (size_t)i * 0x70;
+            o += wsprintfA(s + o, "%s{\"h\":\"%08x\",\"tx\":%d,\"fl\":\"%x\"}", i ? "," : "",
+                           *(unsigned *)(sp + 4), *(int *)(sp + 0x14), *(unsigned *)(sp + 0x6c));
+        }
+        wsprintfA(s + o, "]}");
+        if (st->host && st->host->log) st->host->log("info", s);
+    }
 }
 
 /* 実マウス→消費側へ直接注入（SEGA の replay/debug 経路と同じ report_push 機構を自前で駆動）。
@@ -385,12 +416,35 @@ static void touch_inject(LogicState *st) {
     float ny = (float)p.y * (600.0f  / (float)ch);   /* client → native Y（想定 600）*/
     int press = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) ? 1 : 0;
     int down  = (press && !st->touch_last_press) ? 1 : 0;   /* 押下エッジ */
+
+    /* (A) report_promote 経路: +0x2b8→+0x210/+0x234（press と pixel 座標）。dirty で昇格。 */
     c[0x2b8] = (unsigned char)press;          /* → +0x210（押下保持）*/
     c[0x2b9] = (unsigned char)down;           /* → +0x211（押下エッジ）*/
     c[0x2ba] = (unsigned char)press;          /* → +0x212 */
-    *(float *)(c + 0x2dc) = nx;               /* → +0x234（X）*/
-    *(float *)(c + 0x2e0) = ny;               /* → +0x238（Y）*/
-    c[0x30c] = 1;                             /* dirty → report_promote が +0x210/+0x234 へ昇格 */
+    *(float *)(c + 0x2dc) = nx;               /* → +0x234（X pixel）*/
+    *(float *)(c + 0x2e0) = ny;               /* → +0x238（Y pixel）*/
+    c[0x30c] = 1;                             /* dirty → report_promote */
+
+    /* (B) decode_T_coord(0x8B31E0) の全フィールド直接再現（hit-test 系が読む raw/正規化座標）。
+       +0x228/+0x22c = 正規化 0..1（DAT_00c916d0=1/4095）, +0x21c/+0x220 = 軸反転 raw(0xfff-X)。 */
+    {
+        unsigned rawX = (unsigned)((long long)p.x * 4095 / (cw > 1 ? cw - 1 : 1));
+        unsigned rawY = (unsigned)((long long)p.y * 4095 / (ch > 1 ? ch - 1 : 1));
+        unsigned rawZ = press ? 0xFF : 0;
+        c[0x166] = (unsigned char)(press ? 1 : 0);
+        *(uint16_t *)(c + 0x160) = (uint16_t)rawX;
+        *(uint16_t *)(c + 0x162) = (uint16_t)rawY;
+        *(uint16_t *)(c + 0x164) = (uint16_t)rawZ;
+        *(uint16_t *)(c + 0x216) = (uint16_t)rawX;
+        *(uint16_t *)(c + 0x218) = (uint16_t)rawY;
+        *(uint16_t *)(c + 0x21a) = (uint16_t)rawZ;
+        *(float *)(c + 0x21c) = (float)(int)(0xfff - rawX);
+        *(float *)(c + 0x220) = (float)(int)(0xfff - rawY);
+        *(float *)(c + 0x228) = (float)rawX * 0.00024420025874860585f;
+        *(float *)(c + 0x224) = (float)rawZ;
+        *(float *)(c + 0x22c) = (float)rawY * 0.00024420025874860585f;
+        *(float *)(c + 0x230) = (float)rawZ * 0.003921568859368563f;
+    }
     st->touch_last_press = (uint8_t)press;
 }
 
@@ -402,7 +456,8 @@ static void on_jvs_tick(LogicState *st) {
     dipsw_force_ready(st);    /* dipsw ctx 未 provisioning なら provisioning（board index errCode 0xa/0xb の解消）*/
     touch_diag(st);           /* touch device 内部状態の診断（serial→consumer 到達確認）*/
 
-    touch_inject(st);         /* 実マウス→消費側(+0x2b8→promote→+0x210)へ直接注入（serial 迂回）*/
+    /* touch_inject(st); — handshake 完了で device が mode1 動作するため bypass 注入は不要。
+       実 serial 経路（on_read_file の 'T' フレーム→rx_parse→decode_T_coord）でタッチが流れる。 */
 
     /* 筐体 TEST/SERVICE を毎フレーム上書き（dipsw byte2=3 の常時 ON を入力で打ち消す。on_sys_override 相当だが
        on_sys_override(dipsw/sysinput hook)は attract 中に発火しない場合があるため、

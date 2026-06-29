@@ -69,18 +69,25 @@ static void tx_push(TouchPanel *t, const uint8_t *f, int n) {
     t->tx_len += n;
 }
 
+/* game の TX フラッシュ(FUN_0067c070)は **1 バイトずつ WriteFile** する。よってバイトを蓄積し
+   'U'(0x55) 始まりの 10B フレームを組み立ててから処理する（10B 一括前提だと n=1 で一生処理されない）。 */
 void touch_on_write(TouchPanel *t, const uint8_t *buf, int n) {
-    /* game の TX は 'U'(0x55) 始まり 10B フレーム（複数連結あり）。byte1 で分岐。 */
-    for (int i = 0; i + TOUCH_FRAME_LEN <= n; ) {
-        if (buf[i] != (uint8_t)TOUCH_SYNC) { i++; continue; }   /* 同期再取得 */
-        uint8_t cmd = buf[i + 1];
-        if (cmd == 'p' || cmd == 'P') {                          /* status 照会 / param set → 'P' ack */
+    for (int i = 0; i < n; i++) {
+        uint8_t byte = buf[i];
+        if (t->rx_len == 0 && byte != (uint8_t)TOUCH_SYNC) continue;  /* 'U' まで同期待ち */
+        if (t->rx_len < TOUCH_FRAME_LEN) t->rx[t->rx_len++] = byte;
+        if (t->rx_len < TOUCH_FRAME_LEN) continue;                    /* まだ未完 */
+
+        /* 10B フレーム完成。byte1=cmd で分岐。'p'(status照会)/'P'(param set)→ 'P'(byte3=6) ack。 */
+        uint8_t cmd = t->rx[1];
+        if (cmd == 'p' || cmd == 'P') {
             uint8_t f[TOUCH_FRAME_LEN];
             build_P(f);
             tx_push(t, f, TOUCH_FRAME_LEN);
         }
-        /* 'R'(reset 0x52) は応答不要（game は +0xc timer 駆動で前進）。其他も無応答＝timeout 前進。 */
-        i += TOUCH_FRAME_LEN;
+        /* 'R'(reset 0x52) は応答不要（game は timer 駆動で前進）。 */
+        t->cmds++;
+        t->rx_len = 0;                                                /* 次フレームへ */
     }
 }
 

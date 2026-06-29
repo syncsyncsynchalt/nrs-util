@@ -24,7 +24,10 @@ typedef struct {
     uint8_t  pressed;           /* タッチ中（マウス左ボタン押下）*/
     uint8_t  tx[64];            /* device→host 応答キュー（handshake の 'P' ack）*/
     int      tx_len, tx_off;    /* 応答キューの書込/読出位置 */
+    uint8_t  rx[TOUCH_FRAME_LEN]; /* host→device コマンド組立バッファ（game は 1 バイト/WriteFile で書く）*/
+    int      rx_len;            /* 組立中バイト数 */
     unsigned reads;             /* ReadFile 回数（診断）*/
+    unsigned cmds;              /* 受信した完全コマンドframe 数（診断）*/
 } TouchPanel;
 
 void touch_init(TouchPanel *t);
