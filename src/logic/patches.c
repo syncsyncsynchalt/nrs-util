@@ -39,9 +39,20 @@ static const CodePatch CODE[] = {
        - discovery スレッド(0x9869f0)が COM4 上でバス列挙し node_count を立てる＝forgery 不要。
        COM 番号は patches_apply 末尾で 0xAE11F0 を cfg->jvs_com にパッチ（既定 COM4）。 */
     /* devices/presence.js */
-    {0x4F6310, RET1, 6, "IC Card R/W ready->1 (Error 5101)"},
-    {0x8B3B00, RET1, 6, "Touch Panel status->1 (Error 5501)"},
-    {0x6F0B80, P_zero1, 1, "USB I/O board errCode imm 0F->00 (Error 951)"},
+    /* 0x4F6310 IC Card R/W ready(cardrw_ready_bit1=card_flags>>1&1) RET1 は撤去（2026-06-30, ライブ実証）:
+       card serial emu(card.c)が実 handshake を完走させると game 自身が card_flags bit1 を立てる。boot state2
+       (amlib_init_sm 0x89a010)は cardrw_ready_bit1()!=0 を無期限ポーリングするので詐称不要。
+       差分ライブテスト: 撤去→"CHECKING IC CARD R/W … OK"→attract 到達(5101 不在)。再発(5101/ハング)時は復活させる。 */
+    /* {0x4F6310, RET1, 6, "IC Card R/W ready->1 (Error 5101)"}, */
+    /* 0x8B3B00 Touch Panel status(touchpanel_status=ctx+0x18) RET1 は撤去（2026-06-30, ライブ実証）:
+       touch serial emu(touch.c)が handshake を完走させると game 自身が ctx+0x18=1 を立てる
+       (FUN_008b2ad0 default case→"touch panel ok.")。boot state3 は touchpanel_status()!=0 を無期限ポーリング＝詐称不要。
+       差分ライブテスト: 撤去→"CHECKING TOUCH PANEL … OK"→attract 到達(5501 不在)。再発(5501)時は復活させる。 */
+    /* {0x8B3B00, RET1, 6, "Touch Panel status->1 (Error 5501)"}, */
+    /* 0x6F0B80 は保持（撤去不可・2026-06-30 ライブ実証）: USB I/O board(usbio_board_count 0x16b88dc)は vtable USB 列挙
+       (FUN_0067cbe0)で検出され COM4 JVS emu(amJvst)とは別経路ゆえ standalone で count=0 のまま。撤去すると boot が
+       Error 0910(Wrong Resolution Setting)で停滞し attract に到達しない（差分ライブテストで確認, 951 連鎖が解像度初期化を阻害）。 */
+    {0x6F0B80, P_zero1, 1, "USB I/O board errCode imm 0F->00 (Error 951). 撤去不可(0910 停滞)。"},
     /* dipsw byte2->3 / byte3->0x20(board index 2) は撤去: dipsw ctx を api.c dipsw_force_ready が provisioning し、
        read fn の mxsmbus IOCTL(0x9c402004,cmd5) を mxdev_ioctl が応答(index0=0x20)。素の amDipswRead が board index 2
        を算出するため byte patch 不要。詳細 facts/devices.md。再発(errCode 0xa/0xb)時は復活させる。 */
