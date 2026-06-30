@@ -13,7 +13,7 @@
 #include <windows.h>
 #include <stdint.h>
 
-#define NRSEDGE_ABI_VERSION 5u   /* v5: on_eeprom_init 追加（amEepromInit detour で EEPROM ctx を storage-init 中に早期 provisioning）。v4: on_set_file_pointer */
+#define NRSEDGE_ABI_VERSION 6u   /* v6: on_dipsw_provision 追加（dipsw read 0x45A0E0 PRE で dipsw ctx を早期 provisioning し board index errCode 0xa→errNo 910 "Wrong Resolution Setting" を解消）。v5: on_eeprom_init。v4: on_set_file_pointer */
 
 /* host が hook している原関数(トランプリン)の識別子。logic は services->orig(id) で呼び戻す。 */
 enum { ORIG_CREATE_FILE_W = 1, ORIG_CREATE_FILE_A, ORIG_READ_FILE, ORIG_WRITE_FILE,
@@ -89,6 +89,13 @@ typedef struct LogicApi {
        host detour が 0(成功)を返すと genuine な amBackupRead(STATIC) が走り seed 済み region を読む。
        per-frame の eeprom_force_ready は main loop（init 後）で遅すぎるための早期化。 */
     void (*on_eeprom_init)(LogicState *st);
+    /* dipsw read(0x45A0E0=amDipswRead) PRE: dipsw ctx を読取の直前に provisioning する。standalone では amDipswInit が
+       SetupDi(PnP 列挙)失敗で handle=-1 のため amDipswReadByte が即 return → board_index がゴミ(実測 5) → board-table
+       table[5]!=8 → amlib_master_errCode=0xa → errNo 910 "Wrong Resolution Setting"（解像度ではなく基板テーブル誤判定）。
+       per-frame の dipsw_force_ready(on_jvs_tick)は board check より後で遅すぎる。board check が使う board_index は
+       amDipswRead(本 hook)が書くので、読取前に ctx を H_MXSMBUS へ provisioning すれば IOCTL(cmd5,vcode0)→0x20 で
+       index=(0x20>>4)&7=2、table[2]=8 を満たし errCode 0xa が立たない（dipsw byte patch 復活不要のエミュ解）。 */
+    void (*on_dipsw_provision)(LogicState *st);
 
     /* ---- system 層(PCP/TCP): フックは段階的に追加（P5） ---- */
     /* TODO: on_socket / on_pcp_exchange 等 */

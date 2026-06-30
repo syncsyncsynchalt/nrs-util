@@ -107,7 +107,20 @@ typedef struct { uint32_t va; uint32_t val; int size; } DataWrite;
 static const DataWrite DATA[] = {
     /* amjvs node BSS の forgery data write は撤去（native discovery が node を満たす）。 */
     /* mxkeychip/region.js — region=JAPAN */
-    {0x16014C4, 1, 1}, {0x1601744, 1, 1}, {0x1601989, 1, 1},
+    /* 0x16014C4(region_game_pcb/STATIC) は維持: anti-tamper FUN_0048f9c0 の region-index 整合用
+       （EEPROM STATIC seed が genuine 供給するが gate/anti-tamper が直読みするため温存。mxkeychip.md）。 */
+    /* 0x16014C4(region_game_pcb/STATIC) は維持: anti-tamper FUN_0048f9c0 の region-index 整合用
+       （EEPROM STATIC seed が genuine 供給するが gate/anti-tamper が直読みするため温存。mxkeychip.md）。 */
+    {0x16014C4, 1, 1},
+    /* 0x1601744(region_cached)/0x1601989(region_dongle) 撤去済（2026-06-30 差分ライブ実証, patches 20→18）:
+       両者とも game 自身の writer が genuine 供給を持つ（実体確認）ため DATA write は冗長:
+       - 0x1601989 ← FUN_00459220 の FUN_0096f160(&region_dongle) = keychip appboot.region PCP（keychip present 枝。
+         standalone は on_keychip_hold で presence 維持・keychip_server が =01 を返す）。gate=amlib_region_gate が直読み。
+       - 0x1601744 ← FUN_0045acc0 の `DAT_01601744 = DAT_016014c4`（region_game_pcb/STATIC seed=01 のコピー、amlib_eeprom_ok 成立時）。
+       差分実証: patches=20(両 write 有) と patches=18(撤去) でログ error 3件・画面とも完全一致＝撤去でビット等価。
+       撤去後も region_dongle=01 維持（`Region error (01,01,00,05)` の第2 operand）＝keychip 供給がライブで効いている証拠。
+       （`(01,01,00,05)` の第3 operand=00 は ALL.Net network region 未供給の別件＝0x45A846 維持で errCode 抑止。撤去前から同一。）
+       回帰（0903/region error or SYSTEM STARTUP "ERROR."）時は本2行を復活。 */
     /* amdebug 系統A のゲート開放(logLevel/logMask)は**ここでは行わない**。
        注入は CREATE_SUSPENDED ＝ patches_apply は entry 前に走るため、resume 後の
        amDebugInit(0x55C500: memset→logLevel=4/mask=0xff) に上書きされ lv5..7 が脱落する。

@@ -35,6 +35,13 @@ boot 後に居座る「Error NNNN」は**ゲームアプリのエラーシーン
   `0x6F0B80` 復活ではなく「前景ウィンドウ＋システムマウスの供給」で解く（OS 境界仮想化の原則）。
 - 旧「撤去不可・0910 停滞」は **マウス不在(count=0)前提**の旧実測で、本実証により覆った。
   `DAT_016014a3!=0` でも skip するが mxkeychip/dongle 派生(`FUN_00459220/459460`)なので force 非推奨。
+- **★訂正 [L cdb, 2026-07-01]: 951 の真因は SysMouse ではなく keychip_ctx+0xc 欠落だった**。SysMouse は count=1 で
+  genuine 検出済（マウス正常）。だが `input_update_merge_dinput_jvs`(0x679de0) 末尾の count>=1 枝で
+  `(DAT_016b88e4 != 1)` が**恒真**（`DAT_016b88e4` は writer 不在で常に 0）→ `usbio_io_status=-0x70` → mapper default → 0xf。
+  唯一の escape は `DAT_016014a3 != 0` = `FUN_0096c5f0()=(keychip_ctx+4 && keychip_ctx+0xc)`。**keychip_ctx は +4/+8/+0x10=1
+  だが +0xc=0**（live 実証）→ DAT_016014a3=0 → 951。実機は実 keychip で +0xc が立ち回避。**951 の正しいエミュ=keychip_ctx+0xc
+  を立てる keychip setup の完備**（`amDongleSetupKeychip` のどの段が +0xc か特定して keychip_server 補完）。`mxkeychip.md` 参照。
+  error scene は latch 後 errCode クリアでは消えない（未然防止のみ）。
 
 ### Dipsw / board index = board-table check (errCode 0xa / 0xb) [S+F]
 - **dipsw read** `FUN_0045a0e0`（唯一の writer）: `amDipswReadByte` 経由で byte2/byte3 を読み、
@@ -53,7 +60,10 @@ boot 後に居座る「Error NNNN」は**ゲームアプリのエラーシーン
 - `FUN_006c5470`: 同テーブルを `switch`、case 8 以外で `DAT_016f5ac0=0x11/0x1e`。
 - スタンドアロンは dipsw ドライバ不在で読み失敗 → bytes garbage → index/flag が不定 → errCode 0xa/0xb が
   画面ラッチ race の種になる。
-- **適用 patch**（実基板の clean 値を源流供給）: `0x45A0F5`（byte2 ロード→`MOV CL,3`）＋
+- **errNo 対応 [L cdb, 2026-07-01]**: errCode **0xa → 画面 errNo 910 "Wrong Resolution Setting"**（解像度ではなく board-table 誤判定。SEGA カタログの文言割当）。error_scene_render(0x6f2730) の descriptor `+0x00=errCode 0xa / +0x10=errNo 0x38e(910) / +0x0c=msgPtr 0xbd04b4`。同様に errCode 0xf→951, 0x4→903。
+- **dipsw read タイミングの罠 [L cdb, 2026-07-01]**: dipsw ctx provisioning（`dipsw_force_ready` / amDipswInit 0x9842a0 detour / dipsw read 0x45a0e0 PRE）では **board_index を確定する最初の `amDipswRead` に間に合わない**（その read は amlib_reset_init 経由で provisioning より前。実機で dipsw.force_ready 発火時刻 < board check を確認したが board_index=5 のまま＝最初の read は更に前）。`FUN_009836e0` は handle 無効で書込まず byte3=stack garbage(0x5x)→index 5。
+- **確実な解 = consumer hook [L, 2026-07-01]**: `amlib_storage_board_check`(0x679cb0) を **PRE hook**（`src/host/gamehook.c` d_board_check）し判定直前に **board_index=2 + DAT_0160194c bit0x20=0** を供給。dipsw read タイミング非依存で errCode 0xa/0xb を断つ。errCode 0xa→0xf 遷移＋画面 0910→0951 で実証（patches 追加なし）。
+- **適用 patch（旧・撤去済）**（実基板の clean 値を源流供給）: `0x45A0F5`（byte2 ロード→`MOV CL,3`）＋
   `0x45A0F9`（byte3 ロード→`MOV AL,0x20`）。byte3=0x20 で既存 `SHR/AND` が index 2 を自然算出し
   table[2]=8 を満たす（0xa 解消）＋ bit 0x8(=flag 0x20)=0（0xb 解消）。byte2=3 は実基板値で
   bit 0x1/0x2 を実機同様に供給。両 reader（0xa / 0xb / FUN_006c5470 の 0x11/0x1e）を源流で恒久解消。

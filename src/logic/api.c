@@ -898,6 +898,14 @@ static void on_eeprom_init(LogicState *st) {
     eeprom_force_ready(st);
 }
 
+/* dipsw read(0x45A0E0=amDipswRead) PRE detour 本体: dipsw ctx を読取の直前に provisioning する。
+ * dipsw_force_ready を再利用（dipsw_fixed の冪等 one-shot）。board check(amlib_storage_board_check)が使う
+ * board_index は amDipswRead が書くので、その読取前に ctx を H_MXSMBUS にしておけば IOCTL(cmd5,vcode0)→0x20
+ * → index 2 → table[2]=8 で errCode 0xa(→errNo 910)を断つ。per-frame force(on_jvs_tick)は board check 後で遅い。*/
+static void on_dipsw_provision(LogicState *st) {
+    dipsw_force_ready(st);
+}
+
 static const LogicApi g_api = {
     NRSEDGE_ABI_VERSION, l_bind,
     on_create_file, on_read_file, on_write_file, on_ioctl, on_close, on_comm_control,
@@ -905,6 +913,7 @@ static const LogicApi g_api = {
     on_jvs_tick, on_sys_override, on_keychip_hold,
     on_rtc_get,
     on_eeprom_init,
+    on_dipsw_provision,
 };
 
 const LogicApi *logic_get_api(void) { return &g_api; }

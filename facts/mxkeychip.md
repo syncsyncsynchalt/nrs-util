@@ -102,10 +102,18 @@ root-cause 静的化で代替＝`port_status.md`）:
 - **静的 patch（patches.c で適用）**: 0x986A66/0x986A74/0x986A92（keychip txn 成否ゲートを NOP6。下記訂正）、
   0x97588A/0x97595F/0x975A1F（isrelease SM の error-display 分岐 jl→jmp）、0x459109/0x45A846（上表 errCode=4 ストア NOP10）。
 - **旧 hook（native 不要）**: 0x458FD0/0x45A7F0（amlib region check 2関数）、0x98A5F0（error-display 診断）。
-- **data-write**: 0x16014C4/0x1601744/0x1601989（region-index 整合・上表）。
+- **data-write**: 0x16014C4 のみ（**0x1601744/0x1601989 は撤去済 2026-06-30, patches 20→18**。下記）。
 
-`DAT_016014c4=01`(PcbRegion) の data-write は anti-tamper `FUN_0048f9c0` の region-index 整合（01→0=JAPAN,
-他→3）のため**維持**（errCode 抑止用ではない）。実装 `src/logic/patches.c`。比較は純正 `system\mxkeychip.exe` を正に、micetools / TeknoParrot は補助（`ref.md` 階層）。
+**[L] 2026-06-30 撤去（DATA write 0x1601744/0x1601989）**: 両 global は game 自身の writer が稼働中エミュから genuine 供給を
+受けるため DATA write は冗長と実体確認し、差分ライブ実証（patches=20 と 18 でログ error 3件・画面とも完全一致）後に撤去:
+- `0x1601989`(region_dongle) ← `FUN_00459220` の `FUN_0096f160(&region_dongle,0)` = keychip `appboot.region` PCP（keychip
+  present 枝。`on_keychip_hold` で presence 維持・`keychip_server` が `=01`）。撤去後も `Region error (01,01,00,05)` の
+  第2 operand=01 維持＝keychip 供給がライブで効いている直接証拠。
+- `0x1601744`(region_cached) ← `FUN_0045acc0` の `DAT_01601744 = DAT_016014c4`（region_game_pcb/STATIC seed=01 のコピー、
+  `amlib_eeprom_ok` 成立時に HISTORY area4 へ書く）。HISTORY は seed しないが STATIC 由来でコピーされるため genuine。
+
+`DAT_016014c4=01`(PcbRegion/STATIC) の data-write は anti-tamper `FUN_0048f9c0` の region-index 整合（01→0=JAPAN,
+他→3）＋gate/anti-tamper 直読みのため**維持**（errCode 抑止用ではない）。実装 `src/logic/patches.c`。比較は純正 `system\mxkeychip.exe` を正に、micetools / TeknoParrot は補助（`ref.md` 階層）。
 
 **訂正 [S]**: 0x986A66/74/92 は「region の局所バイト比較」ではなく **keychip トランザクションの成否ゲート**だった。
 実体は keychip コマンド 0xd9f0 を構築(0x987CA0)→ JVS フレーム符号化(`jvsp_frame_encode` 0x988810: チェックサム＋0xe0/0xd0 エスケープ)→

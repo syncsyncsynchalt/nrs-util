@@ -8,7 +8,10 @@
 #define KC_GAMEID    "SBVA"
 #define KC_REGION    "01"          /* 01=JAPAN */
 #define KC_PLATID    "AAA"
-#define KC_SYSFLAG   "00"
+#define KC_SYSFLAG   "01"          /* bit0=1: amDongleSetupKeychip case5 が keychip_ctx+0xc=1 を設定 →
+                                      FUN_0096c5f0=1 → DAT_016014a3=1 → usbio escape（errNo 951 解消）。
+                                      実機 keychip も bit0 立て（standalone は USB I/O 基板不在で e4=0 のため
+                                      この keychip escape が唯一の経路）。DAT_016014a3 は usbio 2 関数のみが読み副作用なし。 */
 #define KC_KEYID     "0000000000000000"
 #define KC_MAINID    "00000000000"
 #define NET_IP       "192.168.1.209"

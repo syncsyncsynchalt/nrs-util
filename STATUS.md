@@ -1,5 +1,70 @@
 # STATUS — 現在地と次の一手
 
+## フェーズ: ★★★0951 を keychip PCP 応答で解消 → SYSTEM STARTUP COMPLETE → GP購入画面到達 — 2026-07-01
+
+**951 の genuine 修正に成功し、boot 全 errCode カスケード解消＝attract を越え「ゲームポイント(GP)の購入」画面まで到達**（従来の attract 停滞を突破）。
+- **修正 = keychip_server の `keychip.appboot.systemflag` 応答を `00`→`01`（bit0 を立てる）**（`src/host/keychip_proto.c` KC_SYSFLAG）。
+  根拠（cdb+Ghidra 実証）: `amDongleSetupKeychip`(0x96d523) case5 が systemflag bit0(`local_c[0]&1`)で `keychip_ctx+0xc=1` を設定
+  → `FUN_0096c5f0=(ctx+4 && ctx+0xc)=1` → `DAT_016014a3=1` → `input_update_merge_dinput_jvs` の usbio escape 成立 → errCode 0xf(951) を**未然防止**。
+- **メモリポーク無し**（keychip 自前コードが PCP 応答から ctx+0xc を立てる＝鉄則どおり OS 境界エミュ）。DAT_016014a3 は usbio 2 関数のみ READ で副作用なし。
+- **error scene は latch 後 errCode クリアでは消えない**（実証済）＝**未然防止が必須**。systemflag 修正は latch 自体を防ぐので scene が出ない。
+- **ライブ実証**: keychip_ctx+0xc=1 / DAT_016014a3=1 / amlib_master_errCode=0 / 画面 = SYSTEM STARTUP 全行 OK（EXTEND IMAGE NG は標準筐体で正常）→ COMPLETE → **GP購入画面（FREE PLAY, 260/520/1300 GP, SYSTEM OPERATOR FIONA）**。
+- 残ログ error=1 は良性（appdata "Failed to check application data area"）。Region(01,01,00,05) は network region の既知非致命（0x45A846 維持）。
+- **クリーンアップ完了・実証**: 951 で無効だった暫定策（d_board_check の usbio count/io_status 供給・d_dinput_create 隠し窓 hook）を撤去。
+  撤去後も errCode=0・**SYSTEM STARTUP COMPLETE → WARNING → BORDER BREAK Scramble タイトル/attract「画面をタッチしてください」(FREE PLAY)** まで正常到達を実写確認。
+- **現状の genuine 修正（host gamehook + keychip PCP のみ・静的メモリパッチ追加ゼロ・patches=18 維持）**:
+  - 0910(board-table errCode 0xa): `d_board_check`(0x679CB0 PRE)が board_index=2 + DAT_0160194c bit0x20=0 供給。
+  - 0951(keychip errCode 0xf): `keychip_proto.c` KC_SYSFLAG=01（systemflag bit0）→ keychip 自前が keychip_ctx+0xc=1。
+  - dipsw ctx provision: `on_dipsw_provision`(abi v6, dipsw read PRE / amDipswInit POST)＝genuine dipsw device 化。
+- **到達点更新: attract タイトル到達**（従来の「attract 停滞」を突破）。タッチ→GP購入画面も確認済（FREE PLAY）。次は実プレイ/入力検証・MMGP play-session（`facts/gameflow.md`）。
+
+---
+
+## フェーズ: ★Error 0951 の真因を動的デバッグで解明＝keychip 層（USB/マウスではない）— 2026-07-01
+
+**実機 cdb で 0951「USB Device Not Found」の正体を確定**: USB/マウスではなく **keychip ctx の +0xc 欠落**。多層連鎖（全て cdb live 確認）:
+1. usbio チェック `input_update_merge_dinput_jvs`(0x679de0): **SysMouse は count=1 で genuine 検出済**（dinput.diag 実証。マウスは正常）。
+2. だが末尾で `usbio_io_status=-0x70` になる。count>=1 枝の条件 `(1 < DAT_016b88e0) || (DAT_016b88e4 != 1)`。**`DAT_016b88e4` はコードで一度も WRITE されず常に 0**（writer 不在、xref は READ と DATA のみ）＝`(e4 != 1)` 恒真 → iVar2=-0x70。
+3. 唯一の escape = `DAT_016014a3 != 0`（`if (DAT_016014a3 != 0 || iVar2==0) skip`）。`usbio_errCode_mapper`(0x6F0AD0) が `io_status` default → errCode 0xf(=errNo 951)。
+4. `DAT_016014a3 = FUN_0096c5f0() = (keychip_ctx+4 != 0 && keychip_ctx+0xc != 0)`（FUN_00459220 keychip 成功枝で設定）。
+5. **keychip_ctx(live 0x1b43488): +0=1, +4=1, +8=1, +0x10=1, だが +0xc=0**（唯一欠落）→ FUN_0096c5f0=0 → DAT_016014a3=0 → escape 不成立 → 951。
+- **実機（実 keychip）は +0xc が立つので 951 不在**。keychip_server エミュは +4/+8/+0x10 まで満たすが **+0xc を立てる1ステップが欠けている**。
+- **error scene は errCode クリアでは消えない**（latch 後は事後クリア不可、未然防止のみ有効）を実証（amlib_master_errCode=0 にしても 951 シーン残存）。
+- **試行錯誤の記録（いずれも 951 に無効）**: dinput_create_device に取得可能窓供給（hidden window）/ board-check で usbio count=1+io_status=0 供給 / on_jvs_tick で errCode 0xf クリア。真因が keychip_ctx+0xc のため全て的外れだった。
+- **次**: `amDongleSetupKeychip` のどの段（どの PCP 応答）が keychip_ctx+0xc を立てるか特定 → keychip_server を補完（genuine に +0xc=1）。`facts/mxkeychip.md` 参照。
+- 教訓: errNo 表示名は内部 errCode と無関係（0910=board-table, 951=keychip）。多層依存は cdb live トレースでしか辿れない。
+
+---
+
+## フェーズ: ★Error 0910 の真因を動的デバッグで解明＝board-table errCode 0xa（解像度ではない）+ consumer hook で修正 — 2026-07-01
+
+**実機 cdb 動的解析で 0910「Wrong Resolution Setting」の正体を確定**: 解像度エラーではなく **board-table check の errCode 0xa**。
+- **cdb 実証**: error_scene_render(0x6f2730) に bp → descriptor `+0x00=errCode 0xa` / `+0x10=errNo 0x38e(910)` / msgPtr→0xbd04b4("Wrong Resolution Setting")。
+  メモリダンプで `board_index DAT_01601953=5`（本来 2）→ `amlib_storage_board_check`(0x679cb0) の `table[5]=0x04≠8` → `amlib_master_errCode=0xa`。SEGA カタログが errNo 910 にこの文言を割当てているだけ。
+- **真因**: 標準 PC に mxsmbus PnP が無く amDipswInit が handle=-1。早期 `amDipswRead`→`FUN_009836e0` が handle 無効で書込まず、byte3 が stack garbage 0x5x → board_index 5。
+- **dipsw ctx provisioning の前倒し（amDipswInit 0x9842a0 detour, on_dipsw_provision abi v6）は不発**: board_index を確定する最初の read が provisioning より更に前（cdb で dipsw.force_ready 発火時刻 vs board check を実証）。
+- **修正（gamehook エミュ・静的パッチ追加なし, patches=18 維持）**: `amlib_storage_board_check`(0x679cb0) を **PRE hook**（`src/host/gamehook.c` d_board_check）し、判定直前に **board_index=2 と DAT_0160194c bit0x20=0 を供給**。dipsw read のタイミングに非依存で errCode 0xa(→errNo 910)/0xb を確実に断つ。旧 dipsw byte patch(0x45A0F5/F9)と同 effect を host gamehook で実現。
+- **ライブ実証**: errCode `0xa→0xf` 遷移（latch race で次が surface）＋画面 `0910→0951`。0xa 解消を確認。
+- **残: 0951(errCode 0xf, USB Device)** はヘッドレス自律テスト（実マウス/前景 WGL 窓なし→usbio count=0）の fallback（STATUS:951 予告どおり）。実マウス環境では count=1 で非発生。実機検証待ち。
+- 関連実装: abi v6 `on_dipsw_provision`（dipsw read PRE / amDipswInit POST で ctx provisioning＝genuine dipsw device 化）+ d_board_check（consumer 供給）。
+
+---
+
+## フェーズ: ★region DATA-write 2個を撤去（genuine 供給で冗長化, patches 20→18）— 2026-06-30
+
+**`patches.applied 20→18`**。region=JAPAN の DATA write `0x1601744`(region_cached)/`0x1601989`(region_dongle) を撤去。
+**差分ライブ実証**: patches=20(両 write 有) と patches=18(撤去) で **ログ error 3件・画面とも完全一致**＝撤去でビット等価。
+- **撤去根拠（実体 xref+decompile）**: 両 global は game 自身の writer が稼働中エミュから genuine 供給を受ける＝DATA write は冗長。
+  - `0x1601989` ← `FUN_00459220` の `FUN_0096f160(&region_dongle)` = keychip `appboot.region` PCP（keychip present 枝。`on_keychip_hold` で presence 維持・`keychip_server` が `=01`）。`amlib_region_gate` が直読み。
+  - `0x1601744` ← `FUN_0045acc0` の `DAT_01601744 = DAT_016014c4`（region_game_pcb/STATIC seed=01 のコピー、`amlib_eeprom_ok` 成立時）。
+  - **撤去後も `Region error (01,01,00,05)` の第2 operand=region_dongle が 01 維持**＝keychip 供給がライブで効いている直接証拠。
+- **`0x16014C4`(region_game_pcb/STATIC) は維持**: anti-tamper `FUN_0048f9c0` の region-index 整合用（gate/anti-tamper 直読み）。
+- **`(01,01,00,05)` の第3 operand=00** は ALL.Net network region(`FUN_006ff900`)未供給の**別件**＝`0x45A846` 維持で errCode 抑止（撤去前から同一・非致命）。
+- **注意（環境要因）**: 本ヘッドレス自律テストは attract で `Error 0910 Wrong Resolution Setting` を表示するが、**baseline(patches=20)でも同一表示**＝STATUS:951 節の usbio fallback（count=0）で、本撤去とは無関係。実機（実マウス＋表示）では出ない。
+- 次の region 削減候補は **ALL.Net network region 層**（`FUN_006ff900` 供給で 0x45A846/0x6FF980/network 0x6FF1B3/0x72DCE0 を束ねる）＝Phase B2 と同層・別タスク。
+
+---
+
 ## フェーズ: ★951(USB Device)を実 SysMouse で純正化 — `0x6F0B80` 撤去（patches.applied 21→20）— 2026-06-30
 
 **Error 951 ＝「USB Device」セルフテスト = 実体は DirectInput の SysMouse**（`device2`, GUID_SysMouse）だったと判明。
