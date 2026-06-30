@@ -69,6 +69,26 @@ triage・日付つき訂正・推測で機構を当てない。
 0x457AF0「keychip crash helper」→実体 `delete_directory_recursive`、0x6FF980「getstatus gate」→実体 `hlsm_region_check`、0x701280「FreePlay」→実体 `pras_billing_ready_check`。
 撤去可否が静的に確定できないとき（到達ガードが実行時 FS 状態に依存する等）は、誤撤去の代償が不可逆なら保持する（リスク非対称）。詳細は `facts/bugs.md` の [RISK] 0x457AF0。
 
+### 撤去テストの合格基準は「SYSTEM STARTUP 全行＋ERROR 不在」（「attract 到達」では不十分）[L, 2026-06-30]
+
+パッチ撤去の検証で **「attract に到達するか」だけを見るのは誤り**。実例: region/storage/billing パッチを撤去しても attract には到達したが、
+**SYSTEM STARTUP の途中に "ERROR." が表示**されていた（CHECKING NETWORK OK 直後）。`amlib_master_errCode`(0x16f5af0)は
+**最初に立った errCode を latch**するので、撤去した各パッチが抑止していた error が**カスケードで次々 surface**する（region 4→board-index 0xa→billing 0x15→…）。
+最初の latch error が後続を mask するため、attract だけ見ると複数の latent error を見逃す。
+- **正しい手順**: プロセス内蔵 GL キャプチャ(`capture.req`→`capture.png`)で **SYSTEM STARTUP を早期〜完了まで複数スクショ**し、
+  全 `CHECKING …` 行が OK（EXTEND IMAGE … NG は標準筐体で正常・非ブロッキング）かつ **"ERROR." 行が無い**ことを確認する。計装なら `boot_diag`(errCode 観測)。
+- region/storage/billing は keychip/board/課金の**標準筐体ハード/サービス補償**で互いに連鎖＝個別撤去不可。presence(card/touch)のみ実 device emu で真に冗長。
+
+### エミュ供給のタイミング（CrackProof clobber と決定的 hook 点）[L, 2026-06-30]
+
+「NOP でなくデータ供給」でパッチを置換する際、**供給タイミング**が成否を分ける（`静的パッチの clobber` の発展）。
+- bind 時(CREATE_SUSPENDED, entry 前)の .data/.bss 書込みは **CrackProof アンパックが後で再初期化して消す**（PcbRegion 0x16014C4 は writer 無しなのに 1→0 に戻った）。
+- `on_jvs_tick`(per-frame)は早期 init チェックに**間に合わない**（amlib_master_init は最初の on_jvs_tick より前に走る＝errCode latch 済）。
+- `on_create_file`(ファイル open 時)は amlib 早期 init に重なるが**ファイル open タイミング依存でレース**（チェックの前後が run ごとに振れる）。
+- ⇒ 早期 init チェック(amlib_master_init の region 等)の直前にデータ供給するには **対象 init 関数を gamehook で detour**する必要がある（host 変更＋restart）。
+  名前ベース device は `mxdev_*`/`*_force_ready`、関数フックは `host/gamehook.c` の detour 機構を使う。
+- 多目的 global に注意: `DAT_01696ad8` は is-DVD 判定と**筐体ロール(1=SERVER)**を兼用＝0 にすると SERVER→SATELLITE 表示が壊れる。安易に書かず実体を確認。
+
 ## 静的パッチの clobber
 
 `patches_apply` は CREATE_SUSPENDED 注入のため entry より前に走る。

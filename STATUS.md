@@ -1,29 +1,30 @@
 # STATUS — 現在地と次の一手
 
-## フェーズ: ★★パッチ全数監査完了 — 25→8（不要 17 個撤去, 差分ライブテスト実証）— 2026-06-30
+## フェーズ: ★パッチ監査の訂正 — 25→23（presence 2 のみ撤去可。region/storage/billing は必須）— 2026-06-30
 
-**鉄則「パッチ原則ゼロ」の大幅前進**: 全パッチを**スクショ ground truth の差分ライブテスト**で1つずつ検証し、
-冗長なものを撤去。`patches.applied 25→8`。撤去判定は「撤去→SYSTEM STARTUP 全 device OK→attract 安定到達（対応 Error 画面不在）」。
+**重要な訂正**: 先行監査で「25→8（17 個撤去）」としたのは**誤り**。撤去判定基準を「attract 到達」にしたため
+**SYSTEM STARTUP 途中の "ERROR." を見落とした**（ユーザー報告で発覚: CHECKING NETWORK OK の直後に "ERROR."、attract には進むが不正）。
+真に撤去可能なのは **presence 2 個のみ**（card/touch、実 device emu が置換）＝`patches.applied 25→23`。
 
-**撤去した不要パッチ（計 17 個）**:
-- **presence 詐称 2**: `0x4F6310`(IC Card ready=card_flags>>1&1)/`0x8B3B00`(Touch status=ctx+0x18)。
-  card.c/touch.c の実 handshake が game 自身に presence flag を立てさせる（"CHECKING … OK" 自然通過）。boot は `!=0` を無期限ポーリング。
-- **region 9**（CODE 6 `0x986A66/74/92`+`0x459109`+`0x45A846`+`0x6FF980`, DATA 3 region=JAPAN）: keychip PCP サーバが
-  keychip ハンドシェイクで region 供給→region チェック自然通過。30s サンプリングで region Error 画面(0x381/0x387/0x38D)一度も出ず。
-- **network 2**（`0x6FF1B3` LAN flag/`0x72DCE0` device_status）: keychip サーバ＋`network_auth_force_ready` が供給。8005/8001 不在。
-- **storage 2**（`0x72B3A0` extend_image/`0x4FDA50` is-DVD-boot）: extend NG は元から非ブロッキング、disk boot で素の判定通過。913 不在。
-- **billing 2**（`0xA065C0`/`0x701280`）: boot→attract に billing ready 詐称不要。
+**撤去可（presence 2）— 実 device emu が game に presence flag を立てさせる**:
+- `0x4F6310`(IC Card ready=card_flags>>1&1) / `0x8B3B00`(Touch status=ctx+0x18)。"CHECKING … OK" 自然通過。boot は `!=0` 無期限ポーリング。
 
-**保持した必須パッチ（計 8 個）— いずれも撤去テストで attract 不達/ハングを実証**:
-- `0x6F0B80` USB I/O board(951): 撤去→**Error 0910 停滞**。`usbio_board_count` は vtable USB 列挙で別経路、count=0。
-- dongle batch `0x975E00`+JL2JMP×3: 撤去→**host.ready 直後ハング**（amdongle outerSM が最初期に走る、一体で必須）。
-- `0x457AF0` action-block(delete_directory_recursive, DO NOT REMOVE)/`no_selfshutdown`(0x6C3F20)/COM4 名パッチ(config)。
+**保持必須（region/storage/billing/network/dongle/USB/action-block）— 撤去で startup に errCode カスケード**:
+- これらは独立でなく**連鎖した error 抑止**。`amlib_master_errCode`(0x16f5af0)は**最初の error を latch**するので、撤去すると
+  **region(4)→board-index(0xa)→billing(0x15)→… と次々 surface**（devices.md の latch race 警告どおり）。
+  実証（計装 boot_diag）: region NOP 撤去→`amlib: Region error (00,01,05)`＝`PcbRegion(0x16014C4)=0`→errCode4。
+  これを PcbRegion=1 供給で消すと board-index 0xa(`DAT_01601953`!=2, `amlib_storage_board_check` 0x679cb0)、それも消すと billing 0x15。
+- **errCode は非致命**（boot は attract まで進む）が **SYSTEM STARTUP に "ERROR." を表示**＝startup が不正。
 
-**検証手法**: `loader.exe start --wait`＋プロセス内蔵 GL キャプチャ(`capture.req`→`capture.png`)。**ログ event(mmgp.diag 等)は
-boot 進行を正確に表さず誤判定の罠＝スクショが正**（最終 attract=BORDER BREAK SCRAMBLE タイトル, SYSTEM STARTUP 全 OK で確認）。
-patches.c は空配列耐性(size0 sentinel)を追加し DATA/JL2JMP 全撤去でもビルド可に。
-**注意（リスク非対称）**: region/billing は本来 network 対戦/credit プレイを gate＝**boot→attract では冗長と実証**だが、P5 network play 実装段階で
-keychip/network エミュが供給するか要確認。再発時は patches.c の各注記どおり復活。
+**エミュ化を試みた結果（教訓）**: 鉄則どおり「NOP でなくデータ供給」を狙い、`PcbRegion`(基板 region, ゲーム内 writer 無し)を
+host から供給しようとしたが **CrackProof アンパックが .bss を再ゼロ化し bind 書込みを clobber**。runtime 供給を試すと
+**amlib_master_init(region チェック)より前の決定的 hook 点が無く、on_create_file 供給はファイル open タイミング依存でレース**
+（run ごとに errCode 0/4 が振れる）。⇒ 現状クリーンにエミュ化するには **amlib_master_init を gamehook で detour**（host 変更+restart）して
+region チェック直前に PcbRegion/board-index を供給する必要がある。**= 別タスク**。それまでは region/storage/billing パッチを保持して startup を正常化。
+注: `DAT_01696ad8` は **is-DVD だけでなく筐体ロール(1=SERVER)兼用**＝値変更は SERVER→SATELLITE 表示破壊。多目的 global を安易に書かない。
+
+**教訓（恒久）**: パッチ撤去可否は **「attract 到達」では不十分**。**SYSTEM STARTUP 全 CHECKING 行＋"ERROR." 不在を毎回スクショ確認**する。
+errCode latch のため**最初の error が後続を mask**し、attract だけ見ると複数の latch error を見逃す。`facts/workflow.md`「パッチ監査」に反映。
 
 ---
 
