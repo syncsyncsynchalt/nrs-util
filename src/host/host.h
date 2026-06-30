@@ -18,6 +18,8 @@ void *host_orig(int orig_id);
 int   gamehooks_install(void);
 /* keychip_server.c */
 void  keychip_server_start(void);
+/* netobs.c — U1 観測スパイク: winsock connect/resolve を log のみ（billing path B/U1）。確定後は撤去 */
+void  netobs_install(void);
 /* windowed.c */
 void  windowed_install(void);
 /* capture.c — GL フレームを capture.req トリガで capture.png へ保存（プロセス内 glReadPixels）*/

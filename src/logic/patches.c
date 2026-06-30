@@ -11,7 +11,7 @@
 typedef struct { uint32_t va; const uint8_t *b; int n; const char *note; } CodePatch;
 
 /* --- byte patches（静的VA, 上書きバイト） --- */
-static const uint8_t P_billing[]   = {0xB8,0x05,0x00,0x00,0x00,0xC3};        /* alpbExGetExecStatus -> 5 */
+static const uint8_t P_billing[]   = {0xB8,0x08,0x00,0x00,0x00,0xC3};        /* alpbExGetExecStatus -> 8 (ready, no accounting) */
 static const uint8_t RET0[]        = {0x31,0xC0,0xC3};                       /* xor eax,eax;ret */
 static const uint8_t RET8_0[]      = {0x31,0xC0,0xC2,0x08,0x00};             /* xor eax,eax;ret 8（__thiscall の 8B スタック引数を callee で掃除） */
 static const uint8_t RET1[]        = {0xB8,0x01,0x00,0x00,0x00,0xC3};        /* mov eax,1;ret */
@@ -20,7 +20,6 @@ static const uint8_t P_zero1[]     = {0x00};                                 /* 
 static const uint8_t P_one1[]      = {0x01};                                 /* imm 1 */
 static const uint8_t P_ret2[]      = {0xB8,0x02,0x00,0x00,0x00,0xC3};        /* mov eax,2;ret */
 static const uint8_t P_extimg[]    = {0x31,0xC0,0x85,0xF6,0x74,0x02,0x89,0x06,0xB0,0x04,0xC3};
-static const uint8_t P_alc[]       = {0xB0,0x01,0xC3};                       /* mov al,1;ret */
 static const uint8_t NOP6[]        = {0x90,0x90,0x90,0x90,0x90,0x90};
 static const uint8_t NOP10[]       = {0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90};
 /* amplatform/identity.js: platform getter を固定文字列で置換（mov eax,[esp+4]; mov byte[eax+i],c..; xor eax,eax; ret 4）*/
@@ -29,7 +28,14 @@ static const uint8_t NOP10[]       = {0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x
 
 static const CodePatch CODE[] = {
     /* ambilling/status.js */
-    {0xA065C0, P_billing, 6, "alpbExGetExecStatus->5 (billing offline)"},
+    /* alpbExGetExecStatus->8: status 8 は alpbEx_billing_poll(0x7000C0) case8 で alpbEx_billing_ready=1 を立てる
+       （accounting report は開始しない＝status 2 と違い traffic 無し）。これにより boot SM
+       amlib_init_sm_SYSTEM_STARTUP state7 の pras_billing_ready_check(0x701280) が ready!=0 で自然に通る
+       → 旧 0x701280 パッチを撤去（25/06/30, A 統合）。alpbEx_billing_enabled は無条件 1 で OFF 経路が無いため
+       enabled=0 では回避不可（facts/ambilling.md 全数確認）。残り2 caller(FUN_00700380 credit executor /
+       FUN_00700c00 debug dump)は attract で request queue 空＝no-op、status 8 安全。実 credit 計上を
+       配線する際は status 8↔5 を再評価（executor の早期 return 挙動が変わる）。 */
+    {0xA065C0, P_billing, 6, "alpbExGetExecStatus->8 (billing ready, no accounting; retires 0x701280)"},
     /* amdongle/patch.js */
     {0x975E00, RET0, 3, "amDongleBusy->0 (outerSM advances)"},
     {0x457AF0, RET8_0, 5, "delete_directory_recursive nop: blocks keychipSM_FSM case4 recursive dir delete on appdata mismatch. __thiscall(this,arg1,arg2)=callee-clean ゆえ ret 8 必須(関数の 0x457fd1=RET 0x8 / call site 0x4579F4 に add esp 無し)。bare ret はスタック破壊→発火時クラッシュ。(DO NOT REMOVE; facts/bugs.md, facts/amdongle.md)"},
@@ -61,15 +67,21 @@ static const CodePatch CODE[] = {
     {0x72DCE0, P_ret2, 6, "amlib_device_status_getter->2 (Error 8001)"},
     /* mxsegaboot/startup.js */
     {0x72B3A0, P_extimg, 11, "extend_image_install_status (state7)"},
-    {0x701280, P_alc, 3, "pras_billing_ready_check->al=1: billing offline でも ready 強制（alpbEx_billing_ready/enabled 参照。freeplay flag 0x128855A とは別物）"},
+    /* 0x701280 pras_billing_ready_check->al=1 は撤去（2026-06-30, A 統合）: 上の alpbExGetExecStatus->8 が
+       alpbEx_billing_poll 経由で alpbEx_billing_ready=1 を game 自身に立てさせるため、ready!=0 で本 check が
+       自然に通る。詐称不要。再発(state7 ハング)時は alpbExGetExecStatus が 8 を返せているか先に確認。 */
     /* mxstorage/presence.js */
     {0x4FDA50, RET0, 3, "is-DVD-boot->0 (Error 913)"},
     /* mxkeychip/region.js — region check 無効化 */
     {0x986A66, NOP6, 6, "region jne->nop (Error 0x381)"},
     {0x986A74, NOP6, 6, "region jne->nop (Error 0x387 wrong region)"},
     {0x986A92, NOP6, 6, "region jne->nop (Error 0x38D)"},
-    {0x459109, NOP10, 10, "errCode=4 store nop (FUN_00458fd0)"},
-    {0x45A846, NOP10, 10, "errCode=4 store nop (FUN_0045a7f0)"},
+    /* 0x459109 errCode=4 store NOP (amlib_master_init 0x458fd0) は撤去（2026-06-30, 純正供給経路で実証）:
+       EEPROM STATIC を seed し amEepromInit を gamehook detour（host gamehook.c d_eeprom_init）で storage init
+       中に provisioning すると、genuine な amBackupRead(STATIC) が region_game_pcb=01 を供給し
+       (region_game_pcb & region_dongle & 5)!=0 が自然に通る。ライブ差分実証: 撤去後も amlib_master_init の
+       Region error(00,01,05) は出ない。実装 src/logic/driver/mxdevices.c eeprom_seed_static。詳細 facts/mxkeychip.md。 */
+    {0x45A846, NOP10, 10, "errCode=4 store nop (FUN_0045a7f0): 第3オペランドが alAbEx/ALL.Net network region(FUN_006ff900)で未供給ゆえ維持。撤去には network region 層が要る（facts/mxkeychip.md ライブ検証）"},
     /* mxgfetcher/getstatus.js 由来だが実体は HLSM の region ゲート */
     {0x6FF980, RET1, 6, "hlsm_region_check->1: HLSM(0x457fe0) の region ゲート（0x210aed0/2/4 参照。keychip region NOP 0x986A.. とは別経路）"},
     /* amplatform/identity.js（platform gate FUN_0045a6f0 回避） */

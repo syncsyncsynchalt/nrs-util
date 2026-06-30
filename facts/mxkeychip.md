@@ -3,7 +3,7 @@
 このサブシステムの事実（アドレス/構造体/RVA）。索引 `_index.md` / 横断知見 `workflow.md`。
 confidence: [S]=静的解析 [L]=ライブ実走 [I]=推論 [F]=旧 Frida 計装(履歴・再取得は Ghidra/実走)
 
-> **PCP 応答の正準実装**: 下表は nrs.exe 側観測＋micetools。**実機 keychip デーモンの正バイナリ** =
+> **PCP 応答の正準実装**: 下表は nrs.exe 側観測＋micetools(補助)。**正本＝実機 keychip デーモン** =
 > `C:\src\ringedge_system_63.01.10\system\mxkeychip.exe`（CrackProof の公算大→実行時観測で裏取り。
 > 所在 `ref.md`）。`code=54` バイパス・`encrypt`/`decrypt` AES・billing の実装確認は
 > ここで行う。署名検証ルート鍵 = `system\ringmaster_pub.pem`（RSA-1024, e=0x10001。**nrs.exe 自身は非参照**
@@ -75,14 +75,22 @@ if ((DAT_016014c4 & bVar & 5) == 0) {              // PcbRegion & dongleRegion &
 
 JAPAN=01 を通すには **3オペランド全てに bit0 が必要**。各オペランドの出所（xref 確定）:
 
-| データ | static | 意味 | writer | 状態 |
+| データ | static | 意味 | 純正の供給源（実体確定） | 状態 |
 |---|---|---|---|---|
-| `DAT_01601989` | 0x1601989 | dongle region | `FUN_00459220`→`FUN_0096f160`（keychip `appboot.region`） | pcpa=01 で満たせる |
-| `DAT_01601744` | 0x1601744 | appboot m_Region cache | keychip appboot ブロック copy | pcpa=01 で 01 |
-| **`DAT_016014c4`** | 0x16014C4 | **PcbRegion** | **writer 無し（全 xref READ）**＝本来 mxGetHwInfo/基板コンフィグ値 | バイパス構成では常に 0 |
+| `region_dongle` | 0x1601989 | dongle region | keychip `appboot.region`（`FUN_00459220`→`FUN_0096f160`, PCP） | pcpa=01 で満たせる |
+| `region_cached` | 0x1601744 | **AM_SYSDATAwH_HISTORY.m_Region**（EEPROM area4 @0x1601738+0xC） | 基板 EEPROM HISTORY レコード | EEPROM seed で 01 |
+| `region_game_pcb` | 0x16014C4 | **AM_SYSDATAwH_STATIC.m_Region**（`amSysdataStatic` 0x16014b8+0xC のミラー） | **基板 EEPROM(AT24C64AN) area0=STATIC**。`amlib_storage_init_all`→`amBackupRead(area0,&amSysdataStatic)`→CRC 検証で展開 | **EEPROM seed で 01（実装済）** |
 
-→ PcbRegion=0 ゆえ `(0 & x & 5)=0` は不可避。data-write 強制は timing-fragile（setter が forceRegion 着弾前に走り
-errCode 4 を display struct へ snapshot）。**解法は TeknoParrot 同様チェック無力化**: errCode 4 ストアを NOP。
+**訂正 [S] 2026-06-30**: `region_game_pcb` の「writer 無し」は `amBackupRead` が base 0x16014b8 へ**一括読込み**する静的 xref の死角だった。実体は**基板 EEPROM の STATIC レコード `m_Region`**で、ゲーム自身が CRC 検証付きで読む正規データ。`region_cached` も「keychip appboot cache」は誤りで EEPROM HISTORY.m_Region。
+→ **純正の供給経路の再現**: EEPROM STATIC を seed すれば 3 オペランド全て正規経路で 01 になり `(1&1&5)!=0` で通る。直書き/NOP より faithful かつ timing-fragile でない（最初の SMBus read から正）。実装 `src/logic/driver/mxdevices.c` `eeprom_seed_static`（region=01/serial/amiCrc32R 正CRC を REG@0x000 へ。CRC 一致時は温存）。CRC = `amiCrc32RGet`(0x98a820, 反射 CRC-32 poly 0xEDB88320)。
+→ これにより errCode-4 NOP(0x459109/0x45A846)と region DATA-write は撤去可能か検討。`amBackupRead` は REG 有効で DUP を読まず短絡するため REG seed のみで足りる。
+（旧解法メモ: data-write 直書きは CrackProof 再init と setter 先行で timing-fragile だった。EEPROM seed はこれを回避する。）
+
+**ライブ検証 [L] 2026-06-30**（seed＋`amEepromInit` detour 後）:
+- **STATIC seed は genuine 経路で機能**: `amEepromInit() failed`=0 / `STATIC is broken`=0 / **region_game_pcb 00→01**。`amlib_master_init`(0x458fd0, 3値版) の `Region error (00,01,05)` は**消失**＝この check は genuine に通過 → **errCode-4 NOP `0x459109` は撤去済（2026-06-30 差分実証, patches 22→21）**。撤去後も 3値 region error は出ず errCode カスケードも無し（seed が「最初に立つ errCode」の根を断つ）。
+- ただし**第2の region check `FUN_0045a7f0`(0x45a7f0, 4値版) は別経路で残存**: `Region error (01,01,00,05)`。第3オペランド `bVar2` は `FUN_006ff900(0/3)`＝**alAbEx/ALL.Net network region**（`DAT_0210aed0/aed2` auth ゲート後 `DAT_0210b594` 文字列でテーブル検索）で、EEPROM/keychip 非依存。net auth を詐称(network_auth_force_ready)するため発火し、network region 未供給で 0。**errCode-4 NOP `0x45A846` はこの network check のため当面維持**（撤去には ALL.Net region 供給が要る）。masked で非致命。
+- **タイミングが鍵だった**: per-frame `eeprom_force_ready` は main loop（storage init 後）で遅すぎ region_game_pcb=0 を latch。`amEepromInit`(0x985160) を gamehook detour（`src/host/gamehook.c` d_eeprom_init, __thiscall→__fastcall, orig 非呼出で ctx provisioning＋0 返し）して storage init の最中に前倒しすると genuine な amBackupRead(STATIC) が seed を読む。abi v5(`on_eeprom_init`)。
+- **永続 [L] 修正済**: 当初 実行後 eeprom.bin の STATIC が region=0x20/serial 化け＝**mxsmbus エミュの 8bit vcode 切詰め**(`mxdevices.c`)で高位 record(DUP @+0x1000 等)を STATIC(0x000)へ alias 混入していた。`vcode` を 13bit(0..0x1FFF, AT24C64AN 正幅)化して解消。実証: 1st boot で STATIC REG が region=01/serial="ABLN-00100000001" のまま無傷、**2nd boot(eeprom 温存)でも `STATIC broken`=0 / region_game_pcb=01 維持**（seed は CRC 一致で温存）。
 
 | RVA(static) | 命令(10B) | 関数 | 呼出元(戻り値破棄) |
 |---|---|---|---|
@@ -97,7 +105,7 @@ root-cause 静的化で代替＝`port_status.md`）:
 - **data-write**: 0x16014C4/0x1601744/0x1601989（region-index 整合・上表）。
 
 `DAT_016014c4=01`(PcbRegion) の data-write は anti-tamper `FUN_0048f9c0` の region-index 整合（01→0=JAPAN,
-他→3）のため**維持**（errCode 抑止用ではない）。実装 `src/logic/patches.c`。比較は micetools / TeknoParrot（`ref.md`）。
+他→3）のため**維持**（errCode 抑止用ではない）。実装 `src/logic/patches.c`。比較は純正 `system\mxkeychip.exe` を正に、micetools / TeknoParrot は補助（`ref.md` 階層）。
 
 **訂正 [S]**: 0x986A66/74/92 は「region の局所バイト比較」ではなく **keychip トランザクションの成否ゲート**だった。
 実体は keychip コマンド 0xd9f0 を構築(0x987CA0)→ JVS フレーム符号化(`jvsp_frame_encode` 0x988810: チェックサム＋0xe0/0xd0 エスケープ)→

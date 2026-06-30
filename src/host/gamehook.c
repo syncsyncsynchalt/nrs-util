@@ -11,6 +11,7 @@ static void     (*o_sysinput)(void);
 static unsigned (*o_dipsw)(void);
 static int      (*o_kchold)(void);
 static long long (__stdcall *o_rtc_get)(void *tm, unsigned *flag);
+static int (__fastcall *o_eeprom_init)(unsigned ecx, unsigned edx, void *size_ptr);
 
 /* jvs_update_main PRE: 入力を node BSS へ書いてから本体へ（旧 input.js）。 */
 static void __cdecl d_jvs_update(void) {
@@ -53,6 +54,18 @@ static long long __stdcall d_rtc_get(void *tm, unsigned *flag) {
     return r;
 }
 
+/* amEepromInit(0x985160) 完全置換 detour（__thiscall: protocol=ECX, size_ptr=stack1, RET 4 ＝
+ * __fastcall(ECX,EDX,stack) で捕捉）。orig は呼ばず（SetupDi 失敗経路と後始末 FUN_00984bd0 を回避）、
+ * logic に EEPROM ctx を provisioning させ 0(成功)を返す。これで amlib_storage_init_all が storage-init の
+ * 最中に genuine な amBackupRead(STATIC area0) を走らせ、seed 済み region_game_pcb=01 を得る。 */
+static int __fastcall d_eeprom_init(unsigned ecx, unsigned edx, void *size_ptr) {
+    (void)ecx; (void)edx; (void)size_ptr;
+    AcquireSRWLockShared(&g_logic_lock);
+    if (g_api && g_api->on_eeprom_init) g_api->on_eeprom_init(g_state);
+    ReleaseSRWLockShared(&g_logic_lock);
+    return 0;   /* amEepromInit 成功（amlib_eeprom_ok=1）*/
+}
+
 static int gh(unsigned va, void *det, void **orig) {
     void *a = (void *)((uintptr_t)GetModuleHandleW(NULL) + (va - IMAGE_BASE));
     return (MH_CreateHook(a, det, orig) == MH_OK && MH_EnableHook(a) == MH_OK) ? 0 : -1;
@@ -65,5 +78,6 @@ int gamehooks_install(void) {   /* MH_Initialize は hooks_install で実施済 
     e |= gh(0x45A0E0, (void *)d_dipsw,      (void **)&o_dipsw);
     e |= gh(0x6F0A80, (void *)d_kchold,     (void **)&o_kchold);
     e |= gh(0x974040, (void *)d_rtc_get,    (void **)&o_rtc_get);
+    e |= gh(0x985160, (void *)d_eeprom_init,(void **)&o_eeprom_init);
     return e;
 }

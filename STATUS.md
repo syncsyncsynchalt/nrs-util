@@ -1,5 +1,18 @@
 # STATUS — 現在地と次の一手
 
+## フェーズ: ★billing パッチ統合 — 23→22（status 5→8 で 0x701280 撤去）— 2026-06-30
+
+**`patches.applied 23→22`**。billing の2パッチを1つに統合（A 統合）。差分ライブ実証済（SYSTEM_STARTUP 完走=scene 稼働, billing/state7 エラー無し）。
+- **変更**: `0xA065C0 alpbExGetExecStatus` を **5→8**。status 8 が `alpbEx_billing_poll`(0x7000C0) case8 で `alpbEx_billing_ready=1` を
+  game 自身に立てさせる（accounting 開始せず）→ boot SM state7 の `pras_billing_ready_check`(旧 0x701280)が ready!=0 で自然通過 → **0x701280 撤去**。
+- **RE 確定（撤去の根拠, facts/ambilling.md）**: `alpbEx_billing_enabled` は無条件 1 で **OFF 経路がコード上存在しない**ため enabled=0 回避は不可、
+  ready=1 は poll の status 2/8 のみ（PowerOn から立つ口は無い）。status 8 が3 caller 全てで安全（attract で credit queue 空）。
+- **billing path B（TLS server emu, billing メモリ完全無改変）は保留**: 観測スパイク(`src/host/netobs.c`)で **billing は attract で TLS session を
+  張らない**（getaddrinfo 後 DNS 失敗、redirect+8443 listener でも connect 無し）と判明＝起動目的に対し過剰。実 credit 計上を配線する段で再評価。
+  netobs.c は passive 観測（connect/resolve を log）に戻して残置＝Phase B2 ネットワーク経路調査の診断に有用。
+
+---
+
 ## フェーズ: ★パッチ監査の訂正 — 25→23（presence 2 のみ撤去可。region/storage/billing は必須）— 2026-06-30
 
 **重要な訂正**: 先行監査で「25→8（17 個撤去）」としたのは**誤り**。撤去判定基準を「attract 到達」にしたため

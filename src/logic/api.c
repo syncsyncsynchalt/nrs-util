@@ -498,6 +498,22 @@ static void touch_diag(LogicState *st) {
              (int)*(float *)(c + 0x234), (int)*(float *)(c + 0x238), c[0x30c]);
     if (st->host && st->host->log) st->host->log("info", m);
 
+    /* 校正矩形（touch_set_calib_window 0x8B3D60 が DAT_00bb30d8/e0 を積む）。
+       cal_en=+0x198,+0x199 / X=[+0x19c,+0x1a4] / Y=[+0x1a0,+0x1a8]（int, poll_update が float 比較）。
+       これが画面(1024x600)より小さい矩形なら中心引き込み k<1 の正体。実値からゲインを解析導出する。 */
+    {
+        char cb[256];
+        unsigned char dbg = *(unsigned char *)((uintptr_t)GetModuleHandleW(NULL) + (0x1696F2Cu - 0x400000u));
+        wsprintfA(cb, "{\"ev\":\"touch.calib\",\"en198\":%d,\"en199\":%d,"
+                      "\"Xmin_19c\":%d,\"Xmax_1a4\":%d,\"Ymin_1a0\":%d,\"Ymax_1a8\":%d,"
+                      "\"amDebug\":%d,\"inv21c\":%d,\"inv220\":%d,\"normX228x1k\":%d,\"normY22cx1k\":%d}",
+                  c[0x198], c[0x199], *(int *)(c + 0x19c), *(int *)(c + 0x1a4),
+                  *(int *)(c + 0x1a0), *(int *)(c + 0x1a8),
+                  (dbg & 1), (int)*(float *)(c + 0x21c), (int)*(float *)(c + 0x220),
+                  (int)(*(float *)(c + 0x228) * 1000.0f), (int)(*(float *)(c + 0x22c) * 1000.0f));
+        if (st->host && st->host->log) st->host->log("info", cb);
+    }
+
     /* serial struct 配列 DAT_016b8678（3×0x70）を走査: 各 +4=handle / +0x14=TX count / +0x6c=flags。
        SerialThread: 0x16b87c8=ready, 0x16b87cc=obj。touch handle(0xC0114001)を持つ struct と TX 滞留を見る。 */
     {
@@ -515,26 +531,118 @@ static void touch_diag(LogicState *st) {
     }
 }
 
+/* scene_va_name — task node の update slot(+0x24) VA → **nrs.exe 埋め込みの実 C++ クラス名**（RTTI 由来、
+ * 推測ではない）。update VA はその scene クラスの vtable slot#2（仮想メソッド）の生アドレスなので、
+ * vtable[-4]=COL → +0x0c=TypeDescriptor → +0x08=mangled name で実名を確定できる（裏取り: nrs.exe 直読、
+ * EntryModeGamePoint/CheckCard を facts のライブ観測 VA と一致確認）。
+ *   表は EntryMode* 系（attract→credit→card-auth entry flow の scene 群）。VA は static_VA。
+ * ・継承で slot#2 を共有する組（Regist/UpdateBase/UpdateCard/VersionUp = 0x5ea0a0）は update VA だけでは
+ *   一意化できないため意図的に未掲載（生 VA で出す。disambiguate は実行時 obj の RTTI 読みが要る）。
+ * ・attract(0x7274d0)/net-session(0x6f42c0) は C++ scene クラスではない素の task callback で RTTI が無い
+ *   → 実名が存在しないので名付けない（生 VA のまま）。捏造しない。 */
+static const char *scene_va_name(unsigned va) {
+    switch (va) {
+        case 0x5e6200: return "EntryModeCheckCard";    /* COL 0xca9538 / vtbl 0xbb34bc（旧ラベル card-auth）*/
+        case 0x5eaae0: return "EntryModeGamePoint";    /* COL 0xca9318 / vtbl 0xbb3584（旧ラベル credit, GP 入金）*/
+        case 0x5e90b0: return "EntryModeNameEntry";    /* COL 0xca94a0 / vtbl 0xbb34ec */
+        case 0x5e8710: return "EntryModeSelectChara";  /* COL 0xca94ec / vtbl 0xbb34d4 */
+        case 0x5eb000: return "EntryModeDotNetRegist"; /* COL 0xca92cc / vtbl 0xbb359c */
+        case 0x5ec340: return "EntryModePassword";     /* COL 0xca9234 / vtbl 0xbb35cc */
+        case 0x5eb6b0: return "EntryModeReIssue";      /* COL 0xca9280 / vtbl 0xbb35b4 */
+        case 0x62fb50: return "EntryModeBase";         /* COL 0xca9584 / vtbl 0xbb34a4（基底）*/
+        default:       return 0;                        /* RTTI 未解決/非クラス → 生 VA で出す */
+    }
+}
+
+/* scene_tag_fourcc — uid(tag) を ASCII FourCC へ。ゲーム自身が amTaskOpen の重複警告で
+ * `uid=%08x(%s)` と出すのと同じ**低位バイト順**（DAT_02283014 = uid&0xff から）。
+ * 非表示文字は '.'（JSON 安全のため " と \ も '.' に潰す）。例: 0x50474d4d→"MMGP", 0x45→"E...". */
+static void scene_tag_fourcc(char out[5], unsigned tag) {
+    for (int i = 0; i < 4; i++) {
+        unsigned c = (tag >> (i * 8)) & 0xffu;
+        out[i] = (c >= 0x20 && c < 0x7f && c != '"' && c != '\\') ? (char)c : '.';
+    }
+    out[4] = 0;
+}
+
+/* scene_node_json — delta の 1 エントリ。cls = 実 RTTI クラス名（無ければ null＝次の解析対象＝生 VA）、
+ * tag = uid 生 hex、tag4 = uid を FourCC 文字列化（ゲーム公認のタグ表記。amTaskOpen 0x89dcb0 で裏取り）。 */
+static int scene_node_json(char *dst, int cap, unsigned va, unsigned tag) {
+    char fc[5]; scene_tag_fourcc(fc, tag);
+    const char *cls = scene_va_name(va);
+    (void)cap;
+    if (cls) return wsprintfA(dst, "{\"va\":\"%x\",\"tag\":\"%x\",\"tag4\":\"%s\",\"cls\":\"%s\"}",
+                              va, tag, fc, cls);
+    return wsprintfA(dst, "{\"va\":\"%x\",\"tag\":\"%x\",\"tag4\":\"%s\",\"cls\":null}", va, tag, fc);
+}
+
 /* scene_diag — task/scene list(DAT_016db564) を walk し、各ノードの update vtable slot(+0x24) の VA を集める。
  * 目的: attract→credit→card-auth の scene 活性化を観測する。Phase B2 の停止点は「credit scene が非 active」
  * （gameflow.md 経験的検証）なので、touch 時に credit(0x5eaae0)/card-auth(0x5e6200) update fn を持つノードが
  * 生成・active 化されるかを直接見る。ノード: +4=uid tag / +8=flags(&1 active,&2 init,&4 remove) / +0x24=update / +0x3c=next。
  * 既知 scene update VA: attract=0x7274d0 / credit=0x5eaae0 / card-auth=0x5e6200。変化時＋約2秒毎にログ。 */
+#define SCENE_CAP 64   /* active set ~35。診断 static の上限（超過分は切詰めて trunc を出す）*/
 static void scene_diag(LogicState *st) {
     static unsigned n; static unsigned last_sig = 0xFFFFFFFFu; static int last_flags = -1;
+    /* delta 用の前フレーム snapshot（(va,tag) の多重集合）。reload で 0 → 1 度だけ無音 seed。 */
+    static unsigned prev_va[SCENE_CAP], prev_tag[SCENE_CAP]; static int prev_n = 0, seeded = 0;
     uintptr_t b = (uintptr_t)GetModuleHandleW(NULL);
     unsigned char *node = *(unsigned char **)(b + (0x16DB564u - 0x400000u));
     unsigned sig = 0; int active_attract = 0, active_credit = 0, active_cardauth = 0, nact = 0;
     int seen_credit = 0, seen_cardauth = 0;   /* present at all（active 否かに依らず）*/
+    unsigned cur_va[SCENE_CAP], cur_tag[SCENE_CAP]; int cur_n = 0, trunc = 0;
     for (int guard = 0; node && guard < 128; guard++) {
         unsigned flags = *(unsigned *)(node + 8);
+        unsigned tag = *(unsigned *)(node + 4);            /* uid tag: 0x21=card,0x45='E',MMGP… */
         uintptr_t upd = *(uintptr_t *)(node + 0x24);
         unsigned va = upd ? (unsigned)(upd - b + 0x400000u) : 0;
         if (va == 0x5eaae0) { seen_credit = 1; if (flags & 1) active_credit = 1; }
         if (va == 0x5e6200) { seen_cardauth = 1; if (flags & 1) active_cardauth = 1; }
         if (va == 0x7274d0 && (flags & 1)) active_attract = 1;
-        if (flags & 1) { nact++; sig = sig * 31u + va; }  /* active set の署名 */
+        if (flags & 1) {
+            nact++; sig = sig * 31u + va;                  /* active set の署名 */
+            if (cur_n < SCENE_CAP) { cur_va[cur_n] = va; cur_tag[cur_n] = tag; cur_n++; }
+            else trunc = 1;
+        }
         node = *(unsigned char **)(node + 0x3c);
+    }
+    /* scene.delta — active(va,tag) 多重集合を前フレームと diff。add/del を出し、未知 VA は生 hex で温存
+     * （＝生成主を辿る次の Ghidra リード）。RE は「フレーム N で何が現れ／消えたか」で進むのでこれが主軸。
+     * 35 ノードを目視 diff する摩擦を排し、各行を static_VA としてそのまま Ghidra に貼れる形にする。 */
+    if (!seeded) {                                          /* 初回（reload 後含む）は無音で baseline を確定 */
+        for (int i = 0; i < cur_n; i++) { prev_va[i] = cur_va[i]; prev_tag[i] = cur_tag[i]; }
+        prev_n = cur_n; seeded = 1;
+    } else {
+        char used[SCENE_CAP]; for (int i = 0; i < prev_n; i++) used[i] = 0;
+        char dl[760]; int dn = 0, ao = 0, ro = 0;          /* dl: add[] 群 / 別 buf に del[] 群 */
+        char rm[380];
+        for (int i = 0; i < cur_n; i++) {                  /* cur にあって prev に無い = add */
+            int hit = -1;
+            for (int j = 0; j < prev_n; j++)
+                if (!used[j] && prev_va[j] == cur_va[i] && prev_tag[j] == cur_tag[i]) { hit = j; break; }
+            if (hit >= 0) used[hit] = 1;
+            else if (ao < (int)sizeof dl - 80) {
+                ao += wsprintfA(dl + ao, "%s", dn++ ? "," : "");
+                ao += scene_node_json(dl + ao, (int)sizeof dl - ao, cur_va[i], cur_tag[i]);
+            }
+        }
+        int rn = 0;
+        for (int j = 0; j < prev_n; j++) {                 /* prev に残った = del */
+            if (used[j]) continue;
+            if (ro < (int)sizeof rm - 80) {
+                ro += wsprintfA(rm + ro, "%s", rn++ ? "," : "");
+                ro += scene_node_json(rm + ro, (int)sizeof rm - ro, prev_va[j], prev_tag[j]);
+            }
+        }
+        if (dn || rn) {                                    /* 変化フレームだけ出す */
+            char m[1200];
+            wsprintfA(m, "{\"ev\":\"scene.delta\",\"f\":%u,\"nact\":%d,\"trunc\":%d,"
+                         "\"add\":[%s],\"del\":[%s]}", st->tick, nact, trunc,
+                      dn ? dl : "", rn ? rm : "");
+            if (st->host && st->host->log) st->host->log("info", m);
+        }
+        for (int i = 0; i < cur_n; i++) { prev_va[i] = cur_va[i]; prev_tag[i] = cur_tag[i]; }
+        prev_n = cur_n;
     }
     int flagbits = active_attract | (active_credit << 1) | (active_cardauth << 2)
                  | (seen_credit << 3) | (seen_cardauth << 4);
@@ -750,12 +858,21 @@ static long long on_rtc_get(LogicState *st, void *time_out, unsigned *flag_out, 
     return 0;   /* ≠ -1 = success */
 }
 
+/* amEepromInit(0x985160) detour 本体: EEPROM ctx を storage-init の最中に provisioning する。
+ * eeprom_force_ready を再利用（initFlag==0 の今だけ書く・冪等）。host 側 detour は本関数の後 0 を返し、
+ * amlib_storage_init_all が amlib_eeprom_ok=1 で STATIC(area0) を読む → seed 済み region_game_pcb=01。
+ * per-frame force（on_jvs_tick 経由）は init 後で遅すぎるため、ここで早期化する（force 側は冪等で no-op 化）。*/
+static void on_eeprom_init(LogicState *st) {
+    eeprom_force_ready(st);
+}
+
 static const LogicApi g_api = {
     NRSEDGE_ABI_VERSION, l_bind,
     on_create_file, on_read_file, on_write_file, on_ioctl, on_close, on_comm_control,
     on_set_file_pointer,
     on_jvs_tick, on_sys_override, on_keychip_hold,
     on_rtc_get,
+    on_eeprom_init,
 };
 
 const LogicApi *logic_get_api(void) { return &g_api; }

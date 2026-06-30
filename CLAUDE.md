@@ -8,11 +8,14 @@ CrackProof 残置のみ）。**Frida は使わない。** 旧 Frida 実装は破
 
 1. **ドキュメントは参考。正は実装。** 値/アドレス/フォーマット/シーケンスは使う前に必ず実体で裏取り:
    - **nrs.exe** → Ghidra MCP（`mcp__ghidra__*`, static_VA）。手計算・推測禁止。
-   - **micetools**（RingEdge クリーンルームの正。lift 元） → `C:\src\micetools\` 直読。所在は `ref.md`。
-   - **TeknoParrot / RingEdge 純正イメージ** → `ref.md` 参照。
+   - **RingEdge 1 実装＝最上位の正本**。実 SEGA バイナリで裏取り（micetools/TP より上）:
+     - driver 層 → `C:\src\RingOSUpdate\common\segadriver\`（Columba/mxjvs/mxsmbus/mxsuperio/mxhwreset/mxcmos/mxsram/… の純正 .sys/.inf）
+     - system 層 → `C:\src\ringedge_system_63.01.10\system\`（mx*.exe デーモン＝非パック・Ghidra 可）
+   - **RingEdge 2 実装＝二次参照**（差分確認）: `C:\src\RingOSUpdate\ringedge2\`（共通は `common\`、RE1 固有は `ringedge1\`）。
+   - **micetools / TeknoParrot＝最下位の補助**（クリーンルーム再実装／挙動観測）。RE1/RE2 実バイナリと食い違ったら**実バイナリが正**。所在は `ref.md`。
 2. **二層写像を守る**: `src/logic/system/`=mx* デーモン（PCP/TCP 傍受）、`src/logic/driver/`=segadriver+
    シリアル（DeviceIoControl/シリアル傍受）。実 RingEdge の境界＝エミュ戦略の境界。
-3. **値・プロトコルは micetools と TeknoParrot の両方を正として参照**し推測で決めない。
+3. **値・プロトコルは RingEdge 1 実装を正本に裏取り**（RE2 で補強、micetools/TP は最後）し推測で決めない。
 
 ## 構成
 

@@ -8,7 +8,7 @@ confidence: [S]=静的解析 [L]=ライブ実走 [I]=推論 [F]=旧 Frida 計装
 ## ★現行方式 = native JVS over COM4（forgery/direct-write は撤去）[S+L, 2026-06-28 確定]
 
 旧「JVS forgery patch ＋ node BSS direct-write(B 経路)」は**全撤去**。実機どおり nrs の native amJvst を
-COM4 経由で駆動し、`src/logic/driver/mxjvs.c`（micetools lift）が JVS ボードをエミュする。**実走で init clean
+COM4 経由で駆動し、`src/logic/driver/mxjvs.c`（純正 `RingOSUpdate\common\segadriver\mxjvs\mxjvs.sys` を正本に、micetools mxjvs.c を補助 lift）が JVS ボードをエミュする。**実走で init clean
 ＋入力フロー確認済み**（`jvs_initialized_flag=1 / jvs_node_count=1 / jvs_p1_device_id=1 / jvs_error_state=0`、
 START 押下で `node+0x643 bit7=0x80`）。
 
@@ -17,7 +17,7 @@ START 押下で `node+0x643 bit7=0x80`）。
 - `GetCommState→SetCommState(115200/8N1)→SetCommTimeouts(全0)→SetupComm(0x400,0x400)→PurgeComm(0xf)` が
   **全て成功(非0)必須**。host(`hook.c`)が COM 制御 API 群をフックし仮想ハンドルへ TRUE 化（`on_comm_control`）。
   overlapped は host が read/write 後に `ov->InternalHigh=k; SetEvent(ov->hEvent)` で完了シグナル（logic は同期）。
-- **SENSE ライン = GetCommModemStatus の DSR(MS_DSR_ON=0x20)**（micetools `mxjvs_GetCommModemStatus` 準拠）:
+- **SENSE ライン = GetCommModemStatus の DSR(MS_DSR_ON=0x20)**（micetools `mxjvs_GetCommModemStatus` 準拠＝純正 mxjvs.sys で要裏取り）:
   sense=1(未割当)→0、sense=0(割当済=チェーン終端)→MS_DSR_ON。**欠落するとマスタが SETADDR を無限ループ**し
   node 確定しない（実走で確認）。`JvsBoard.sense` は init=1 / ASSIGN_ADDR 後=0。
 

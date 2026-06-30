@@ -75,11 +75,86 @@ static void sram_ensure(void) {
     if (g_host && g_host->log)
         g_host->log("info", "{\"ev\":\"mxsram.backing\",\"file\":\"nvram.bin\",\"bytes\":2097152}");
 }
+/* ─── 純正供給経路の再現: AT24C64AN board EEPROM → amBackup STATIC → region_game_pcb ───
+ * 実機 RingEdge の region は「基板 EEPROM(AT24C64AN) の AM_SYSDATAwH_STATIC.m_Region」が正本。
+ * nrs.exe は amlib_storage_init_all で amBackupRead(area0=STATIC, &amSysdataStatic@0x016014b8) を呼び、
+ * その +0x0C(=region_game_pcb 0x016014c4)を読み、amlib_master_init が
+ * (region_game_pcb & region_dongle & 5)!=0 を要求する（両方 NOP/直書きではなく、これが正の経路）。
+ * standalone では eeprom.bin が blank(0xFF)＝STATIC CRC 不正 → 既定(region=0)へ reset → Error 0903。
+ * よって patches/直接書込みでなく、純正どおり EEPROM STATIC レコードを seed して
+ * ゲーム自身の amBackup 経路に region を供給する。構造体/オフセット/CRC は nrs.exe 実体と micetools に一致。*/
+
+/* AM_SYSDATAwH_STATIC: EEPROM area0 レコード(0x20B)。nrs.exe の &DAT_016014b8 展開先 ＝
+ * micetools amBackupStructs.h と一致確認済。m_Region@+0x0C = region_game_pcb(0x016014c4)。*/
+#pragma pack(push, 1)
+typedef struct {
+    uint32_t m_Crc;             /* +0x00 amiCrc32R(レコード[+4..size)) */
+    uint8_t  Rsv04[8];          /* +0x04 */
+    uint8_t  m_Region;          /* +0x0C → region_game_pcb。01=JAPAN(FUN_0048f9c0: 01→index0) */
+    uint8_t  m_Rental;          /* +0x0D */
+    uint8_t  Rsv0F;             /* +0x0E */
+    char     m_strSerialId[17]; /* +0x0F PCB シリアル(NUL 終端) */
+} AM_SYSDATAwH_STATIC;          /* sizeof = 0x20 */
+#pragma pack(pop)
+
+#define AM_SYSDATAwH_STATIC_REG 0x000   /* EEPROM 内 REG オフセット(micetools/nrs 一致) */
+#define AM_SYSDATAwH_STATIC_DUP 0x1000  /* DUP(nrs.exe 側 +0x1000)。現行 8bit SMBus エミュ(vcode 切詰め)
+                                           では未到達＝REG へ alias。amBackupRead は REG 有効で短絡する
+                                           ため region には不要だが、addressing 改良時のため faithful に書く。*/
+
+/* 純正 amiCrc32R = 反射 CRC-32(poly 0xEDB88320, init/final ~)。nrs.exe amBackup 検証関数
+ * FUN_0098a820 と micetools amiCrc.c が命令単位で一致。table は初回 lazy 構築。*/
+static uint32_t g_amiCrc32R_table[256];
+static int      g_amiCrc32R_init;
+static void amiCrc32RCreateTable(void) {
+    for (uint32_t i = 0; i < 256; i++) {
+        uint32_t v = i;
+        for (int b = 0; b < 8; b++) v = (v & 1) ? (v >> 1) ^ 0xEDB88320u : v >> 1;
+        g_amiCrc32R_table[i] = v;
+    }
+    g_amiCrc32R_init = 1;
+}
+static uint32_t amiCrc32RCalc(int length, const void *data, uint32_t initial) {
+    if (!g_amiCrc32R_init) amiCrc32RCreateTable();
+    const uint8_t *p = (const uint8_t *)data;
+    uint32_t v = ~initial;
+    for (; length > 0; length--, p++) v = (v >> 8) ^ g_amiCrc32R_table[(*p ^ v) & 0xff];
+    return ~v;
+}
+
+/* set_eeprom_static_config 相当(micetools smb_at24c64an.c)。STATIC が無効(blank 含む)のときだけ
+ * region=01 で seed＝既存の operator provisioned eeprom.bin は温存（CRC 一致なら何もしない）。*/
+static void eeprom_seed_static(void) {
+    AM_SYSDATAwH_STATIC *cur = (AM_SYSDATAwH_STATIC *)&g_eeprom[AM_SYSDATAwH_STATIC_REG];
+    uint32_t curCrc = amiCrc32RCalc(sizeof *cur - 4, (uint8_t *)cur + 4, 0);
+    if (curCrc == cur->m_Crc) return;   /* 既に有効＝operator 値を温存 */
+
+    AM_SYSDATAwH_STATIC st;
+    memset(&st, 0, sizeof st);
+    st.m_Region = 0x01;                 /* JAPAN(BBS JP build) ← 純正どおり供給する region */
+    st.m_Rental = 0x00;
+    /* PCB シリアル: 実機は SEGA 工場割当の固定値（実行時導出はしない）。書式は
+     * [英数4]-[英数3][数字8] = 16文字, 文字集合 base-34 [0-9A-HJ-NP-Z](I/O 除外)。
+     * 例値は micetools KEY_ID "A72E-02D11261116" と同 family。alpbEx(ALL.Net billing)へ
+     * 筐体識別子として渡るだけで書式検証は無い。standalone は単一筐体ゆえ固定で実機相当。
+     * 純正フォールバックは "INVALID_SERIALNO"(region=0)＝未 provisioning マーカー。 */
+    memcpy(st.m_strSerialId, "ABLN-00100000001", 16);   /* PCB serial(固定, NUL 終端) */
+    st.m_Crc = amiCrc32RCalc(sizeof st - 4, (uint8_t *)&st + 4, 0);
+
+    memcpy(&g_eeprom[AM_SYSDATAwH_STATIC_REG], &st, sizeof st);
+    if (AM_SYSDATAwH_STATIC_DUP + sizeof st <= EEPROM_BYTES)
+        memcpy(&g_eeprom[AM_SYSDATAwH_STATIC_DUP], &st, sizeof st);
+    if (g_host && g_host->log)
+        g_host->log("info",
+            "{\"ev\":\"eeprom.seed_static\",\"rec\":\"AM_SYSDATAwH_STATIC\",\"region\":1}");
+}
+
 static void eeprom_ensure(void) {
     static uint8_t fallback_eeprom[EEPROM_BYTES];
     if (g_eeprom) return;
     g_eeprom = map_nvram(L"eeprom.bin", EEPROM_BYTES, 0xff);
     if (!g_eeprom) { g_eeprom = fallback_eeprom; memset(g_eeprom, 0xff, EEPROM_BYTES); }
+    eeprom_seed_static();   /* 純正 STATIC レコードを供給（blank/無効時のみ）→ region_game_pcb */
 }
 
 void mxdev_init(HostServices *host) { g_host = host; }   /* map は初回 IO で遅延生成（bind 中の reload 安全）*/
@@ -184,8 +259,10 @@ BOOL mxdev_ioctl(HANDLE h, DWORD code, void *in, DWORD inlen,
         if (code == 0x9c406008) { if (ob && outlen >= 4) *(uint32_t *)ob = 0x01020001; if (ret) *ret = 4; return TRUE; }
         if ((code == 0x9c40200c || code == 0x9c402004) && ib && ob) {
             int i2c = (code == 0x9c40200c);
-            uint8_t cmd = ib[1], vaddr, vcode, nb, off;
-            if (i2c) { vaddr = (uint8_t)(*(uint16_t *)(ib + 2) & 0x7fff); vcode = (uint8_t)*(uint16_t *)(ib + 4); nb = ib[6]; off = 7; }
+            uint8_t cmd = ib[1], vaddr, nb, off;
+            uint16_t vcode;   /* EEPROM/SMBus 内アドレス。AT24C64AN は 13bit(0..0x1FFF)＝8bit 切詰め厳禁
+                                 （DUP record が +0x1000 にあり、切詰めると REG へ alias 混入し STATIC 等を破壊する）*/
+            if (i2c) { vaddr = (uint8_t)(*(uint16_t *)(ib + 2) & 0x7fff); vcode = *(uint16_t *)(ib + 4) & 0x1fff; nb = ib[6]; off = 7; }
             else     { vaddr = ib[2] & 0x7f; vcode = ib[3]; nb = ib[4]; off = 5; }
             ob[0] = 0;   /* status ok */
             if (vaddr == 0x57) {                      /* AT24C64AN eeprom */

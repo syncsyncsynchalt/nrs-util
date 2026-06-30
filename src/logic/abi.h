@@ -13,7 +13,7 @@
 #include <windows.h>
 #include <stdint.h>
 
-#define NRSEDGE_ABI_VERSION 4u   /* v4: on_set_file_pointer 追加（mxsram データ面: SetFilePointer 位置決め）*/
+#define NRSEDGE_ABI_VERSION 5u   /* v5: on_eeprom_init 追加（amEepromInit detour で EEPROM ctx を storage-init 中に早期 provisioning）。v4: on_set_file_pointer */
 
 /* host が hook している原関数(トランプリン)の識別子。logic は services->orig(id) で呼び戻す。 */
 enum { ORIG_CREATE_FILE_W = 1, ORIG_CREATE_FILE_A, ORIG_READ_FILE, ORIG_WRITE_FILE,
@@ -83,6 +83,12 @@ typedef struct LogicApi {
        amRtcTime 構造体(year@0 WORD/month@2/day@3/hour@4/min@5/sec@6, converter 0x973F20 で確証)を埋め成功(≠-1)を返す。
        戻り値が detour の返り値になる。実 RTC が応答すれば温存（旧 amrtc/rtc.js, only-on-failure）。 */
     long long (*on_rtc_get)(LogicState *st, void *time_out, unsigned *flag_out, long long orig_ret);
+    /* amEepromInit(0x985160) を完全置換する detour 用。standalone では amEepromCreateDeviceFile(SetupDi PnP
+       列挙)失敗 → amEepromInit 失敗 → amlib_storage_init_all が amlib_eeprom_ok=0 で STATIC(area0) read を
+       skip → region_game_pcb=0 → Error 0903。この hook で EEPROM ctx を storage-init の最中に provisioning し、
+       host detour が 0(成功)を返すと genuine な amBackupRead(STATIC) が走り seed 済み region を読む。
+       per-frame の eeprom_force_ready は main loop（init 後）で遅すぎるための早期化。 */
+    void (*on_eeprom_init)(LogicState *st);
 
     /* ---- system 層(PCP/TCP): フックは段階的に追加（P5） ---- */
     /* TODO: on_socket / on_pcp_exchange 等 */

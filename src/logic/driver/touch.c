@@ -4,6 +4,16 @@
 #include "driver/touch.h"
 #include <string.h>
 
+/* 校正スケール相殺ゲイン（中心アンカー）。ゲームは生レンジ(0..0xFFF)を画面より内側へ校正マッピング
+ * する（touch_set_calib_window 0x8B3D60, 中心引き込み k<1）。送信前に中心基準で 1/k 倍に拡大して相殺する。
+ * 1.0=無補正。実測で隅までカーソルと一致する値に調整（X/Y 個別。求め方は touch.h / 下記コメント）。 */
+#ifndef TOUCH_GAIN_X
+#define TOUCH_GAIN_X 1.0   /* TODO: 実測値に置換（例 1/(1−2p), p=左端カーソル時のタッチ表示位置/画面幅）*/
+#endif
+#ifndef TOUCH_GAIN_Y
+#define TOUCH_GAIN_Y 1.0   /* TODO: 同上（上端カーソル時の縦比から）*/
+#endif
+
 /* checksum = (Σ byte[0..8] − 0x56) & 0xff（touch_serial_rx_parse 0x8B2E40 / 送信側 FUN_008b38f0 と同式）*/
 static uint8_t touch_cksum(const uint8_t *f) {
     unsigned s = 0;
@@ -21,29 +31,50 @@ void touch_sample_mouse(TouchPanel *t, HWND win) {
     POINT p;
     if (!GetCursorPos(&p)) return;
     if (!win) win = GetForegroundWindow();
+    int inside = 0;
     RECT rc;
     if (win && GetClientRect(win, &rc) && rc.right > rc.left && rc.bottom > rc.top) {
         long w = rc.right - rc.left, h = rc.bottom - rc.top;
-        ScreenToClient(win, &p);
-        long cx = p.x < 0 ? 0 : (p.x >= w ? w - 1 : p.x);
-        long cy = p.y < 0 ? 0 : (p.y >= h ? h - 1 : p.y);
-        t->x = (uint16_t)((long long)cx * TOUCH_MAX / (w > 1 ? w - 1 : 1));
-        t->y = (uint16_t)((long long)cy * TOUCH_MAX / (h > 1 ? h - 1 : 1));
+        POINT cp = p;
+        ScreenToClient(win, &cp);
+        inside = (cp.x >= 0 && cp.x < w && cp.y >= 0 && cp.y < h);  /* client 矩形内か */
+        long cx = cp.x < 0 ? 0 : (cp.x >= w ? w - 1 : cp.x);
+        long cy = cp.y < 0 ? 0 : (cp.y >= h ? h - 1 : cp.y);
+        /* client 0..1 正規化 → 中心基準でゲイン拡大（校正の中心引き込みを相殺）→ クランプ → 0..0xFFF。
+           +0.5 で四捨五入（floor の左上偏りも解消）。t->x/y は反転前の生値（build_T で 0xFFF−x 反転）。 */
+        double fx = (w > 1) ? (double)cx / (double)(w - 1) : 0.0;
+        double fy = (h > 1) ? (double)cy / (double)(h - 1) : 0.0;
+        fx = (fx - 0.5) * (double)TOUCH_GAIN_X + 0.5;
+        fy = (fy - 0.5) * (double)TOUCH_GAIN_Y + 0.5;
+        if (fx < 0.0) fx = 0.0; else if (fx > 1.0) fx = 1.0;
+        if (fy < 0.0) fy = 0.0; else if (fy > 1.0) fy = 1.0;
+        t->x = (uint16_t)(fx * (double)TOUCH_MAX + 0.5);
+        t->y = (uint16_t)(fy * (double)TOUCH_MAX + 0.5);
     }
-    /* 押下 = マウス左ボタン または T キー(VK 0x54)。座標はどちらでも現カーソル位置。 */
-    t->pressed = ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) || (GetAsyncKeyState('T') & 0x8000)) ? 1 : 0;
+    /* 押下 = マウス左 or 'T' キー。ただし VK_LBUTTON はシステム全域で発火するため、
+       「ゲーム窓が前面 かつ カーソルが client 矩形内」に限定する。これを外すと窓外クリックが
+       端クランプ座標で誤タッチになる（窓外反応バグ）。座標は現カーソル位置。 */
+    int focused = (win && win == GetForegroundWindow());
+    int held = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) || (GetAsyncKeyState('T') & 0x8000);
+    t->pressed = (held && focused && inside) ? 1 : 0;
 }
 
 /* 現座標の 'T' 座標フレームを out[10] に構築。X/Y は LE12bit, Z=筆圧, byte2=status(押下フラグ)。*/
 static int build_T(const TouchPanel *t, uint8_t *out) {
     uint16_t z = t->pressed ? 0x00FFu : 0x0000u;
+    /* パネル native 座標系は screen に対し両軸反転（game の decode_T_coord 0x8B31E0 が
+       +0x21c=0xFFF−X / +0x220=0xFFF−Y で戻す。facts/devices.md「'T' 座標」/ touch.h 注記）。
+       t->x/t->y は cursor 由来の生値ゆえ、ここで反転し game の反転と相殺する＝鏡像バグの解消。
+       実機検証で片軸のみズレるなら該当軸の反転だけ外す（X=wx, Y=wy を個別に t->x/t->y へ戻す）。 */
+    uint16_t wx = (uint16_t)(TOUCH_MAX - t->x);
+    uint16_t wy = (uint16_t)(TOUCH_MAX - t->y);
     out[0] = (uint8_t)TOUCH_SYNC;            /* 'U' */
     out[1] = 'T';                            /* 0x54 = 座標レポート */
     out[2] = (uint8_t)(t->pressed ? 1 : 0);  /* status/id → ctx+0x166 */
-    out[3] = (uint8_t)(t->x & 0xff);
-    out[4] = (uint8_t)((t->x >> 8) & 0x0f);
-    out[5] = (uint8_t)(t->y & 0xff);
-    out[6] = (uint8_t)((t->y >> 8) & 0x0f);
+    out[3] = (uint8_t)(wx & 0xff);
+    out[4] = (uint8_t)((wx >> 8) & 0x0f);
+    out[5] = (uint8_t)(wy & 0xff);
+    out[6] = (uint8_t)((wy >> 8) & 0x0f);
     out[7] = (uint8_t)(z & 0xff);
     out[8] = (uint8_t)((z >> 8) & 0xff);
     out[9] = touch_cksum(out);

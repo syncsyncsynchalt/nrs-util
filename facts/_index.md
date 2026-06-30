@@ -2,7 +2,8 @@
 
 nrs.exe で確定した事実（アドレス/構造体/プロトコル）をサブシステム別に置く。
 1 サブシステムの作業は当該ファイル閉で完結する（全読み不要）。**正は実装**＝値は使う前に
-Ghidra(static_VA)／micetools／実走ログで裏取りする（`../CLAUDE.md` 鉄則）。
+Ghidra(static_VA)／**RingEdge 1 純正バイナリ**（`RingOSUpdate\common\segadriver\` + `ringedge_system_63.01.10\system\`）／実走ログで裏取りする（`../CLAUDE.md` 鉄則）。
+**注意**: 各 facts に残る「micetools を正」「authoritative（micetools）」表記は旧来の優先順位。現行は **RE1/RE2 純正バイナリ > micetools/TP**（`../ref.md` 階層）。値が両者で食い違ったら純正を正に補正する。
 
 confidence 凡例: [S]=静的解析(Ghidra) [L]=ライブ実走確認 [I]=推論
 [F]=旧 Frida 計装で確認（**履歴的来歴**。Frida は破棄済み＝再取得は Ghidra/実走で行う）
@@ -34,6 +35,6 @@ confidence 凡例: [S]=静的解析(Ghidra) [L]=ライブ実走確認 [I]=推論
 
 ## 外部オラクル・ツール
 
-- 外部オラクル（micetools / TeknoParrot / RingEdge 純正イメージ）の所在 → `../ref.md`
+- 外部オラクル（① nrs.exe → ② RingEdge 1 純正バイナリ → ③ RingEdge 2 → ④ micetools/TeknoParrot）の所在・権威階層 → `../ref.md`
 - 関数名/型の正（Ghidra へ適用） → `../data/known_names.json`
 - 静的解析 = Ghidra MCP（`mcp__ghidra__*`, static_VA）。起動 `tools/ghidra_mcp/start_headless.ps1`

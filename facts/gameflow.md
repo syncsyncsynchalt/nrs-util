@@ -13,16 +13,41 @@ touch device も card reader も完動（"touch panel ok" / "card slot ok"）。
 
 ## scene/task 機構 [S]
 
-- **task list `DAT_016db564`**（= `g_amTaskList_head`, device list と同一）: 各ノード 0x5c B。
-  `+0`=tid / `+4`=uid(tag) / `+8`=flags(&3=active) / `+0x10`=per-task ctx / `+0x3c`=next。
-  registrar=**`amTaskOpen`(0x89dcb0)** `(tid,uid,ctxSize)`。tag 例: 0x21=card / 0x45('E')=network-reception / 0x50474d4d("MMGP")。
+- **task list `DAT_016db564`**（= `g_amTaskList_head`, device list と同一）: 各ノード 0x5c B（stride 0x17 int）。
+  `+0`=tid / `+4`=uid(tag) / `+8`=flags(&3=active,&4=remove) / `+0x10`=per-task ctx / `+0x14`=ctxSize / `+0x3c`=next。
+  registrar=**`amTaskOpen`(0x89dcb0)** `(tid,uid,ctxSize)`（逆コンパイルで裏取り: `*node=tid; node[1]=uid; node[2]=3`）。
+  - **uid はゲーム公認の FourCC タグ [S]**: amTaskOpen の重複 open 警告が `amDebugOut("...uid=%08x(%s)...", uid, &str)` で
+    uid を**4バイト ASCII（低位バイト順）として文字列化**（`DAT_02283014=uid&0xff`…）。∴「uid をタグ文字列で読む」のはゲーム本来の規約。
+    tag 例: `0x50474d4d`="MMGP"（mmgp_diag がこの uid でライブ walk）/ `0x45`='E'=network-reception / `0x21`,`0x21`=card（tid==uid, devices.md）。
+  - 計装 `api.c scene.delta` は uid を生 hex(`tag`)＋FourCC(`tag4`)の両方で出す（`scene_tag_fourcc`）。
+    ※EntryMode scene 個々の uid は **未裏取り**（生成元コード未特定。実値は出るが意味付けは未確定）。
 - **scene 選択は scene-id global ではない**（訂正・PROVEN）: `DAT_016b8b54` は **`amlib_subsystem_state`**（keychip/usbio 状態、
   `==8`=keychip-ready。`keychip_errCode1_latcher`0x6f0a80 / `usbio_errCode_mapper`0x6f0ae0 が同名で読む）であり requested_scene_id ではない。
   0xD4B000 は state-string jump table（3 slot のみ）で scene ctor 表ではない。
-- scene 本体は **vtable/RTTI ベース**: credit scene `credit_touch_scene_update`(0x5eaae0)=vtbl 0xbb358c /
-  card-auth `cardauth_netentry_scene_update`(0x5e6200)=vtbl 0xbb34c4（RTTI@0xca9318）。`scene_list_lifecycle_update`(0x89d830)が
-  node-id 0x21 の render-node リストを tick。**遷移は scene SM 内部**（下記 MMGP）＋ `param_2` 出力構造体(`+0x134`=done)で駆動し、
-  scene-id global の書込みでは起きない。
+- scene 本体は **vtable/RTTI ベース**で、各 scene は **nrs.exe 埋め込みの実 C++ クラス（RTTI 有）**。
+  task node の update slot(+0x24) に入る VA = その scene クラスの **vtable slot#2（仮想メソッド）の生アドレス**。
+  ∴ update VA → vtbl base(=slot#2 addr − 8) → vtbl[-4]=COL → COL+0x0c=TypeDescriptor → TD+0x08=mangled name で実名確定。
+  **entry flow scene の実クラス名（nrs.exe 直読で裏取り, [S]）**:
+  | update VA(slot#2) | 実 RTTI class | COL | vtbl base | 旧RE名 |
+  |---|---|---|---|---|
+  | 0x5eaae0 | `EntryModeGamePoint` | 0xca9318 | 0xbb3584 | credit_touch_scene_update |
+  | 0x5e6200 | `EntryModeCheckCard` | 0xca9538 | 0xbb34bc | cardauth_netentry_scene_update |
+  | 0x5e90b0 | `EntryModeNameEntry` | 0xca94a0 | 0xbb34ec | — |
+  | 0x5e8710 | `EntryModeSelectChara` | 0xca94ec | 0xbb34d4 | — |
+  | 0x5eb000 | `EntryModeDotNetRegist` | 0xca92cc | 0xbb359c | — |
+  | 0x5ec340 | `EntryModePassword` | 0xca9234 | 0xbb35cc | — |
+  | 0x5eb6b0 | `EntryModeReIssue` | 0xca9280 | 0xbb35b4 | — |
+  | 0x62fb50 | `EntryModeBase`(基底) | 0xca9584 | 0xbb34a4 | — |
+  - ⚠️ **訂正**: 旧記述「card-auth=vtbl 0xbb34c4（RTTI@0xca9318）」は取り違え。0xbb34c4 は **vtbl base ではなく slot#2 のアドレス**
+    （base 0xbb34bc + 8）。かつ 0xca9318 は **credit(EntryModeGamePoint) の COL**であり card-auth ではない。card-auth の COL は 0xca9538。
+  - **継承の罠**: `EntryModeRegist/UpdateBase/UpdateCard/VersionUp` は slot#2 を override せず **0x5ea0a0 を共有**（基底の update）。
+    ∴ update VA だけでは一意化不可。実行時 obj の vtable→RTTI 読みが要る。
+  - `attract_scene_lifecycle`(0x7274d0) / `net_session_task_sm_on_touch`(0x6f42c0) は **C++ scene クラスでない素の task callback で RTTI 無し**
+    ＝実名が存在しない（`api.c scene_va_name` は捏造せず生 VA で出す）。
+  - `scene_list_lifecycle_update`(0x89d830)が node-id 0x21 の render-node リストを tick。**遷移は scene SM 内部**（下記 MMGP）＋
+    `param_2` 出力構造体(`+0x134`=done)で駆動し、scene-id global の書込みでは起きない。
+  - 計装: `api.c scene_diag` の **`scene.delta`** が active(va,tag) 集合を毎フレーム diff し、各 node を上表の実クラス名(`cls`)で出す
+    （未解決 VA は `cls:null`＝生 VA で次の RTTI 解析対象）。
 - ※dispatcher 領域 0x6f06e4–0x6f0a7f は Ghidra 未解析 raw（要 GUI force-disassemble、MCP 不可）。本 flow には不要。
 
 ## attract→credit 遷移 gate（PROVEN）

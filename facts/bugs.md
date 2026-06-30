@@ -47,11 +47,11 @@ Each entry: symptom → root cause → fix/workaround.
 「init OK」を「デバイス動作」の証拠と取り違えるのが罠（ログ上は初期化成功に見える）。
 
 **修正**: host が `SetFilePointer` をフック(ABI v4 `on_set_file_pointer`)→ `mxdev_seek`/`mxdev_read`/`mxdev_write` が
-`nvram.bin` を memory-map した backing で記録を授受。GET_SECTOR_SIZE は authoritative 値 **RINGEDGE2=4**（micetools）を返す。
+`nvram.bin` を memory-map した backing で記録を授受。GET_SECTOR_SIZE は **RINGEDGE2=4**（micetools 由来＝純正 mxsram.sys は memcard0 へ転送し自前で答えないため要確認。`mxdrivers.md`）を返す。
 
 ⚠️ **自己訂正**: 「sector 512 だと sub-512 record I/O が弾かれて洪水が残る」は**誤り**だった。実体検証で
 SRAM 系 4 record(BACKUP/HM_PEAK/TIMEZONE/ERROR_LOG)は**全て明示パディングで正確に 512B/512境界**＝512 でも
-アラインメント検査は通る。**洪水の原因はデータ面の欠落のみ**で sector size は無関係。4 は authoritative かつ厳密に
+アラインメント検査は通る。**洪水の原因はデータ面の欠落のみ**で sector size は無関係。4 は micetools 由来（純正で要確認）かつ厳密に
 緩いので採用したが、これは fidelity 改善であって洪水 fix ではない。
 
 **教訓**: ①デバイスは「制御面(IOCTL)」と「データ面(Read/Write/Seek)」の二層。init が通ってもデータ面の配線を
