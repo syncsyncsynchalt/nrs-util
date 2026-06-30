@@ -28,10 +28,13 @@ static const uint8_t NOP10[]       = {0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x
    C:\System\SystemVersion.txt（api.c on_create_file/on_read_file）が供給。下の CODE[] 注記参照。 */
 
 static const CodePatch CODE[] = {
-    /* ambilling/status.js */
-    {0xA065C0, P_billing, 6, "alpbExGetExecStatus->5 (billing offline)"},
-    /* amdongle/patch.js */
-    {0x975E00, RET0, 3, "amDongleBusy->0 (outerSM advances)"},
+    /* ambilling/status.js — billing batch 撤去（2026-06-30, 差分ライブテストで冗長確認）:
+       撤去→SYSTEM STARTUP 全 OK→attract 安定到達。boot→attract には billing ready 詐称不要。
+       ※実コイン/プレイ(credit)段階で必要になりうるが現状 attract 止まり(P5 network blocker)ゆえ未到達。再発時は復活。 */
+    /* {0xA065C0, P_billing, 6, "alpbExGetExecStatus->5 (billing offline)"}, */
+    /* amdongle/patch.js — 保持（撤去不可・2026-06-30 ライブ実証）: 撤去すると boot が host.ready 直後に
+       ハング（amdongle outerSM が最初期に走り attract 不達）。dongle batch(0x975E00+JL2JMP)は一体で必須。 */
+    {0x975E00, RET0, 3, "amDongleBusy->0 (outerSM advances). 撤去不可(early hang)。"},
     {0x457AF0, RET8_0, 5, "delete_directory_recursive nop: blocks keychipSM_FSM case4 recursive dir delete on appdata mismatch. __thiscall(this,arg1,arg2)=callee-clean ゆえ ret 8 必須(関数の 0x457fd1=RET 0x8 / call site 0x4579F4 に add esp 無し)。bare ret はスタック破壊→発火時クラッシュ。(DO NOT REMOVE; facts/bugs.md, facts/amdongle.md)"},
     /* amjvs: forgery 撤去。native JVS 経路（COM4 = mxjvs.c エミュ）を実駆動する方針へ移行（facts/amjvs.md）。
        0x67AFA0(reinit ret)/0x987590(specCheck)/0x9883D3(acksw) と node BSS data write 群は撤去:
@@ -56,22 +59,31 @@ static const CodePatch CODE[] = {
     /* dipsw byte2->3 / byte3->0x20(board index 2) は撤去: dipsw ctx を api.c dipsw_force_ready が provisioning し、
        read fn の mxsmbus IOCTL(0x9c402004,cmd5) を mxdev_ioctl が応答(index0=0x20)。素の amDipswRead が board index 2
        を算出するため byte patch 不要。詳細 facts/devices.md。再発(errCode 0xa/0xb)時は復活させる。 */
-    /* mxnetwork/state.js */
-    {0x6FF1B3, P_one1, 1, "LAN flag b50c 0->1 (Error 8005)"},
-    {0x72DCE0, P_ret2, 6, "amlib_device_status_getter->2 (Error 8001)"},
-    /* mxsegaboot/startup.js */
-    {0x72B3A0, P_extimg, 11, "extend_image_install_status (state7)"},
-    {0x701280, P_alc, 3, "pras_billing_ready_check->al=1: billing offline でも ready 強制（alpbEx_billing_ready/enabled 参照。freeplay flag 0x128855A とは別物）"},
-    /* mxstorage/presence.js */
-    {0x4FDA50, RET0, 3, "is-DVD-boot->0 (Error 913)"},
-    /* mxkeychip/region.js — region check 無効化 */
-    {0x986A66, NOP6, 6, "region jne->nop (Error 0x381)"},
-    {0x986A74, NOP6, 6, "region jne->nop (Error 0x387 wrong region)"},
-    {0x986A92, NOP6, 6, "region jne->nop (Error 0x38D)"},
-    {0x459109, NOP10, 10, "errCode=4 store nop (FUN_00458fd0)"},
-    {0x45A846, NOP10, 10, "errCode=4 store nop (FUN_0045a7f0)"},
-    /* mxgfetcher/getstatus.js 由来だが実体は HLSM の region ゲート */
-    {0x6FF980, RET1, 6, "hlsm_region_check->1: HLSM(0x457fe0) の region ゲート（0x210aed0/2/4 参照。keychip region NOP 0x986A.. とは別経路）"},
+    /* mxnetwork/state.js — network batch 撤去（2026-06-30, 差分ライブテストで冗長確認）:
+       撤去→"CHECKING NETWORK … OK"→attract 安定到達。runtime の keychip PCP サーバ＋api.c network_auth_force_ready が
+       network 状態を供給するため LAN flag/device_status の静的詐称は不要。8005/8001 不在。再発時は復活。 */
+    /* {0x6FF1B3, P_one1, 1, "LAN flag b50c 0->1 (Error 8005)"}, */
+    /* {0x72DCE0, P_ret2, 6, "amlib_device_status_getter->2 (Error 8001)"}, */
+    /* mxsegaboot/startup.js — extend_image batch 撤去（2026-06-30, 差分ライブテストで冗長確認）:
+       撤去→attract 安定到達。"CHECKING EXTEND IMAGE … NG" は元から非ブロッキングで詐称不要。再発時は復活。 */
+    /* {0x72B3A0, P_extimg, 11, "extend_image_install_status (state7)"}, */
+    /* pras_billing_ready_check 撤去（2026-06-30, billing batch の一部。上記 0xA065C0 と同じ理由で冗長）。 */
+    /* {0x701280, P_alc, 3, "pras_billing_ready_check->al=1: billing offline でも ready 強制（alpbEx_billing_ready/enabled 参照。freeplay flag 0x128855A とは別物）"}, */
+    /* mxstorage/presence.js — is-DVD-boot 撤去（2026-06-30, 差分ライブテストで冗長確認）:
+       撤去→attract 安定到達(913 不在)。standalone は disk boot で素の判定が通る。再発時は復活。 */
+    /* {0x4FDA50, RET0, 3, "is-DVD-boot->0 (Error 913)"}, */
+    /* mxkeychip/region.js + hlsm region — region batch 撤去（2026-06-30, 差分ライブテストで冗長確認, 6 CODE + 3 DATA=9個）:
+       撤去→attract 安定到達、region Error 画面(0x381/0x387/0x38D)は 30s サンプリングで一度も出ず。
+       keychip PCP サーバ(host/keychip_server.c)が keychip ハンドシェイクで region を供給し、ゲームの region チェックが
+       自然通過＋region globals もゲーム自身が設定するため詐称・DATA 書込み(region=JAPAN)とも不要。lv3 警告ログは
+       baseline でも出る良性。※region は本来 network 対戦の matchmaking を gate ＝ P5 network play 実装時は keychip 供給を
+       要確認。再発(region Error)時は復活。詳細 facts/devices.md。 */
+    /* {0x986A66, NOP6, 6, "region jne->nop (Error 0x381)"}, */
+    /* {0x986A74, NOP6, 6, "region jne->nop (Error 0x387 wrong region)"}, */
+    /* {0x986A92, NOP6, 6, "region jne->nop (Error 0x38D)"}, */
+    /* {0x459109, NOP10, 10, "errCode=4 store nop (FUN_00458fd0)"}, */
+    /* {0x45A846, NOP10, 10, "errCode=4 store nop (FUN_0045a7f0)"}, */
+    /* {0x6FF980, RET1, 6, "hlsm_region_check->1: HLSM(0x457fe0) の region ゲート（0x210aed0/2/4 参照。keychip region NOP 0x986A.. とは別経路）"}, */
     /* amplatform/identity.js（platform gate FUN_0045a6f0 回避） */
     /* 0x981FF0 amPlatformGetPlatformId->"AAL" は撤去: columba DMI(mxdevices.c build_dmi の OEM
        string index2="AAL")が amOemstringGetOemstring 経由で供給するため素の関数が "AAL" を返す＝冗長。
@@ -82,14 +94,16 @@ static const CodePatch CODE[] = {
        詳細 facts/amplatform.md。再発(errCode 3)時は復活させる。 */
 };
 
-/* jl(0x7C disp8) -> jmp(0xEB disp8): byte0 のみ書換 */
-static const uint32_t JL2JMP[] = { 0x97588A, 0x97595F, 0x975A1F };
+/* jl(0x7C disp8) -> jmp(0xEB disp8): byte0 のみ書換。amdongle outerSM の 3 分岐（dongle batch, 撤去不可）。
+   先頭 0=sentinel（skip）で全撤去しても空配列にならない。撤去テスト→early hang ゆえ保持。 */
+static const uint32_t JL2JMP[] = { 0 /*sentinel*/, 0x97588A, 0x97595F, 0x975A1F };
 
 typedef struct { uint32_t va; uint32_t val; int size; } DataWrite;
 static const DataWrite DATA[] = {
+    {0, 0, 0},   /* sentinel（size 0 = skip）。全 DATA を撤去しても空配列にならずビルド可にする番兵。 */
     /* amjvs node BSS の forgery data write は撤去（native discovery が node を満たす）。 */
-    /* mxkeychip/region.js — region=JAPAN */
-    {0x16014C4, 1, 1}, {0x1601744, 1, 1}, {0x1601989, 1, 1},
+    /* mxkeychip/region.js — region=JAPAN [TEST 撤去中: region DATA] */
+    /* {0x16014C4, 1, 1}, {0x1601744, 1, 1}, {0x1601989, 1, 1}, */
     /* amdebug 系統A のゲート開放(logLevel/logMask)は**ここでは行わない**。
        注入は CREATE_SUSPENDED ＝ patches_apply は entry 前に走るため、resume 後の
        amDebugInit(0x55C500: memset→logLevel=4/mask=0xff) に上書きされ lv5..7 が脱落する。
@@ -113,14 +127,21 @@ void patches_apply(HostServices *h) {
         wr(base + (CODE[i].va - IMAGE_BASE), CODE[i].b, CODE[i].n);
 
     uint8_t jmp = 0xEB;
-    for (size_t i = 0; i < sizeof JL2JMP / sizeof JL2JMP[0]; i++)
+    int njl = 0;
+    for (size_t i = 0; i < sizeof JL2JMP / sizeof JL2JMP[0]; i++) {
+        if (JL2JMP[i] == 0) continue;   /* sentinel/撤去枠は skip */
         wr(base + (JL2JMP[i] - IMAGE_BASE), &jmp, 1);
+        njl++;
+    }
 
+    int ndata = 0;
     for (size_t i = 0; i < sizeof DATA / sizeof DATA[0]; i++) {
+        if (DATA[i].size == 0) continue;   /* sentinel/撤去枠は skip */
         uintptr_t a = base + (DATA[i].va - IMAGE_BASE);
         if (DATA[i].size == 1) { uint8_t v = (uint8_t)DATA[i].val; wr(a, &v, 1); }
         else if (DATA[i].size == 2) { uint16_t v = (uint16_t)DATA[i].val; wr(a, &v, 2); }
         else { uint32_t v = DATA[i].val; wr(a, &v, 4); }
+        ndata++;
     }
 
     /* app/no_selfshutdown.js: 0x6C3F20 が je(0x74) のときだけ jmp(0xEB) 化 */
@@ -142,8 +163,7 @@ void patches_apply(HostServices *h) {
         }
     }
 
-    int total = (int)(sizeof CODE / sizeof CODE[0]) + (int)(sizeof JL2JMP / sizeof JL2JMP[0])
-              + (int)(sizeof DATA / sizeof DATA[0]) + 2;
+    int total = (int)(sizeof CODE / sizeof CODE[0]) + njl + ndata + 2;
     wsprintfA(msg, "{\"ev\":\"patches.applied\",\"count\":%d,\"base\":\"%p\"}", total, (void *)base);
     if (h && h->log) h->log("info", msg);
 }

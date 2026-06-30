@@ -1,22 +1,29 @@
 # STATUS — 現在地と次の一手
 
-## フェーズ: ★パッチ監査（presence 詐称の冗長化）— device emu 完成で 25→23 — 2026-06-30
+## フェーズ: ★★パッチ全数監査完了 — 25→8（不要 17 個撤去, 差分ライブテスト実証）— 2026-06-30
 
-**鉄則「パッチ原則ゼロ」の前進**: touch/card が「presence 詐称のみ」→「実 serial protocol emu」へ昇格した結果、
-presence 詐称 2 パッチが冗長化したと**Ghidra ＋ 差分ライブテスト（スクショ実証）**で確定し撤去。`patches.applied 25→23`。
-- **撤去① `0x4F6310`** IC Card ready(`cardrw_ready_bit1`=card_flags>>1&1): boot state2(`amlib_init_sm` 0x89a010)が
-  `!=0` を無期限ポーリング。card.c の実 handshake が card_flags bit1 を立てるので詐称不要。
-  実走: **"CHECKING IC CARD R/W … OK"→attract 到達**(5101 不在)。
-- **撤去② `0x8B3B00`** Touch status(`touchpanel_status`=ctx+0x18): handshake 完走で game 自身が `FUN_008b2ad0`
-  default case で `ctx+0x18=1`("touch panel ok.")を立てる。boot state3 が `!=0` を無期限ポーリング＝詐称不要。
-  実走: **"CHECKING TOUCH PANEL … OK"→attract 到達**(5501 不在)。
-- **保持判定 `0x6F0B80`** USB I/O board errCode(951): `usbio_board_count`(0x16b88dc)は vtable USB 列挙(`FUN_0067cbe0`)
-  で検出＝**COM4 JVS emu と別経路**ゆえ standalone で count=0。撤去すると boot が **Error 0910(Wrong Resolution Setting)で停滞**
-  し attract 不達（実証）。シリアルエミュで冗長化しない read-fake＝**保持**。
-- **検証手法**: `loader.exe start --wait`＋プロセス内蔵 GL キャプチャ(`capture.req`→`capture.png`)で SYSTEM STARTUP の
-  device チェック行と最終 attract を直接確認。ログ event(mmgp.diag 等)は boot 進行を正確に表さず誤判定の罠＝**スクショが正**。
-- 監査の網羅: 残り 20 パッチ（billing/dongle/network/region/storage/no_selfshutdown/COM4 名/`0x457AF0` action-block）は
-  対応サブシステムのエミュ未完 or action-block ゆえ非冗長（`facts/workflow.md`「read-fake と action-block の区別」）。
+**鉄則「パッチ原則ゼロ」の大幅前進**: 全パッチを**スクショ ground truth の差分ライブテスト**で1つずつ検証し、
+冗長なものを撤去。`patches.applied 25→8`。撤去判定は「撤去→SYSTEM STARTUP 全 device OK→attract 安定到達（対応 Error 画面不在）」。
+
+**撤去した不要パッチ（計 17 個）**:
+- **presence 詐称 2**: `0x4F6310`(IC Card ready=card_flags>>1&1)/`0x8B3B00`(Touch status=ctx+0x18)。
+  card.c/touch.c の実 handshake が game 自身に presence flag を立てさせる（"CHECKING … OK" 自然通過）。boot は `!=0` を無期限ポーリング。
+- **region 9**（CODE 6 `0x986A66/74/92`+`0x459109`+`0x45A846`+`0x6FF980`, DATA 3 region=JAPAN）: keychip PCP サーバが
+  keychip ハンドシェイクで region 供給→region チェック自然通過。30s サンプリングで region Error 画面(0x381/0x387/0x38D)一度も出ず。
+- **network 2**（`0x6FF1B3` LAN flag/`0x72DCE0` device_status）: keychip サーバ＋`network_auth_force_ready` が供給。8005/8001 不在。
+- **storage 2**（`0x72B3A0` extend_image/`0x4FDA50` is-DVD-boot）: extend NG は元から非ブロッキング、disk boot で素の判定通過。913 不在。
+- **billing 2**（`0xA065C0`/`0x701280`）: boot→attract に billing ready 詐称不要。
+
+**保持した必須パッチ（計 8 個）— いずれも撤去テストで attract 不達/ハングを実証**:
+- `0x6F0B80` USB I/O board(951): 撤去→**Error 0910 停滞**。`usbio_board_count` は vtable USB 列挙で別経路、count=0。
+- dongle batch `0x975E00`+JL2JMP×3: 撤去→**host.ready 直後ハング**（amdongle outerSM が最初期に走る、一体で必須）。
+- `0x457AF0` action-block(delete_directory_recursive, DO NOT REMOVE)/`no_selfshutdown`(0x6C3F20)/COM4 名パッチ(config)。
+
+**検証手法**: `loader.exe start --wait`＋プロセス内蔵 GL キャプチャ(`capture.req`→`capture.png`)。**ログ event(mmgp.diag 等)は
+boot 進行を正確に表さず誤判定の罠＝スクショが正**（最終 attract=BORDER BREAK SCRAMBLE タイトル, SYSTEM STARTUP 全 OK で確認）。
+patches.c は空配列耐性(size0 sentinel)を追加し DATA/JL2JMP 全撤去でもビルド可に。
+**注意（リスク非対称）**: region/billing は本来 network 対戦/credit プレイを gate＝**boot→attract では冗長と実証**だが、P5 network play 実装段階で
+keychip/network エミュが供給するか要確認。再発時は patches.c の各注記どおり復活。
 
 ---
 
