@@ -55,10 +55,16 @@ static const CodePatch CODE[] = {
        (FUN_008b2ad0 default case→"touch panel ok.")。boot state3 は touchpanel_status()!=0 を無期限ポーリング＝詐称不要。
        差分ライブテスト: 撤去→"CHECKING TOUCH PANEL … OK"→attract 到達(5501 不在)。再発(5501)時は復活させる。 */
     /* {0x8B3B00, RET1, 6, "Touch Panel status->1 (Error 5501)"}, */
-    /* 0x6F0B80 は保持（撤去不可・2026-06-30 ライブ実証）: USB I/O board(usbio_board_count 0x16b88dc)は vtable USB 列挙
-       (FUN_0067cbe0)で検出され COM4 JVS emu(amJvst)とは別経路ゆえ standalone で count=0 のまま。撤去すると boot が
-       Error 0910(Wrong Resolution Setting)で停滞し attract に到達しない（差分ライブテストで確認, 951 連鎖が解像度初期化を阻害）。 */
-    {0x6F0B80, P_zero1, 1, "USB I/O board errCode imm 0F->00 (Error 951). 撤去不可(0910 停滞)。"},
+    /* 0x6F0B80 撤去（2026-06-30, 実 SysMouse 供給で純正化・ライブ実証）: usbio_board_count(0x16b88dc) は
+       dinput_create_device(0x67CBE0)が **CreateDevice(GUID_SysMouse)+SetDataFormat(c_dfDIMouse2)+
+       SetCooperativeLevel(hwnd@0x1696e0c)** 成功時に +1 する DirectInput マウスの検出数。device2 の正体は
+       特定 I/O 基板ではなく **OS のシステムマウス**だった。dinput.diag(api.c) のライブ計装で、開発 PC の実マウス＋
+       WGL ウィンドウ(hwnd==FindWindow"WGL")で **count=1・mouse 非null・hwnd 有効** を確認 → 素の usbio_errCode_mapper
+       が default(errCode 0xf=951)経路に入らず、byte patch 無しで 951 が出ない。touch/card と同じ「詐称→純正供給」格上げ。
+       旧「撤去すると 0910 停滞」は **マウス不在環境**での旧実測（count=0 前提）。fallback: 真のヘッドレス/マウス無し
+       環境では count=0 で 951 再発しうる → その場合は本エントリ復活ではなく「ウィンドウ＋システムマウスの供給」で解く。
+       詳細 facts/devices.md・amjvs.md。 */
+    /* {0x6F0B80, P_zero1, 1, "USB I/O board errCode imm 0F->00 (Error 951)"}, — 実 SysMouse で純正化済（撤去） */
     /* dipsw byte2->3 / byte3->0x20(board index 2) は撤去: dipsw ctx を api.c dipsw_force_ready が provisioning し、
        read fn の mxsmbus IOCTL(0x9c402004,cmd5) を mxdev_ioctl が応答(index0=0x20)。素の amDipswRead が board index 2
        を算出するため byte patch 不要。詳細 facts/devices.md。再発(errCode 0xa/0xb)時は復活させる。 */

@@ -148,8 +148,16 @@ credit_handler が差分してクレジット換算する（node+0x648 はアナ
 | 0x67B620 | switch_decoder | node+0x642..+0x646 を読み論理ボタン mask へ（sys bit7→TEST=2, +0x643 bit7→START=1, bit6→SERVICE=4 …） |
 | 0x67B6E0 | input_snapshot | FUN_0067b620 で switch、node+0x648.. で analog 8ch を読み `(v-0x8000)*scale`（中心0x8000）で構造体化 |
 | 0x67B860 | input_poll | input_snapshot の呼出元 |
-| 0x679DF0 | usbio_jvs_io_update | input_poll を呼ぶ。root-scene(0x6C3F46) から毎フレーム |
+| 0x679DE0 | input_update_merge_dinput_jvs | (旧 usbio_jvs_io_update) root-scene(0x6C3F46) から毎フレーム。**DirectInput と JVS を OR 合成**。①dinput_read_joysticks ②dinput_read_device2 ③input_poll(COM4) を呼び、出力バンク(DAT_016b7344/74e4/7414/75b4/7684)へ。次に root-scene が input_process_to_gamestate を呼ぶ。末尾が **951 発生源**(usbio_board_count<1→usbio_io_status=-0x70) |
+| 0x89B230 | input_process_to_gamestate | root-scene(0x6C3F4B) から毎フレーム。出力バンク→ゲーム入力状態 DAT_0227xxxx（エッジ/ホールドカウンタ FUN_0089b730/b930, アナログ clamp）。gameplay が読む正準入力の終端 |
 | 0x8A04B0 | input_test_display | テストメニュー INPUT TEST 画面。JVS 入力の正準リスト。各項目のソース global は下表 |
+
+#### DirectInput 入力系（"usbio" は誤称＝実体は DirectInput8 game controller）[S・2026-06-30 確定]
+- **3 本目の入力経路**: ①COM4 シリアル JVS(amJvst) ②そのノードを読む input_poll ③**DirectInput8 ゲームコントローラ**。③が "USB Device(951)" 検査の対象で、JVS(FTDI VCP=COM4)とは**別デバイスクラス**。
+- `dinput_ctx`(0x16f3a4c)=IDirectInput8。`dinput_enum_gamectrl`(0x67C580) が EnumDevices(devType=4=DI8DEVCLASS_GAMECTRL, ATTACHEDONLY)、`dinput_create_device`(0x67CBE0) が CreateDevice+SetDataFormat(+0x2c)+SetCooperativeLevel(+0x34,hwnd@0x1696e0c)+Acquire(+0x1c) し `usbio_board_count++`。
+- `dinput_read_joysticks`(0x67C5F0): device[0],[1] を Poll(+0x64)→GetDeviceState(0x110=**DIJOYSTATE2**,+0x24)。rgbButtons&0x80→ボタン、lX/lY/lZ/lRz(中心0x8000,デッドゾーン0x1000,0x7fff正規化)→アナログ、POV hat(0/4500/9000/13500/18000/22500/27000/31500 centideg)→方向ビット → `dinput_player_bank`(0x16b8808, stride 0x4c, P1/P2)。**= BORDER BREAK ツインスティック主操作系（確証済み: gameplay まで到達）**。
+- `dinput_read_device2`(0x67CC90): device[2]→GetDeviceState(0x14)→`dinput_pad2_state`(0x16b88a0, ボタン bit 0x200/0x400/0x800/0x1000+アナログX/Y+float)。
+- vtable offset 一致表は IDirectInputDevice8: +0x08=Release +0x1c=Acquire +0x20=Unacquire +0x24=GetDeviceState +0x2c=SetDataFormat +0x34=SetCooperativeLevel +0x64=Poll。
 
 ### INPUT TEST 項目 → ソース global → node（実機計測で確定）[F]
 

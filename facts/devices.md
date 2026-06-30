@@ -20,15 +20,20 @@ boot 後に居座る「Error NNNN」は**ゲームアプリのエラーシーン
 `0xbd0374` IC Card R/W / `0xbd038c` Touch Panel / `0xbd03a4` USB Device / `0xbd041c` Keychip /
 `0xbd0464` Game Program on Storage / `0xbd0518` Sound Function / `0xbd0534` Graphic Function。
 
-### USB Device (951) = USB JVS I/Oボード の連鎖 [S]
-- `FUN_00679de0` 末尾: `DAT_016b88dc < 1`(I/Oボード未検出)→ `iVar2=-0x70(-112)` →
-  `if(1<DAT_016b6ffc && DAT_016b7000==0) DAT_016b7000=iVar2` / `if(DAT_016b8670!=0 && DAT_016b7000==0) DAT_016b7000=DAT_016b8670(jvs_error_state)`。
-- `FUN_006f0ad0`: `switch(DAT_016b7000)` default → `if(DAT_016b8b50!=8) DAT_016f5af0=0xf`。
-- **適用 patch**: `0x6F0B80`（`DAT_016f5af0=0xf` の imm `0F→00`。USB I/O board errCode 無効化＝Error 951 non-fatal）。
-  実装 `src/logic/patches.c`。
-- 回避: `DAT_016b88dc>=1`(+ `DAT_016b88e0<=1 && DAT_016b88e4==1`) かつ `DAT_016b8670==0`、または `DAT_016b8b50==8`。
-- **撤去不可・実証（2026-06-30, 差分ライブテスト）**: `usbio_board_count`(0x16b88dc)は `FUN_0067cbe0` の **vtable USB 列挙**(DAT_016f3a4c→open/+0x2c/+0x34)で検出され、**COM4 JVS emu(amJvst)とは別経路**。standalone では count=0 のまま。
-  `0x6F0B80` を撤去すると boot が **Error 0910(Wrong Resolution Setting)で停滞**し attract に到達しない（951 errCode 連鎖が後段の解像度初期化を阻害すると推定）。touch/card と異なり**シリアルエミュで冗長化しない read-fake**＝保持。
+### USB Device (951) = DirectInput SysMouse の連鎖 [S+L]
+> **訂正(2026-06-30, 二段)**: ①旧「USB JVS I/Oボード」は誤称。②951 ゲートの対象は **DirectInput の SysMouse**（`device2`, GUID_SysMouse `{6F1D2B60-...}`）。`usbio_board_count` を +1 するのは `dinput_create_device`(0x67CBE0) ＝**マウス作成**のみで、joystick 列挙(`dinput_enum_gamectrl`)は count に触らない。joystick(dev0/dev1)は別系統の主操作系（facts/amjvs.md「DirectInput 入力系」）。
+- `FUN_00679de0`(input_update_merge_dinput_jvs) 末尾: `usbio_board_count < 1`→ `iVar2=-0x70(-112)` →
+  `if(1<DAT_016b6ffc && usbio_io_status==0) usbio_io_status=iVar2` / `if(jvs_error_state!=0 && usbio_io_status==0) usbio_io_status=jvs_error_state`。
+- `usbio_errCode_mapper`(0x6F0AD0): `switch(usbio_io_status)` default → `if(amlib_subsystem_state!=8) amlib_master_errCode=0xf`(=951)。
+- **回避条件**: `usbio_board_count>=1`(+ `DAT_016b88e0<=1 && DAT_016b88e4==1`) かつ `jvs_error_state==0`、または `amlib_subsystem_state==8`。
+- **純正化済・撤去（2026-06-30, ライブ実証）**: device2 = OS の **システムマウス**。`dinput_create_device` が
+  `CreateDevice(GUID_SysMouse)+SetDataFormat(c_dfDIMouse2 @0xaf48ac)+SetCooperativeLevel(hwnd@0x1696e0c)` 成功で count++。
+  **dinput.diag(api.c) で実測: 実マウス＋WGL ウィンドウ下で `count=1`・`mouse`非null・`hwnd==FindWindow("WGL")`** →
+  素の usbio_errCode_mapper が 951 経路に入らない。**`0x6F0B80` byte patch を撤去しても restart 後 phase=ready・951 不在を確認**
+  （patches.applied count 21→20）。touch/card と同じ「詐称→純正供給」格上げ。
+- **fallback**: 真のヘッドレス/マウス無し or ウィンドウ未生成環境では count=0 で 951 再発しうる。その場合は
+  `0x6F0B80` 復活ではなく「前景ウィンドウ＋システムマウスの供給」で解く（OS 境界仮想化の原則）。
+- 旧「撤去不可・0910 停滞」は **マウス不在(count=0)前提**の旧実測で、本実証により覆った。
   `DAT_016014a3!=0` でも skip するが mxkeychip/dongle 派生(`FUN_00459220/459460`)なので force 非推奨。
 
 ### Dipsw / board index = board-table check (errCode 0xa / 0xb) [S+F]

@@ -734,10 +734,42 @@ static void touch_inject(LogicState *st) {
     st->touch_last_press = (uint8_t)press;
 }
 
+/* DirectInput / 951 診断: 起動時 dinput_create_device(0x67CBE0)が usbio_board_count を立てたか、
+ * どの段で失敗して count=0(=Error 951)になるかを観測する。目的 = 951 を byte patch(0x6F0B80)ではなく
+ * 実 SysMouse 供給で解消する前提調査（OS 境界仮想化・鉄則）。読み取り globals:
+ *   usbio_board_count(0x16b88dc): dinput_create_device 成功数。<1 で usbio_io_status=-0x70→errCode 0xf→951。
+ *   dinput_ctx(0x16f3a4c): IDirectInput8*（0 = DirectInput8Create 失敗）
+ *   dev0/dev1(0x16f3a50/54): EnumDevices(DI8DEVCLASS_GAMECTRL)で埋まる joystick（不在なら 0）
+ *   dinput_device2/mouse(0x16f3a58): CreateDevice(GUID_SysMouse)+SetDataFormat+SetCooperativeLevel 成功で非0
+ *   hwnd(0x1696e0c): SetCooperativeLevel に渡すゲームウィンドウ HWND（0 = 未作成→SetCoopLevel が E_HANDLE で失敗）
+ * 切り分け: ctx!=0 && mouse==0 && hwnd==0 → ウィンドウ未生成が原因。ctx!=0 && mouse==0 && hwnd!=0 → CreateDevice/環境。
+ *          ctx==0 → DirectInput8Create 自体が失敗。 */
+static void dinput_diag(LogicState *st) {
+    static int last_count = -1, last_state = -1; static unsigned n;
+    uintptr_t b = (uintptr_t)GetModuleHandleW(NULL);
+    int   count = *(int   *)(b + (0x16B88DCu - 0x400000u));
+    void *ctx   = *(void **)(b + (0x16F3A4Cu - 0x400000u));
+    void *dev0  = *(void **)(b + (0x16F3A50u - 0x400000u));
+    void *dev1  = *(void **)(b + (0x16F3A54u - 0x400000u));
+    void *dev2  = *(void **)(b + (0x16F3A58u - 0x400000u));
+    void *hwnd  = *(void **)(b + (0x1696E0Cu - 0x400000u));
+    HWND  wgl   = FindWindowW(NULL, L"WGL");
+    int   state = (ctx?1:0) | (dev0?2:0) | (dev1?4:0) | (dev2?8:0) | (hwnd?16:0);
+    if (count != last_count || state != last_state || (n++ % 240) == 0) {
+        char m[280];
+        wsprintfA(m, "{\"ev\":\"dinput.diag\",\"count\":%d,\"ctx\":\"%p\",\"dev0\":\"%p\",\"dev1\":\"%p\","
+                     "\"mouse\":\"%p\",\"hwnd\":\"%p\",\"wgl\":\"%p\"}",
+                  count, ctx, dev0, dev1, dev2, hwnd, wgl);
+        if (st->host && st->host->log) st->host->log("info", m);
+        last_count = count; last_state = state;
+    }
+}
+
 static void on_jvs_tick(LogicState *st) {
     const NrsConfig *cfg = st->host ? st->host->cfg : 0;
     NrsInput in; nrs_poll_input(&in, cfg ? cfg->bind : 0);
 
+    dinput_diag(st);          /* DirectInput/951 状態観測（実 SysMouse 供給で 951 純正解消する前提調査）*/
     eeprom_force_ready(st);   /* EEPROM 未 provisioning なら provisioning（amBackup -3 洪水の解消）*/
     dipsw_force_ready(st);    /* dipsw ctx 未 provisioning なら provisioning（board index errCode 0xa/0xb の解消）*/
     network_auth_force_ready(st); /* ALL.Net alAbEx auth 成功詐称（attract→card-auth 開通の試験）*/

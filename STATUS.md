@@ -1,5 +1,20 @@
 # STATUS — 現在地と次の一手
 
+## フェーズ: ★951(USB Device)を実 SysMouse で純正化 — `0x6F0B80` 撤去（patches.applied 21→20）— 2026-06-30
+
+**Error 951 ＝「USB Device」セルフテスト = 実体は DirectInput の SysMouse**（`device2`, GUID_SysMouse）だったと判明。
+`usbio_board_count`(0x16b88dc) を +1 するのは `dinput_create_device`(0x67CBE0)＝CreateDevice(GUID_SysMouse)+SetDataFormat(c_dfDIMouse2)+
+SetCooperativeLevel(hwnd@0x1696e0c) の成功で、joystick 列挙は count に触らない。
+- **ライブ実証（dinput.diag, api.c 計装）**: 開発 PC の実マウス＋WGL ウィンドウ下で `count=1 / mouse 非null / hwnd==FindWindow("WGL")`。
+  ＝素の `usbio_errCode_mapper`(0x6F0AD0) が 951 経路に入らない。
+- **`0x6F0B80` byte patch を撤去 → restart 後 phase=ready・951/0910 不在・errors=1(既存 app-data のみ)を確認**（patches.applied 21→20）。
+  touch/card と同じ「詐称→純正供給」格上げ。詳細 facts/devices.md「USB Device (951)」・facts/amjvs.md「DirectInput 入力系」。
+- **fallback**: 真のヘッドレス/マウス無し環境では count=0 で 951 再発しうる → `0x6F0B80` 復活ではなく「前景ウィンドウ＋システムマウス供給」で解く。
+- 旧 facts「撤去不可・0910 停滞」は **マウス不在(count=0)前提の旧実測**で、本実証により覆した（訂正済）。
+- `dinput_diag`(api.c) は fallback 検知の canary として残置（count=0 が出れば 951 回帰の原因が即判る）。
+
+---
+
 ## フェーズ: ★billing パッチ統合 — 23→22（status 5→8 で 0x701280 撤去）— 2026-06-30
 
 **`patches.applied 23→22`**。billing の2パッチを1つに統合（A 統合）。差分ライブ実証済（SYSTEM_STARTUP 完走=scene 稼働, billing/state7 エラー無し）。
