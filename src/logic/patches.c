@@ -37,7 +37,14 @@ static const CodePatch CODE[] = {
        配線する際は status 8↔5 を再評価（executor の早期 return 挙動が変わる）。 */
     {0xA065C0, P_billing, 6, "alpbExGetExecStatus->8 (billing ready, no accounting; retires 0x701280)"},
     /* amdongle/patch.js */
-    {0x975E00, RET0, 3, "amDongleBusy->0 (outerSM advances)"},
+    /* 0x975E00 amDongleBusy->0 撤去済（2026-07-01 差分ライブ実証, patches 17→16）: amInstall SM
+       (amDongle_top_level_init のブロッキング init)を keychip_server(keychip_proto.c)の 40102 amInstall 応答で
+       genuine 完走させる。RET0 は ctx[0xc](busy=pcpaRecvResponse 未完)を 0 詐称し outer/keychip SM を強制前進させる
+       assert だった。応答 query_slot_status=complete / query_application_status=inactive / query_appdata_status=error で
+       SM が case7(ctx[0xc]=0)まで進み busy が自然に 0。実証: errors=0・SYSTEM STARTUP 全行 OK・"ERROR." 不在・
+       appdata loop 不在・attract タイトル到達。実 install(request type 2)は boot 不発ゆえ 40103 不要。
+       回帰（boot hang at amDongle_top_level_init / Error 0903 amInstall* / check_appdata⇄query 無限ループ）時は本行を復活。
+       {0x975E00, RET0, 3, "amDongleBusy->0 (outerSM advances)"}, */
     {0x457AF0, RET8_0, 5, "delete_directory_recursive nop: blocks keychipSM_FSM case4 recursive dir delete on appdata mismatch. __thiscall(this,arg1,arg2)=callee-clean ゆえ ret 8 必須(関数の 0x457fd1=RET 0x8 / call site 0x4579F4 に add esp 無し)。bare ret はスタック破壊→発火時クラッシュ。(DO NOT REMOVE; facts/bugs.md, facts/amdongle.md)"},
     /* amjvs: forgery 撤去。native JVS 経路（COM4 = mxjvs.c エミュ）を実駆動する方針へ移行（facts/amjvs.md）。
        0x67AFA0(reinit ret)/0x987590(specCheck)/0x9883D3(acksw) と node BSS data write 群は撤去:
@@ -104,14 +111,21 @@ static const CodePatch CODE[] = {
 static const uint32_t JL2JMP[] = { 0x97588A, 0x97595F, 0x975A1F };
 
 typedef struct { uint32_t va; uint32_t val; int size; } DataWrite;
-static const DataWrite DATA[] = {
-    /* amjvs node BSS の forgery data write は撤去（native discovery が node を満たす）。 */
-    /* mxkeychip/region.js — region=JAPAN */
-    /* 0x16014C4(region_game_pcb/STATIC) は維持: anti-tamper FUN_0048f9c0 の region-index 整合用
-       （EEPROM STATIC seed が genuine 供給するが gate/anti-tamper が直読みするため温存。mxkeychip.md）。 */
-    /* 0x16014C4(region_game_pcb/STATIC) は維持: anti-tamper FUN_0048f9c0 の region-index 整合用
-       （EEPROM STATIC seed が genuine 供給するが gate/anti-tamper が直読みするため温存。mxkeychip.md）。 */
-    {0x16014C4, 1, 1},
+/* region DATA write は現在すべて撤去済（下記履歴）＝適用配列は空。
+   再追加時は `static const DataWrite DATA[] = { ... };` とその適用ループを復活させる
+   （空配列に sizeof を適用すると MSVC が ICE を起こすため、空のときは配列自体を置かない）。 */
+/* --- 撤去済 DATA write 履歴 ---
+    amjvs node BSS の forgery data write は撤去（native discovery が node を満たす）。
+    mxkeychip/region.js — region=JAPAN */
+    /* 0x16014C4(region_game_pcb/STATIC) 撤去済（2026-07-01 差分ライブ実証, patches 18→17）: EEPROM STATIC seed
+       （mxdevices.c eeprom_seed_static, m_Region@+0x0C=01）が genuine 供給するため bind 時 direct-write は
+       旧「直書き」の残置で冗長。bind write 自体 CrackProof アンパックで clobber される（workflow.md）ので実供給は seed が担う。
+       0x459109(master_init region NOP)/0x1601744/0x1601989 と同 cluster・同理屈で撤去済3件と bit 等価。
+       実証: 撤去後も `Region error (01,01,00,05)` の **第1 operand=01**（=region_game_pcb が seed から 01 維持）＝
+       direct-write 不在でも seed が供給する直接証拠。SYSTEM STARTUP "ERROR." 不在で attract タイトル到達・errCode カスケード無し。
+       anti-tamper FUN_0048f9c0 も region-index 整合を seed 値で満たす（fault 不在）。
+       回帰（0903/region error 第1 operand=00/anti-tamper）時は本行を復活。
+       {0x16014C4, 1, 1}, */
     /* 0x1601744(region_cached)/0x1601989(region_dongle) 撤去済（2026-06-30 差分ライブ実証, patches 20→18）:
        両者とも game 自身の writer が genuine 供給を持つ（実体確認）ため DATA write は冗長:
        - 0x1601989 ← FUN_00459220 の FUN_0096f160(&region_dongle) = keychip appboot.region PCP（keychip present 枝。
@@ -125,7 +139,6 @@ static const DataWrite DATA[] = {
        注入は CREATE_SUSPENDED ＝ patches_apply は entry 前に走るため、resume 後の
        amDebugInit(0x55C500: memset→logLevel=4/mask=0xff) に上書きされ lv5..7 が脱落する。
        → init 完了後に開放する必要があり host/dbglog.c が amDebugInit を hook して実施。 */
-};
 
 static void wr(uintptr_t addr, const void *src, int n) {
     DWORD old;
@@ -147,12 +160,7 @@ void patches_apply(HostServices *h) {
     for (size_t i = 0; i < sizeof JL2JMP / sizeof JL2JMP[0]; i++)
         wr(base + (JL2JMP[i] - IMAGE_BASE), &jmp, 1);
 
-    for (size_t i = 0; i < sizeof DATA / sizeof DATA[0]; i++) {
-        uintptr_t a = base + (DATA[i].va - IMAGE_BASE);
-        if (DATA[i].size == 1) { uint8_t v = (uint8_t)DATA[i].val; wr(a, &v, 1); }
-        else if (DATA[i].size == 2) { uint16_t v = (uint16_t)DATA[i].val; wr(a, &v, 2); }
-        else { uint32_t v = DATA[i].val; wr(a, &v, 4); }
-    }
+    /* DATA write は現在空（region direct-write を全撤去）＝適用ループ無し。再追加時は復活。 */
 
     /* app/no_selfshutdown.js: 0x6C3F20 が je(0x74) のときだけ jmp(0xEB) 化 */
     {
@@ -173,8 +181,8 @@ void patches_apply(HostServices *h) {
         }
     }
 
-    int total = (int)(sizeof CODE / sizeof CODE[0]) + (int)(sizeof JL2JMP / sizeof JL2JMP[0])
-              + (int)(sizeof DATA / sizeof DATA[0]) + 2;
+    /* DATA write は現在 0 件（region direct-write 全撤去）ゆえ total に含めない。 */
+    int total = (int)(sizeof CODE / sizeof CODE[0]) + (int)(sizeof JL2JMP / sizeof JL2JMP[0]) + 2;
     wsprintfA(msg, "{\"ev\":\"patches.applied\",\"count\":%d,\"base\":\"%p\"}", total, (void *)base);
     if (h && h->log) h->log("info", msg);
 }

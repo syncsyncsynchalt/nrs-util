@@ -1,5 +1,44 @@
 # STATUS — 現在地と次の一手
 
+## フェーズ: ★amDongleBusy(0x975E00)を amInstall エミュで純正化（patches 17→16）— 2026-07-01
+
+**残 read-fake の保留候補 `0x975E00 amDongleBusy` を genuine エミュ化して撤去**（`patches.applied 17→16`）。
+- **真因**: `amDongle_top_level_init`(0x457500) は **ブロッキング init**（`do{outerSM/keychipSM}while(!=done)`）で、両 SM が
+  `amDongleBusy`(=ctx[0xc]=pcpaRecvResponse 未完で busy)を待つ。keychip_server が **amInstall(port 40102)の query に正式応答して
+  いなかった**ため SM が完走せず busy のまま＝RET0 が busy を 0 詐称して強制前進させていた（旧 facts「recv-completion gap assert」の正体）。
+- **修正（host・静的パッチ追加ゼロ）**: `keychip_proto.c` に amInstall 応答を実装＝`response=<verb>&result=success&status=<S>`
+  （FUN_00977d50 が "response" を verb 照合、FUN_009765d0 が result==success 要求）。steer 先（実体確定）:
+  query_slot_status=**complete** / query_application_status=**inactive** / query_appdata_status・check_appdata=**error**。
+  - appdata=**error(-1)** は 3 consumer の唯一の交差解: keychipSM case3 query が gameid 不要で成功・case4 が format 回避で state7-done・
+    appdata task(FUN_00977230)が terminate（0/1/2 は check_appdata⇄query 無限ループ、3/4/5 は format/gameid 一致要求）。詳細 `facts/amdongle.md §amInstall`。
+- **実 install(request type 2)は boot 不発ゆえ 40103(未 serve)不要**＝「40103 依存」懸念は誤りと確定。
+- **差分ライブ実証**: RET0 撤去後 `errors=0`・SYSTEM STARTUP 全行 OK（EXTEND IMAGE NG は標準筐体で正常）・**"ERROR." 不在**・
+  appdata loop 不在（40102 traffic 有界: query 各1-2回）・**attract タイトル「画面をタッチしてください」(FREE PLAY)** へクリーン到達。baseline の
+  amHmInit/Region error(01,01,00,05) のみ。一時計装(pcp.io ログ)は撤去済。
+- **残 16 パッチ**: 撤去困難9（keychip-serial region NOP 6・action-block 2・billing no-OFF 1）／network/region cluster 4
+  （`FUN_006ff900` ALL.Net region で束撤去＝Phase B2）／infra 1（COM4）／is-DVD 1（多重 global 脱結合・撤去不可）。
+  read-fake の安い勝ちは取り切った＝次の削減は network/region 層の大仕事。
+
+---
+
+## フェーズ: ★read-fake 再監査 — region DATA-write 0x16014C4 撤去（patches 18→17）— 2026-07-01
+
+**残 read-fake 4個を Ghidra 実体＋差分ライブで再監査し、`0x16014C4`(region_game_pcb DATA write)を撤去**（`patches.applied 18→17`）。
+- **撤去（0x16014C4）**: EEPROM STATIC seed（`mxdevices.c eeprom_seed_static`, m_Region@+0x0C=01）が genuine 供給するため
+  bind 時 direct-write は旧「直書き」の残置で冗長。bind write は CrackProof clobber されるので実供給は seed が担う。
+  **差分ライブ実証**: 撤去後も `Region error (01,01,00,05)` の**第1 operand=01**（region_game_pcb が seed 由来で 01 維持）＝
+  direct-write 不在でも genuine 供給される直接証拠。SYSTEM STARTUP "ERROR." 不在で **attract タイトル「画面をタッチしてください」(FREE PLAY)** に
+  クリーン到達・errCode カスケード無し（errors=1 は既知良性 app-data。amHmInit failed も baseline）。詳細 `facts/mxkeychip.md`。
+- **保持確定（0x4FDA50 is-DVD）**: SYSTEM STARTUP state5 で `FUN_004fda50()`(=`DAT_01696ad8==1||==2`)が true→`+0x1c=0xc`→
+  errCode 0xc latch→error state9。`DAT_01696ad8=1`(SERVER ロール兼用 global)ゆえ素では true＝関数 RET0 は多重定義 global の
+  脱結合で**撤去不可**（0 を書くと SERVER→SATELLITE 表示破壊。workflow.md）。
+- **保留（中〜高リスク, 別タスク）**: `0x975E00 amDongleBusy`＝amInstallInit(40102/**40103 未 serve**)の install SM 完走に依存。
+  `0x72B3A0 extend_image`＝state5 case3 で install 状態が complete に達しないと boot hang の恐れ。撤去には serve 拡張/state 解析が要る。
+- **残 17 パッチの構造**: 撤去困難9（keychip-serial region NOP 6・action-block 2・billing no-OFF 1）／network/region cluster 4
+  （`FUN_006ff900` ALL.Net region 供給で束撤去＝Phase B2 同層）／保留2（amDongleBusy/extend_image）／infra 1（COM4 文字列）／is-DVD 1。
+
+---
+
 ## フェーズ: ★★★0951 を keychip PCP 応答で解消 → SYSTEM STARTUP COMPLETE → GP購入画面到達 — 2026-07-01
 
 **951 の genuine 修正に成功し、boot 全 errCode カスケード解消＝attract を越え「ゲームポイント(GP)の購入」画面まで到達**（従来の attract 停滞を突破）。

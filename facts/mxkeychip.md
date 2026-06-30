@@ -102,7 +102,7 @@ root-cause 静的化で代替＝`port_status.md`）:
 - **静的 patch（patches.c で適用）**: 0x986A66/0x986A74/0x986A92（keychip txn 成否ゲートを NOP6。下記訂正）、
   0x97588A/0x97595F/0x975A1F（isrelease SM の error-display 分岐 jl→jmp）、0x459109/0x45A846（上表 errCode=4 ストア NOP10）。
 - **旧 hook（native 不要）**: 0x458FD0/0x45A7F0（amlib region check 2関数）、0x98A5F0（error-display 診断）。
-- **data-write**: 0x16014C4 のみ（**0x1601744/0x1601989 は撤去済 2026-06-30, patches 20→18**。下記）。
+- **data-write**: **全撤去**（0x1601744/0x1601989 は 2026-06-30 patches 20→18、**0x16014C4 は 2026-07-01 patches 18→17**。下記）。
 
 **[L] 2026-06-30 撤去（DATA write 0x1601744/0x1601989）**: 両 global は game 自身の writer が稼働中エミュから genuine 供給を
 受けるため DATA write は冗長と実体確認し、差分ライブ実証（patches=20 と 18 でログ error 3件・画面とも完全一致）後に撤去:
@@ -112,8 +112,13 @@ root-cause 静的化で代替＝`port_status.md`）:
 - `0x1601744`(region_cached) ← `FUN_0045acc0` の `DAT_01601744 = DAT_016014c4`（region_game_pcb/STATIC seed=01 のコピー、
   `amlib_eeprom_ok` 成立時に HISTORY area4 へ書く）。HISTORY は seed しないが STATIC 由来でコピーされるため genuine。
 
-`DAT_016014c4=01`(PcbRegion/STATIC) の data-write は anti-tamper `FUN_0048f9c0` の region-index 整合（01→0=JAPAN,
-他→3）＋gate/anti-tamper 直読みのため**維持**（errCode 抑止用ではない）。実装 `src/logic/patches.c`。比較は純正 `system\mxkeychip.exe` を正に、micetools / TeknoParrot は補助（`ref.md` 階層）。
+**[L] 2026-07-01 撤去（DATA write 0x16014C4 / region_game_pcb・STATIC, patches 18→17）**: bind 時 direct-write は EEPROM
+STATIC seed（`mxdevices.c eeprom_seed_static`, m_Region@+0x0C=01）に置換された旧「直書き」の残置で冗長と確定。bind write
+自体 CrackProof アンパックで clobber されるため実供給は seed が担う。差分ライブ実証: 撤去後も `Region error (01,01,00,05)` の
+**第1 operand=01**（=region_game_pcb が seed 由来で 01 維持）＝direct-write 不在でも genuine 供給される直接証拠。
+SYSTEM STARTUP "ERROR." 不在で attract タイトル到達・errCode カスケード無し。anti-tamper `FUN_0048f9c0` の region-index 整合
+（01→0=JAPAN, 他→3）も seed 値で満たされ fault 不在。回帰（0903/第1 operand=00/anti-tamper）時は patches.c の本行を復活。
+比較は純正 `system\mxkeychip.exe` を正に、micetools / TeknoParrot は補助（`ref.md` 階層）。
 
 **訂正 [S]**: 0x986A66/74/92 は「region の局所バイト比較」ではなく **keychip トランザクションの成否ゲート**だった。
 実体は keychip コマンド 0xd9f0 を構築(0x987CA0)→ JVS フレーム符号化(`jvsp_frame_encode` 0x988810: チェックサム＋0xe0/0xd0 エスケープ)→

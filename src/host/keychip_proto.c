@@ -85,9 +85,27 @@ const char *kc_respond(const char *line, char *buf, int cap) {
     }
     if (starts(line, "request=")) {
         find_val(line, "request", v, sizeof v);
-        if (!strcmp(v, "query_application_status") || !strcmp(v, "query_slot_status") ||
-            !strcmp(v, "query_appdata_status")) return "status=0";
-        if (!strcmp(v, "check_appdata")) return "code=0";
+        /* amInstall（port 40102, amDongle/amInstall SM）応答。FUN_00977d50 が "response" キーを req 名と
+           照合し、FUN_009765d0 が "result"=="success" を要求。旧 "status=0"/"code=0" は形式不一致で SM が
+           完走せず ctx[0xc] が busy のまま → amDongleBusy(0x975E00) RET0 patch が必要だった。正式形式で genuine
+           完走させ、ブロッキング init amDongle_top_level_init(do{outerSM/keychipSM}while != done)を抜ける（RET0 撤去）。
+           steer 先（実体確定。各 status→数値は FUN_009767f0/FUN_00976aa0/FUN_00977050 の strcmp 表）:
+           - query_slot_status   → complete : スロット既インストール(FUN_009767f0: complete→3)。install(req type 2)不発で 40103 不使用。
+           - query_application_status → inactive : アプリ未起動(FUN_00976aa0: inactive→0)。
+           - query_appdata_status/check_appdata → error : appdata status の唯一の整合解。3 consumer の交差:
+             (a) keychipSM case3 の query(ctx+8=0xe, FUN_00977d50)は status∈{0,1,2,3,-1}で gameid 不要に成功（4/5 は
+                 gameid フィールド必須＝無いと "Failed to get appdata status"）、(b) keychipSM case4 は -1 で format 回避し
+                 state7-done（3=needed と 4/5 は format/削除を誘発。-1 は gameid 一致非依存）、(c) appdata task(ctx+8=0xf,
+                 FUN_00977230)は param∉{0,1,2}で terminate（0/1/2 は execute=1 で check_appdata⇄query を無限ループ）。
+                 → error(-1, FUN_00977050: error→-1)のみが (a)∩(b)∩(c) を満たす。実証: errors=0・loop 無し・attract 到達。 */
+        if (!strcmp(v, "query_slot_status"))
+            return "response=query_slot_status&result=success&status=complete";
+        if (!strcmp(v, "query_application_status"))
+            return "response=query_application_status&result=success&status=inactive";
+        if (!strcmp(v, "query_appdata_status"))
+            return "response=query_appdata_status&result=success&status=error";
+        if (!strcmp(v, "check_appdata"))
+            return "response=check_appdata&result=success&status=error";
         if (!strcmp(v, "query_dhcp_status"))
             return "response=query_dhcp_status&result=0&dhcp_status=3&ip_address=" NET_IP
                    "&subnetmask=" NET_MASK "&gateway=" NET_GW;
