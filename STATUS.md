@@ -1,5 +1,23 @@
 # STATUS — 現在地と次の一手
 
+## フェーズ: ★EXTEND IMAGE を image-present gate で純正 OK 化＋P_extimg 撤去（patches 16→15）— 2026-07-01
+
+**state5「CHECKING EXTEND IMAGE」を実筐体「イメージ導入済み」境界供給で純正 OK 表示にし、静的パッチ `P_extimg`(0x72B3A0)を撤去**（`patches.applied 16→15`）。
+- **真因（Ghidra 実体）**: extend-image install の実体は **ALL.Net 配信タスク**（`NetworkTask_ctor` 0x72b490、install_ctx=`devMgr+0x258`=`field[0x96]`）。
+  getter `extend_image_install_status`(0x72b3a0)の state→status マップ消費を boot SM(0x89a4eb)が解す: install 経由で attract に抜ける唯一路は
+  **state 0xc=Install Error + error0（"NG"表示のまま前進）**＝旧 `P_extimg`/初回 gamehook と同挙動（STATUS の「EXTEND IMAGE NG は正常」の正体）。**"OK" 純正路は substate1 の
+  image-present gate `DAT_01601b23`≠0 skip 枝のみ**（`keychip_appdata_delete_gate_probe` 0x45a8f0 がファイル存在＋検証で立てる本物の gate。"delete" 名は誤導で実体は image-present）。
+- **修正（host gamehook・静的パッチ撤去）**: 
+  - **primary**: gamehook `d_extimg_gate_probe` が `keychip_appdata_delete_gate_probe`(0x45A8F0, amlib_master_init から call＝SM より前)を **POST** し `DAT_01601b23=1` を force
+    → state5 substate1 が "CHECKING EXTEND IMAGE … **OK**"→state6（INSTALLING 行を出さず install 完全 skip）＝TP の extend-image 提供と等価。
+  - **fallback（多層防御）**: `d_ext_install_kick`（`extend_image_install_begin` 0x72eaf0 POST）が install_ctx に state=0xc/error0 を provision（万一 gate 経路を通らず install 試行に入っても "NG"だが前進＝旧 P_extimg 相当）。
+- **★ライブ実証（スクショ確認）**: SYSTEM STARTUP **全行 OK**（IC CARD/TOUCH/NETWORK/**EXTEND IMAGE OK**/ALL.NET AUTH/UPLOAD/GAME SERVER/LOCAL GAME SERVER）・
+  **"NG"/"INSTALLING EXTEND IMAGE" 行ゼロ**・errors=0・patches=15・P-ras 初期化→attract タイトル到達。gate=1 は state1 case1 で extended リソース再ロード(`FUN_007416e0` 列)を誘発するが boot 健全（image-present 時の genuine 挙動）。
+- 回帰時は gamehook 2 本撤去＋`patches.c` の P_extimg 復活で即フォールバック。真の install SM 完走（実配信）は ALL.Net 層エミュ＝Phase B2 前提（network status も現状 `0x6FF1B3`/`0x72DCE0` で詐称中）。
+- **残 15 パッチ**: keychip-serial region NOP 6・action-block 2（delete_dir/no-selfshutdown）・billing 1・network/region cluster 4（`FUN_006ff900` 束撤去=Phase B2）／infra 1（COM4）／is-DVD 1（撤去不可）。
+
+---
+
 ## フェーズ: ★amDongleBusy(0x975E00)を amInstall エミュで純正化（patches 17→16）— 2026-07-01
 
 **残 read-fake の保留候補 `0x975E00 amDongleBusy` を genuine エミュ化して撤去**（`patches.applied 17→16`）。

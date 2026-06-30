@@ -19,7 +19,7 @@ static const uint8_t P_zero1[]     = {0x00};                                 /* 
 /* P_dipsw2/P_dipsw3 は撤去（dipsw は api.c dipsw_force_ready + mxdev_ioctl で OS 境界エミュ。下の CODE[] 注記参照）。 */
 static const uint8_t P_one1[]      = {0x01};                                 /* imm 1 */
 static const uint8_t P_ret2[]      = {0xB8,0x02,0x00,0x00,0x00,0xC3};        /* mov eax,2;ret */
-static const uint8_t P_extimg[]    = {0x31,0xC0,0x85,0xF6,0x74,0x02,0x89,0x06,0xB0,0x04,0xC3};
+/* P_extimg は撤去（host gamehook d_ext_install_kick が install_ctx を完了 provision。下の 0x72B3A0 注記参照）。 */
 static const uint8_t NOP6[]        = {0x90,0x90,0x90,0x90,0x90,0x90};
 static const uint8_t NOP10[]       = {0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90};
 /* amplatform/identity.js: platform getter を固定文字列で置換（mov eax,[esp+4]; mov byte[eax+i],c..; xor eax,eax; ret 4）*/
@@ -79,7 +79,14 @@ static const CodePatch CODE[] = {
     {0x6FF1B3, P_one1, 1, "LAN flag b50c 0->1 (Error 8005)"},
     {0x72DCE0, P_ret2, 6, "amlib_device_status_getter->2 (Error 8001)"},
     /* mxsegaboot/startup.js */
-    {0x72B3A0, P_extimg, 11, "extend_image_install_status (state7)"},
+    /* 0x72B3A0 extend_image_install_status->return4 撤去済（host gamehook 格上げ, patches 16→15）:
+       extend-image install の実体は ALL.Net 配信タスク(NetworkTask, install_ctx=devMgr+0x258)。本パッチは getter を
+       「常に return 4・*ESI=0」(=install SM が state 0xc 完了のフリ)に上書きしていた。host gamehook d_ext_install_kick
+       (FUN_0072eaf0=install kicker, boot SM state5 substate2 の唯一 caller を POST)が install_ctx に state=0xc/error(+0x284)=0 を
+       provisioning する＝getter 無改変で同 tick fall-through の substate3 が genuine に return 4・error 0 を読み state6 前進。
+       実筐体「イメージ導入済み」境界条件の供給（src/host/gamehook.c, facts/mxsegaboot.md）。
+       回帰（state5 EXTEND IMAGE NG / INSTALLING WAITING 固着）時は本行を復活。真の install SM 完走化は ALL.Net 層=Phase B2 前提。
+       {0x72B3A0, P_extimg, 11, "extend_image_install_status (state7)"}, */
     /* 0x701280 pras_billing_ready_check->al=1 は撤去（2026-06-30, A 統合）: 上の alpbExGetExecStatus->8 が
        alpbEx_billing_poll 経由で alpbEx_billing_ready=1 を game 自身に立てさせるため、ready!=0 で本 check が
        自然に通る。詐称不要。再発(state7 ハング)時は alpbExGetExecStatus が 8 を返せているか先に確認。 */

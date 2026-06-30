@@ -14,6 +14,8 @@ static long long (__stdcall *o_rtc_get)(void *tm, unsigned *flag);
 static int (__fastcall *o_eeprom_init)(unsigned ecx, unsigned edx, void *size_ptr);
 static int (*o_dipsw_init)(void);
 static void (*o_board_check)(void);
+static unsigned (*o_ext_install_kick)(void);
+static int      (*o_extimg_gate_probe)(void);
 
 /* jvs_update_main PRE: 入力を node BSS へ書いてから本体へ（旧 input.js）。 */
 static void __cdecl d_jvs_update(void) {
@@ -98,6 +100,45 @@ static void __cdecl d_board_check(void) {
     o_board_check();
 }
 
+/* keychip_appdata_delete_gate_probe(0x45A8F0, amlib_master_init から call＝SYSTEM STARTUP SM より前) POST:
+ * この probe は extend-image/appdata ファイルの存在(__stat64i32)＋検証(FUN_00969a00)で DAT_01601b23(image-present gate)を
+ * 1 にする本物の判定。standalone は extend-image ファイルが無く gate=0 のままで、state5 substate1 が
+ * "CHECKING EXTEND IMAGE … NG" を出し install 試行に入る（install getter 経由は state 0xc=Install Error しか前進路が
+ * 無く NG 表示）。実筐体「extend-image 導入済み」境界条件を供給＝gate=1 を force すると substate1 が skip 枝→"… OK"→
+ * state6（INSTALLING 行を出さず install を完全 skip）＝TP の extend-image 提供と等価の純正 OK。
+ * gate=1 は state1 case1 で extended リソース再ロード(FUN_007416e0 列)を誘発するが、これは image-present 時の genuine 挙動
+ * （FUN_007416e0 は bounds-check 付きで idx 不正は graceful return 0）。下の install kicker POST は多層防御の fallback
+ * （万一 gate 経路を通らず install 試行に入った場合に install_ctx を完了 provision＝最悪でも "NG"だが前進、旧 P_extimg 相当）。 */
+static int __cdecl d_extimg_gate_probe(void) {
+    int r = o_extimg_gate_probe();
+    *(unsigned char *)((uintptr_t)GetModuleHandleW(NULL) + (0x1601B23u - IMAGE_BASE)) = 1; /* image-present gate=1 */
+    return r;
+}
+
+/* extend-image install kicker (FUN_0072eaf0, boot SM SYSTEM_STARTUP state5 substate2) POST:
+ * orig は devMgr+0x26d/0x26e=1 を立て ALL.Net 経由の extend-image install を開始させる。だが extend-image install は
+ * 実体が ALL.Net 配信タスク(NetworkTask, install_ctx=devMgr+0x258=field[0x96])で、network 未エミュの standalone では
+ * install SM が state を進められず詰まる（旧静的パッチ P_extimg 0x72B3A0 が getter を return 4 詐称していた所以）。
+ * 実筐体で「イメージ導入済み」に当たる境界条件を供給＝install_ctx に state=0xc(完了)/error(+0x284)=0 を provisioning する。
+ * state5 substate2 は同 tick で substate3 に fall-through し（disasm: 0x89a4c8 kicker→0x89a4eb 0x72b3a0 読取）、その
+ * extend_image_install_status(0x72b3a0) が *param_2(devMgr+0x258)==0xc→return 4・*ESI(param_2[0xb]=devMgr+0x284)=0 を読む。
+ * boot SM は (return>3 && error==0) を成功と解し state6 へ genuine 前進＝getter 無改変のまま P_extimg を撤去できる
+ * （d_board_check / d_eeprom_init と同型の「詐称→純正供給」格上げ。host が境界で正データを供給）。
+ * FUN_0072eaf0 の xref は boot SM 一箇所のみ＝SYSTEM TEST 等の他経路に副作用なし。devMgr は amlib_device_manager_ptr
+ * (0x72b450, 副作用なしの getter)を呼んで取得（detour はゲームスレッド上で走る）。真の genuine 化（実 install SM 完走）は
+ * ALL.Net 層エミュ＝Phase B2 が前提。回帰（state5 で EXTEND IMAGE NG / INSTALLING WAITING 固着）時は P_extimg を復活。 */
+static unsigned __cdecl d_ext_install_kick(void) {
+    unsigned r = o_ext_install_kick();   /* orig: devMgr+0x26d/0x26e=1（install 開始トリガ）*/
+    unsigned (*devmgr_ptr)(void) = (unsigned (*)(void))
+        ((uintptr_t)GetModuleHandleW(NULL) + (0x72B450u - IMAGE_BASE));   /* amlib_device_manager_ptr */
+    uintptr_t dm = (uintptr_t)devmgr_ptr();
+    if (dm) {
+        *(unsigned *)(dm + 0x258) = 0xC;   /* install_ctx state = 0xc（完了→getter return 4）*/
+        *(unsigned *)(dm + 0x284) = 0;     /* install_ctx error(param_2[0xb]) = 0（errCode latch 回避）*/
+    }
+    return r;
+}
+
 /* dinput_create_device(0x67CBE0) PRE/POST: SysMouse(=USB I/O board proxy)取得を窓生成タイミングに非依存化する。
  * count++ は SetCooperativeLevel(DAT_01696e0c, FOREGROUND|NONEXCLUSIVE) 成功が条件だが、起動初期（board check 内
  * FUN_0067c510 経由）は WGL 窓未生成で hwnd=0 → SetCoopLevel が E_HANDLE 失敗 → usbio_board_count=0 のまま →
@@ -120,5 +161,7 @@ int gamehooks_install(void) {   /* MH_Initialize は hooks_install で実施済 
     e |= gh(0x985160, (void *)d_eeprom_init,(void **)&o_eeprom_init);
     e |= gh(0x9842A0, (void *)d_dipsw_init, (void **)&o_dipsw_init);   /* amDipswInit POST: dipsw ctx 早期 provisioning */
     e |= gh(0x679CB0, (void *)d_board_check,(void **)&o_board_check);  /* board check PRE: board index=2/flag 供給（errCode 0xa→errNo 910 解消）*/
+    e |= gh(0x45A8F0, (void *)d_extimg_gate_probe,(void **)&o_extimg_gate_probe); /* image-present gate POST: DAT_01601b23=1（EXTEND IMAGE→OK skip）*/
+    e |= gh(0x72EAF0, (void *)d_ext_install_kick,(void **)&o_ext_install_kick); /* extend-image install kicker POST: install_ctx 完了 provision（fallback／P_extimg 0x72B3A0 格上げ）*/
     return e;
 }
