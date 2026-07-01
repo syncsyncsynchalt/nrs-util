@@ -46,6 +46,12 @@ struct LogicState {
     unsigned   card_ctl_gen;         /* 最後に適用した gen（同一秒書込でも変化検知）*/
     wchar_t    card_img_path[MAX_PATH]; /* アクティブ card.bin パス（dirty 保存先）*/
     int        card_force_logged;    /* card.force_present 初回ログフラグ */
+    /* --- headless タッチ注入（nrsedge.touch.json, テスト自動化用）--- */
+    int        touch_ctl_seen;       /* 制御ファイルを一度読めたか */
+    FILETIME   touch_ctl_mtime;      /* 最後に適用した last-write time */
+    int        touch_force;          /* 1=注入有効（マウス sampling を置換）*/
+    uint8_t    touch_force_press;    /* 注入押下 */
+    uint16_t   touch_force_x, touch_force_y;  /* 注入座標（0..TOUCH_MAX 生値）*/
     /* TODO(P2+): overlapped 対応 / 可変長フレーム組立 */
 };
 
@@ -212,8 +218,13 @@ static BOOL on_read_file(LogicState *st, HANDLE h, void *buf, DWORD n, DWORD *go
         *hd = 1;
         return TRUE;
     }
-    if (h == st->touch_handle) {                  /* COM1: 現マウス位置→'T' フレームをストリーム */
-        { HWND w = FindWindowW(NULL, L"WGL"); touch_sample_mouse(&st->touch, w ? w : GetForegroundWindow()); }
+    if (h == st->touch_handle) {                  /* COM1: マウス位置 or 注入座標→'T' フレームをストリーム */
+        if (st->touch_force) {                    /* headless 注入（nrsedge.touch.json）: mouse sampling を置換 */
+            st->touch.x = st->touch_force_x; st->touch.y = st->touch_force_y;
+            st->touch.pressed = st->touch_force_press;
+        } else {
+            HWND w = FindWindowW(NULL, L"WGL"); touch_sample_mouse(&st->touch, w ? w : GetForegroundWindow());
+        }
         int k = touch_on_read(&st->touch, (uint8_t *)buf, (int)n);
         if (got) *got = (DWORD)k;
         /* 初回・押下状態変化・約2秒毎にログ（streaming 確認＋座標観測。常時は出さない）*/
@@ -899,6 +910,44 @@ static void card_control_poll(LogicState *st) {
     }
 }
 
+/* ============================================================ headless タッチ注入（nrsedge.touch.json）
+ * loader/スクリプトが `{"press":0|1,"x":<0..1>,"y":<0..1>,"gen":N}` を書く。x/y は client 正規化(左上原点)。
+ * card_control_poll と同流儀（orig CreateFile 経由・mtime 変化で再読込）。touch_force 有効時は
+ * on_read_file(COM1) で touch_sample_mouse を置換して serial 'T' 経路へ流す（前面窓/カーソル非依存）。
+ * これで attract→credit→card-auth の scene 遷移を headless で駆動・自動テストできる。 */
+static void touch_control_poll(LogicState *st) {
+    wchar_t path[MAX_PATH]; GetModuleFileNameW(NULL, path, MAX_PATH);
+    wchar_t *p = wcsrchr(path, L'\\'); if (p) p[1] = 0; else path[0] = 0;
+    wcsncat(path, L"nrsedge.touch.json", MAX_PATH - wcslen(path) - 1);
+    WIN32_FILE_ATTRIBUTE_DATA fa;
+    if (!GetFileAttributesExW(path, GetFileExInfoStandard, &fa)) { st->touch_force = 0; return; }
+    if (st->touch_ctl_seen
+        && fa.ftLastWriteTime.dwLowDateTime  == st->touch_ctl_mtime.dwLowDateTime
+        && fa.ftLastWriteTime.dwHighDateTime == st->touch_ctl_mtime.dwHighDateTime)
+        return;                                                           /* 無変化 */
+    char buf[256];
+    int n = card_read_raw(st, path, buf, sizeof buf - 1);
+    if (n <= 0) return;
+    buf[n] = 0;
+    st->touch_ctl_mtime = fa.ftLastWriteTime;
+    st->touch_ctl_seen = 1;
+    int press = cj_int(buf, "press", 0);
+    /* x/y は 0..1000 の千分率整数として渡す（cj_int は整数のみ）。既定 = 中央 500。*/
+    int xm = cj_int(buf, "xm", 500), ym = cj_int(buf, "ym", 500);
+    if (xm < 0) xm = 0; if (xm > 1000) xm = 1000;
+    if (ym < 0) ym = 0; if (ym > 1000) ym = 1000;
+    st->touch_force = 1;
+    st->touch_force_press = (uint8_t)(press ? 1 : 0);
+    st->touch_force_x = (uint16_t)(xm * TOUCH_MAX / 1000);
+    st->touch_force_y = (uint16_t)(ym * TOUCH_MAX / 1000);
+    if (st->host && st->host->log) {
+        char m[160];
+        wsprintfA(m, "{\"ev\":\"touch.force\",\"press\":%u,\"xm\":%d,\"ym\":%d,\"x\":%u,\"y\":%u}",
+                  st->touch_force_press, xm, ym, st->touch_force_x, st->touch_force_y);
+        st->host->log("info", m);
+    }
+}
+
 static int *cardrw_object(uintptr_t b);   /* 前方宣言（card_force_present の手前で定義）*/
 
 /* card SM 診断: カード検出が serial SEARCH を撃たない理由を特定する。cardrw 状態機械の核 globals と
@@ -962,16 +1011,14 @@ static int *cardrw_object(uintptr_t b) {
  * `*(int*)(device_status+0x5628)!=0` が立たない → 「カード使用」無効。これを直接供給する。
  * device_status+0x5628 は read シーケンサ FUN_004f30a0 の state でもあるので、1 にすると read 列に入り
  * presence query FUN_004f6a30 も present を返す。前回の flags/state2 poke 版はクラッシュしたため、SM の
- * 中間 state は触らずこのフィールドのみを in-band に供給する（live 検証中・要安定確認）。
+ * 中間 state は触らずこのフィールドのみを in-band に供給する。
  * オフセットは cardrw_device_status_ptr(0x4f3e30): object=node[4] / device_status=object+4 / presence=+0x5628。*/
 static void card_force_present(LogicState *st) {
-    /* 【一時無効化 2026-07-01】この毎フレーム presence 供給が、カード挿入と同時に amGfetcher get_status
-     * (port 40113) のネットワーク認証フローを叩き起こし、そこが完了しない（mxgfetcher.md: recv 完了
-     * [stream+0x21C] が更新されず 0x98B260 が 1 を返さない＝SM 無限ループ）ため、ゲームが黒い
-     * 「サーバ接続中」画面で 40113 を毎フレーム再接続し続ける（実測 2138 回/3分）。レンダー自体は健全
-     * （AMD OpenGL4.6 / present.stats 正常）。amGfetcher serve-it が get_status を完了させられるように
-     * なるまで、この供給を停止して attract 表示を保つ。復帰は本 return を外すだけ。 */
-    return;
+    /* 【有効化 2026-07-01】かつてこの presence 供給は amGfetcher get_status(40113)の無限再接続を誘発したが、
+     * その真因は本関数でなく keychip_proto の amGfetcher 応答 result=0（result_field_checker 0x975140 が
+     * result!="success" を -5 扱い）だったと live capture で確定。keychip_proto を result=success 化して
+     * get_status/set_auth_params/resume 系が各1回で settle（loop 消滅）したため presence 供給を genuine 復帰。
+     * これで card-select scene(0x5e6200)の present gate が立ち、カード抜き差しが反映される。詳細 facts/mxgfetcher.md。 */
     if (!st->card.present) return;
     uintptr_t b = (uintptr_t)GetModuleHandleW(NULL);
     int *obj = cardrw_object(b);
@@ -999,6 +1046,7 @@ static void on_jvs_tick(LogicState *st) {
     mmgp_diag(st);            /* MMGP play-session 連鎖の診断（gate/state/txn のどこで止まるか確定）*/
     touch_diag(st);           /* touch device 内部状態の診断（serial→consumer 到達確認）*/
     scene_diag(st);           /* attract→credit→card-auth の scene 活性化を観測（Phase B2 停止点の切分け）*/
+    touch_control_poll(st);   /* nrsedge.touch.json を反映（headless タッチ注入→attract 進行の自動テスト）*/
     card_control_poll(st);    /* loader の nrsedge.card.json を反映（カードのライブ抜き差し→present/image）*/
     card_force_present(st);   /* present 時、cardrw presence フィールドを供給（standalone のカード挿入信号欠落を補完）*/
     card_sm_diag(st);         /* カード検出 SM の観測（card-select 画面でのゲート解析用・読取専用）*/

@@ -122,9 +122,35 @@ boot network SM `hlsm_boot_network_sm`(0x457fe0) は alAbEx auth flags（`DAT_02
   credit scene は生成されない＝**開始 gate は上流の ALL.NET/MMGP ゲームサーバ接続**（STATUS の「ALL.NET GAME SERVER 未完了・
   【全国対戦受付終了】」と整合）。matching/credit サーバが「セッション開始可」を返すまで title から進めない。
 
-## 未解決（要 RE）= attract demo → credit/entry scene の活性化
+## ★EntryMode scene factory を特定（2026-07-01, gameflow フロンティア前進）[S]
 
-attract demo browser と credit/card-auth scene を切替える**上位 scene manager**が未特定。これが credit scene を active にすれば
+credit/card-auth 等の EntryMode シーンを生成する factory ＝ **`entrymode_scene_factory`(0x5ec6e0)** `(mgr, sel)`:
+- `sel`(0..10) でシーン選択生成: **0=card-auth(`EntryModeCheckCard_ctor` 0x5ec9b0)** / **1=credit(`EntryModeGamePoint_ctor` 0x5eca20)** /
+  2=0x5eca80 / 3=0x5ecb00 / 4=EntryModeRegist / 5=EntryModeUpdateCard / 6=0x5ecba0 / 7=0x5ecc10 / 8=0x5ecc70 / 9=EntryModeVersionUp / 10=null(exit)。
+- `param_1`=entry-mode マネージャ ctx（`+0x5c4`=現シーン状態 id、`DAT_00bb30e8[sel]` が state-id）。生成シーン `puVar4[1]=mgr`。
+- **★呼び出し元が逆コンパイル C に一切現れない＝間接呼び出し**（マネージャの vtable slot 経由でポインタ格納。`get_xrefs_to`/`search_decompiled` とも 0）。
+  ∴「上位 scene manager」＝この factory を持つ **entry-mode マネージャ**で、**sel を進める条件が attract→credit/card-auth の真の gate**。
+- 次の一手: entry-mode マネージャ object の生成元と vtable を特定（factory ポインタ格納先）。マネージャの update が
+  前シーンの done/next 出力で sel を進める SM のはず。**間接 dispatch ゆえ live トレース(cdb で 0x5ec6e0 に bp→戻り先 stack)が最短**だが、
+  headless boot は ~50% で attract 手前停滞するフレークがあり（下記「headless 限界」）GUI/実機トレース向き。
+
+## headless 自動テストの限界（2026-07-01 実測）[L]
+
+attract→card-select の**自動到達**を headless で試みた際の実測制約（card 反映修正の検証とは別）:
+- **boot フレーク ~50%**: host.ready 後 attract まで進む run と、tick ループに入らず停滞する run が混在（scene.diag=0・device read 0）。
+  ゾンビ/ポート競合は無し。CREATE_NO_WINDOW で入力/レンダーループが GUI と等価に回らないのが疑い。
+- **touch device が attract で未 poll**: headless では COM1 read が 0〜2 回に留まり touch handshake が mode1 に達しない run が多い
+  （touch.diag present_18=0）。∴ `nrsedge.touch.json` タッチ注入(下記)は 'T' フレームを送出できてもゲームが消費しない場合がある。
+- ⇒ **完全自動の attract→card-select 到達は現状不可**。card 反映の**機構**（presence/read/whitelist 受理）は headless で検証済みだが、
+  **シーン到達**は GUI（実窓・実タッチ）が確実。
+
+### headless タッチ注入ツール（`nrsedge.touch.json`, api.c touch_control_poll）[L]
+`{"press":0|1,"xm":<0..1000>,"ym":<0..1000>}` を書くと logic が COM1 'T' 経路へ注入（前面窓/カーソル非依存）。
+touch が poll される run では `touch.force`→'T' 送出まで動作。boot フレーク/touch 未 poll のため単体では自動到達を保証しない。
+
+## 未解決（要 RE）= entry-mode マネージャの sel 進行 gate（factory は特定済・上記）
+
+attract demo browser と credit/card-auth scene を切替える上位 = **entry-mode マネージャ**（`entrymode_scene_factory` 0x5ec6e0 を vtable slot に持つ）。これが credit scene を active にすれば
 state1 で `mmgp_request_start`→MMGP→card-auth→card SEARCH と進む。次の一手:
 - credit scene(0x5eaae0, vtbl 0xbb358c)/card-auth(0x5e6200, vtbl 0xbb34c4) を**生成・active 化する所有者**を特定
   （vtbl への DATA xref、ctor、scene 切替の条件）。これが network/service 状態にゲートされるかは**未確認**（推論しない）。

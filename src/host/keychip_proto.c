@@ -113,12 +113,22 @@ const char *kc_respond(const char *line, char *buf, int cap) {
             return "response=query_nic_status&result=0&status=1&ip_address=" NET_IP
                    "&subnetmask=" NET_MASK "&gateway=" NET_GW
                    "&primary_dns=" NET_DNS1 "&secondary_dns=" NET_DNS2;
-        if (!strcmp(v, "get_status"))      return "response=get_status&result=0&status=incorrect";
-        if (!strcmp(v, "set_auth_params")) return "response=set_auth_params&result=0&bbflag=1";
-        if (!strcmp(v, "isrelease"))       return "response=isrelease&result=0&release=1";
-        if (!strcmp(v, "resume"))          return "response=resume&result=0";
-        if (!strcmp(v, "pause"))           return "response=pause&result=0";
-        if (!strcmp(v, "stopcatcher"))     return "response=stopcatcher&result=0";
+        /* ★amGfetcher 応答は result_field_checker(0x975140) を必ず通り、result!="success" は -5
+           (fall-through)＝トランザクション失敗→get_status/set_auth_params 無限再接続ループ。
+           よって amGfetcher 系は全て result=success 必須（amInstall と同型。live capture kc.wire で確定 2026-07-01）。
+           get_status の status=uptodate は「配信データ最新＝取得不要」の standalone 正解。
+           status 9(uptodate) は parser(0x974B00) case7/9 で work_version/work_time/order_time/release_time の
+           存在を要求（欠くと -150）ため 4 フィールドを value=0 で同梱する。 */
+        if (!strcmp(v, "get_status"))
+            return "response=get_status&result=success&status=uptodate"
+                   "&work_version=0&work_time=0&order_time=0&release_time=0";
+        if (!strcmp(v, "set_auth_params")) return "response=set_auth_params&result=success&bbflag=1";
+        if (!strcmp(v, "isrelease"))       return "response=isrelease&result=success&release=1";
+        /* resume パーサ(0x9746c0)は firstreq を要求（無いと -150 loop）。値は "1"(first)/"0"(not-first) のみ有効
+           (nrs.exe 実バイト確定 2026-07-01)。resume=配信継続ゆえ firstreq=0。 */
+        if (!strcmp(v, "resume"))          return "response=resume&result=success&firstreq=0";
+        if (!strcmp(v, "pause"))           return "response=pause&result=success";
+        if (!strcmp(v, "stopcatcher"))     return "response=stopcatcher&result=success";
         return "code=0";
     }
     return "code=0";

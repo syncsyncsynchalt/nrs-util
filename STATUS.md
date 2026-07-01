@@ -1,5 +1,30 @@
 # STATUS — 現在地と次の一手
 
+## フェーズ: ★★カード挿入が反映されない件を解消＝amGfetcher get_status 無限ループ根絶（card_force_present 復帰）— 2026-07-01
+
+**「カードを抜き差ししても反映されない」の真因を live capture で確定・genuine 修正**。カード sel 画面(EntryModeCheckCard 0x5e6200)の
+present gate `device_status+0x5628` を供給する `card_force_present`(api.c) が、40113 get_status 無限ループのため無効化されていた。
+- **真因（旧仮説を live 実証で棄却）**: 旧記述「PCPP フレーム未成立/raw recv」は誤り。kc.wire 一時計装で 40113 を実測→応答は正常フレームで
+  届き**リトライで再接続**していた。実体は **amGfetcher 全応答が `result_field_checker`(0x975140) を通り、`result=0` は
+  fall-through で -5（エラー）**＝トランザクション失敗ループ。amInstall は result=success 済だったが **amGfetcher 応答だけ result=0 で残置**。
+- **修正（keychip_proto.c・静的パッチ追加ゼロ, patches=15 維持）**: amGfetcher 応答を `result=success` 化。get_status=`status=uptodate`＋
+  work_*4 フィールド、resume=`firstreq=0`（parser 0x9746c0 要求・値は nrs.exe 実バイトで "0"/"1" 確定）。
+- **ライブ実証**: 40113 が `pause→set_auth_params→resume→isrelease→get_status` を**各1回で settle**（633→1）、errors=0。
+  `card_force_present` genuine 復帰＋test card(present=1) 注入下でも **40113 ループ再発なし・`card.force_present`(ds+0x5628=1)発火・
+  `card.read` 応答**＝カード挿入検出信号がシーンへ供給される。詳細 `facts/mxgfetcher.md`（Ghidra: result_field_checker/amgfetcher_* 命名済）。
+- **次**: GUI で実カード挿入→card-select 画面が「カード使用」を受理するか実写確認（headless では表示検証不可）。UID whitelist(count=0 観測)と
+  card data read(0x0D/0x2D)の実挙動＝Phase B card data 層。
+
+### ★続き: attract→card-select 自動到達を試行＝gameflow フロンティア前進＋headless 限界の確定（2026-07-01）
+- **EntryMode scene factory を特定**: `entrymode_scene_factory`(0x5ec6e0)`(mgr,sel)` が sel 0=card-auth/1=credit… を生成（`data/known_names.json`・`facts/gameflow.md`）。
+  **呼出元は間接**（entry-mode マネージャの vtable slot）＝**sel を進める gate がこのマネージャ内**＝attract→credit/card-auth の真の gate。cdb live トレース向き。
+- **headless 限界を実測確定**（`facts/gameflow.md`「headless 限界」）: (a) boot が ~50% で attract 手前停滞（CREATE_NO_WINDOW のループ差）、
+  (b) touch device が attract で未 poll になる run が多く（COM1 read 0〜2）注入タッチを消費しない。⇒ **完全自動の card-select 到達は不可、GUI/実機が確実**。
+- **headless タッチ注入ツールを追加**（`nrsedge.touch.json` → `api.c touch_control_poll`、COM1 'T' 注入。json 無しでは inert）。card 反映修正は**回帰なし**（Run B で card.force_present 再確認）。
+- **card whitelist 確定**: `card_read_sm`(0x671470) は count=0/bypass=1 で全受理（accept-all, standalone 相当）。UID 拒否は count>0 かつ不一致時のみ。
+
+---
+
 ## フェーズ: ★EXTEND IMAGE を image-present gate で純正 OK 化＋P_extimg 撤去（patches 16→15）— 2026-07-01
 
 **state5「CHECKING EXTEND IMAGE」を実筐体「イメージ導入済み」境界供給で純正 OK 表示にし、静的パッチ `P_extimg`(0x72B3A0)を撤去**（`patches.applied 16→15`）。

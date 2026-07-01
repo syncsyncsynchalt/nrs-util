@@ -5,7 +5,33 @@ confidence: [S]=静的解析 [L]=ライブ実走 [I]=推論 [F]=旧 Frida 計装
 
 ---
 
-### amGfetcher get_status [S]
+### ★amGfetcher get_status 無限ループの真因＝result≠success（live capture 確定 2026-07-01）[L]
+
+**症状**: `card_force_present`(api.c) で presence を供給すると 40113 で get_status/set_auth_params が無限再接続
+（旧記述の「黒いサーバ接続中・2138回/3分」）。旧仮説「raw recv/[stream+0x21C] 未更新の PCPP フレーム未成立」は
+**live capture(kc.wire, keychip_server 一時計装)で棄却**：応答は正常フレーム(`body\r\n>`)で届き、ゲームは受信後に
+**リトライで再接続**していた＝フレーム問題ではなく**応答内容**。
+
+**真因（Ghidra 実体）**: amGfetcher の全応答は `amgfetcher_response_dispatch`(0x975320) 入口で **`result_field_checker`(0x975140)**
+を必ず通る。この checker は `result`=="success"→0、`invalid_parameter`/`invalid_request`/`error`→各負値、
+**それ以外（我々の `result=0`）→ fall-through で -5**。∴ `result=0` は毎回 -5 エラー→トランザクション失敗→リトライ。
+amInstall(40102)は既に `result=success` 化済みだったが、**amGfetcher 応答(keychip_proto.c)だけ `result=0` のまま取り残されていた**。
+
+**修正（keychip_proto.c・静的パッチ追加ゼロ）**:
+- get_status → `result=success&status=uptodate&work_version=0&work_time=0&order_time=0&release_time=0`
+  （uptodate=最新＝取得不要の standalone 正解。status 9 は parser 0x974B00 case7/9 で work_*4 フィールドの存在を要求）
+- set_auth_params/isrelease/resume/pause/stopcatcher → `result=success`（resume は加えて **`firstreq=0`**、
+  `amgfetcher_resume_parser`0x9746c0 が firstreq="1"/"0" のみ受理・無/他は -150 loop。値は nrs.exe 実バイトで "1"/"0" 確定）
+- **ライブ実証**: 40113 が `pause→set_auth_params→resume→isrelease→get_status` を**各1回で settle**（633回→1回）、
+  errors=0。`card_force_present` 復帰＋テスト card(nrsedge.card.json present=1)注入下でも 40113 ループ再発なし・
+  `card.force_present`(ds+0x5628=1) 発火・`card.read` 応答＝**カード挿入検出信号がシーンへ供給される**。
+
+**HLSM 消費（`hlsm_boot_network_sm`0x457fe0, state=[param_1+0x14]）**: 4→5(get_status送出)→6(結果; status∉{2,4,5}で
+next=7)→7(alabex_auth_ready 待ち)→8→9。get_status が完走しないと state5↔リトライで presence gate に到達しない。
+
+---
+
+### amGfetcher get_status（旧 serve-it 記述・参考）[S]
 
 **現行 native は serve-it**: `src/host/keychip_server.c` が 40113 を bind し本物の get_status 交換で SM を自然前進させ、
 `src/logic/patches.c` は 0x6FF980→ret1（state0 gate）＋ JL2JMP 3 個のみ。下の fake-it パッチ群は **native 未使用**
