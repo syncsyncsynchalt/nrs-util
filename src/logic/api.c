@@ -40,6 +40,12 @@ struct LogicState {
     CardReader card;
     int        card_opened_logged;   /* read ログ初回フラグ */
     int        netauth_logged;       /* netauth.force_ready 初回ログフラグ */
+    /* --- カード制御ファイル(nrsedge.card.json, loader が抜き差しで書く)の poll キャッシュ --- */
+    int        card_ctl_seen;        /* 一度でも制御ファイルを読めたか（初回判定）*/
+    FILETIME   card_ctl_mtime;       /* 最後に適用した last-write time（変化検知）*/
+    unsigned   card_ctl_gen;         /* 最後に適用した gen（同一秒書込でも変化検知）*/
+    wchar_t    card_img_path[MAX_PATH]; /* アクティブ card.bin パス（dirty 保存先）*/
+    int        card_force_logged;    /* card.force_present 初回ログフラグ */
     /* TODO(P2+): overlapped 対応 / 可変長フレーム組立 */
 };
 
@@ -765,6 +771,223 @@ static void dinput_diag(LogicState *st) {
     }
 }
 
+/* ============================================================ カード制御ファイル（loader → 稼働中 logic）
+ * loader が抜き差し操作のたびに **ゲーム dir の nrsedge.card.json** を書く（present/image/type/gen）。
+ * logic は on_jvs_tick で last-write 変化時のみ再読込し present/uid/card_type/image を反映する。
+ * ファイル I/O は **host->orig（フック迂回）** で行う（自フック再入＝SRW deadlock 回避。mxdev と同流儀）。
+ * GetFileAttributesExW は非フック API ゆえ直接呼んでよい（安価な変化検知）。 */
+
+typedef HANDLE (WINAPI *CreateFileW_fn)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
+typedef BOOL   (WINAPI *ReadFile_fn)(HANDLE, LPVOID, DWORD, LPDWORD, LPOVERLAPPED);
+typedef BOOL   (WINAPI *WriteFile_fn)(HANDLE, LPCVOID, DWORD, LPDWORD, LPOVERLAPPED);
+typedef BOOL   (WINAPI *CloseHandle_fn)(HANDLE);
+
+/* nrsedge.card.json のフルパス（ゲーム exe と同 dir）。 */
+static void card_ctl_path(wchar_t *out, int cap) {
+    GetModuleFileNameW(NULL, out, (DWORD)cap);
+    wchar_t *p = wcsrchr(out, L'\\');
+    if (p) p[1] = 0; else out[0] = 0;
+    wcsncat(out, L"nrsedge.card.json", (size_t)cap - wcslen(out) - 1);
+}
+
+/* 小ファイルを orig(CreateFileW/ReadFile/CloseHandle) で丸読み。戻り=読込バイト数（<=0 失敗）。 */
+static int card_read_raw(LogicState *st, const wchar_t *path, void *buf, int cap) {
+    if (!st->host) return -1;
+    CreateFileW_fn  cf = (CreateFileW_fn)st->host->orig(ORIG_CREATE_FILE_W);
+    ReadFile_fn     rf = (ReadFile_fn)st->host->orig(ORIG_READ_FILE);
+    CloseHandle_fn  ch = (CloseHandle_fn)st->host->orig(ORIG_CLOSE_HANDLE);
+    if (!cf || !rf || !ch) return -1;
+    HANDLE f = cf(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+    if (f == INVALID_HANDLE_VALUE) return -1;
+    DWORD got = 0; BOOL ok = rf(f, buf, (DWORD)cap, &got, 0);
+    ch(f);
+    return ok ? (int)got : -1;
+}
+
+/* st->card.image(4104B) を path へ書き戻す（orig 経由）。戻り=成功(1)/失敗(0)。 */
+static int card_save_image(LogicState *st) {
+    if (!st->host || !st->card_img_path[0]) return 0;
+    CreateFileW_fn  cf = (CreateFileW_fn)st->host->orig(ORIG_CREATE_FILE_W);
+    WriteFile_fn    wf = (WriteFile_fn)st->host->orig(ORIG_WRITE_FILE);
+    CloseHandle_fn  ch = (CloseHandle_fn)st->host->orig(ORIG_CLOSE_HANDLE);
+    if (!cf || !wf || !ch) return 0;
+    HANDLE f = cf(st->card_img_path, GENERIC_WRITE, FILE_SHARE_READ, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+    if (f == INVALID_HANDLE_VALUE) return 0;
+    DWORD put = 0; BOOL ok = wf(f, st->card.image, CARD_IMAGE_BYTES, &put, 0);
+    ch(f);
+    if (ok) { st->card.dirty = 0;
+        if (st->host->log) st->host->log("info", "{\"ev\":\"card.save\",\"bytes\":4104}");
+    }
+    return ok ? 1 : 0;
+}
+
+/* control JSON から整数値を取る（"key": <int>）。不在/不正は def。 */
+static int cj_int(const char *j, const char *key, int def) {
+    char needle[40]; wsprintfA(needle, "\"%s\"", key);
+    const char *p = strstr(j, needle); if (!p) return def;
+    p += strlen(needle);
+    while (*p && (*p == ':' || *p == ' ' || *p == '\t')) p++;
+    int neg = 0; if (*p == '-') { neg = 1; p++; }
+    int v = 0, any = 0;
+    while (*p >= '0' && *p <= '9') { v = v * 10 + (*p - '0'); p++; any = 1; }
+    return any ? (neg ? -v : v) : def;
+}
+/* control JSON から文字列値（"key":"..."）を取る。\\ → \ をアンエスケープ。戻り=長さ。 */
+static int cj_str(const char *j, const char *key, char *out, int cap) {
+    char needle[40]; wsprintfA(needle, "\"%s\"", key);
+    const char *p = strstr(j, needle); out[0] = 0; if (!p) return 0;
+    p += strlen(needle);
+    while (*p && (*p == ':' || *p == ' ' || *p == '\t')) p++;
+    if (*p != '"') return 0; p++;
+    int i = 0;
+    while (*p && *p != '"' && i < cap - 1) {
+        if (*p == '\\' && p[1]) p++;     /* \\ → \ , \" → " */
+        out[i++] = *p++;
+    }
+    out[i] = 0; return i;
+}
+
+static void card_control_poll(LogicState *st) {
+    wchar_t path[MAX_PATH]; card_ctl_path(path, MAX_PATH);
+    WIN32_FILE_ATTRIBUTE_DATA fa;
+    if (!GetFileAttributesExW(path, GetFileExInfoStandard, &fa)) return;   /* 制御ファイル未作成 */
+    if (st->card_ctl_seen
+        && fa.ftLastWriteTime.dwLowDateTime  == st->card_ctl_mtime.dwLowDateTime
+        && fa.ftLastWriteTime.dwHighDateTime == st->card_ctl_mtime.dwHighDateTime)
+        return;                                                           /* 無変化 */
+    char buf[1024];
+    int n = card_read_raw(st, path, buf, sizeof buf - 1);
+    if (n <= 0) return;                                                   /* 読めなければ mtime も更新せず再試行 */
+    buf[n] = 0;
+    st->card_ctl_mtime = fa.ftLastWriteTime;
+    st->card_ctl_seen = 1;
+
+    int present = cj_int(buf, "present", 0);
+    int type    = cj_int(buf, "type", st->card.card_type);
+    unsigned gen = (unsigned)cj_int(buf, "gen", 0);
+    char img[512]; cj_str(buf, "image", img, sizeof img);
+    st->card_ctl_gen = gen;
+
+    if (present) {
+        if (img[0]) {
+            wchar_t wimg[MAX_PATH];
+            MultiByteToWideChar(CP_UTF8, 0, img, -1, wimg, MAX_PATH);
+            wcsncpy(st->card_img_path, wimg, MAX_PATH - 1); st->card_img_path[MAX_PATH - 1] = 0;
+            memset(st->card.image, 0, CARD_IMAGE_BYTES);
+            card_read_raw(st, wimg, st->card.image, CARD_IMAGE_BYTES);   /* 4104B 未満は 0 埋めのまま */
+            const uint8_t *h = st->card.image;
+            st->card.uid = ((uint32_t)h[CARD_HDR_UID_OFF] << 24) | ((uint32_t)h[CARD_HDR_UID_OFF + 1] << 16)
+                         | ((uint32_t)h[CARD_HDR_UID_OFF + 2] << 8) | h[CARD_HDR_UID_OFF + 3];
+        }
+        if (type) st->card.card_type = (uint8_t)type;
+        st->card.present = 1;
+        st->card.read_cursor = 0; st->card.read_len = 0;
+        st->card.dirty = 0;
+        if (st->host && st->host->log) {
+            char m[400], pu[300]; WideCharToMultiByte(CP_UTF8, 0, st->card_img_path, -1, pu, sizeof pu, 0, 0);
+            wsprintfA(m, "{\"ev\":\"card.insert\",\"present\":1,\"type\":\"%02x\",\"uid\":\"%08x\",\"gen\":%u,\"image\":\"%s\"}",
+                      st->card.card_type, st->card.uid, gen, pu);
+            st->host->log("info", m);
+        }
+    } else {
+        if (st->card.present && st->card.dirty) card_save_image(st);     /* 取出前に永続化 */
+        st->card.present = 0;
+        if (st->host && st->host->log) {
+            char m[80]; wsprintfA(m, "{\"ev\":\"card.eject\",\"present\":0,\"gen\":%u}", gen);
+            st->host->log("info", m);
+        }
+    }
+}
+
+static int *cardrw_object(uintptr_t b);   /* 前方宣言（card_force_present の手前で定義）*/
+
+/* card SM 診断: カード検出が serial SEARCH を撃たない理由を特定する。cardrw 状態機械の核 globals と
+ * cardrw オブジェクト(node DAT_016d868c → node[4], stride 0x6714)の flags/state2/state3 を変化時に記録。
+ *   ae538=device-found / ae53c=pump substate(10=READY) / ae5c8=cmd class(0idle/2read/3write) /
+ *   ae5cc=request(-1=none,2=read要求) / ae5e0=read count / ae540=sm result。
+ *   obj[0]=flags / obj[2]=state2(0poll/1detect/2present) / obj[3]=state3(0wait-slot/3,4=read/5write)。 */
+static void card_sm_diag(LogicState *st) {
+    static int last = -0x7fffffff; static unsigned n; static int wl_logged = 0;
+    uintptr_t b = (uintptr_t)GetModuleHandleW(NULL);
+    /* カード受理ゲート = UID whitelist（card_read_sm 0x671470）。一度だけ実値をダンプして判断材料にする:
+       DAT_016a55ad=件数 / DAT_016a55ba=bypass / DAT_016a55ac=必要block数 / DAT_016a55b8=maxlen / DAT_016a55b0[]=UID群。*/
+    if (!wl_logged && st->host && st->host->log) {
+        wl_logged = 1;
+        unsigned cnt  = *(uint8_t  *)(b + (0x16A55ADu - 0x400000u));
+        unsigned byp  = *(uint8_t  *)(b + (0x16A55BAu - 0x400000u));
+        unsigned nblk = *(uint8_t  *)(b + (0x16A55ACu - 0x400000u));
+        unsigned mlen = *(uint16_t *)(b + (0x16A55B8u - 0x400000u));
+        uint32_t *wl  = (uint32_t *)(b + (0x16A55B0u - 0x400000u));
+        char m[300]; int o = wsprintfA(m, "{\"ev\":\"card.whitelist\",\"count\":%u,\"bypass\":%u,\"nblk\":%u,\"maxlen\":%u,\"uids\":[",
+                                       cnt, byp, nblk, mlen);
+        for (unsigned i = 0; i < cnt && i < 6; i++) o += wsprintfA(m + o, "%s\"%08x\"", i ? "," : "", wl[i]);
+        wsprintfA(m + o, "]}");
+        st->host->log("info", m);
+    }
+    unsigned devf = *(uint8_t  *)(b + (0x16AE538u - 0x400000u));
+    int sub  = *(int *)(b + (0x16AE53Cu - 0x400000u));
+    int cls  = *(int *)(b + (0x16AE5C8u - 0x400000u));
+    int req  = *(int *)(b + (0x16AE5CCu - 0x400000u));
+    int cnt  = *(int *)(b + (0x16AE5E0u - 0x400000u));
+    int res  = *(int *)(b + (0x16AE540u - 0x400000u));
+    /* device_status = object+4（cardrw_device_status_ptr 0x4f3e30）。flags=+0 / state2=+8 / presence=+0x5628。 */
+    unsigned dsf=0, pres=0; int s2=-1, have=0;
+    int *obj = cardrw_object(b);
+    if (obj) { uintptr_t ds=(uintptr_t)obj+4; dsf=*(uint32_t*)(ds); s2=*(int*)(ds+8); pres=*(uint32_t*)(ds+0x5628); have=1; }
+    int sig = (int)(devf + sub*7 + cls*101 + (req+2)*1009 + s2*31 + (int)(dsf&0xfff)*131 + (pres?1:0));
+    if (sig != last || (n++ % 180) == 0) {
+        char m[360];
+        wsprintfA(m, "{\"ev\":\"card.sm\",\"devf\":%u,\"sub\":%d,\"cls\":%d,\"req\":%d,\"cnt\":%d,\"res\":%d,"
+                     "\"have\":%d,\"dsflags\":\"%x\",\"state2\":%d,\"presence\":%u,\"present\":%u}",
+                  devf, sub, cls, req, cnt, res, have, dsf, s2, pres, st->card.present);
+        if (st->host && st->host->log) st->host->log("info", m);
+        last = sig;
+    }
+}
+
+/* cardrw デバイスオブジェクト(class 0x21,0x21)を取得（cardrw_device_status_ptr 0x4f3e30 と同じ探索）。
+ * 戻り = object base = node[4]（device_status は object+4）。無ければ 0。 */
+static int *cardrw_object(uintptr_t b) {
+    int *node = *(int **)(b + (0x16D868Cu - 0x400000u));   /* DAT_016d868c キャッシュ */
+    if (!node) {
+        node = *(int **)(b + (0x16DB564u - 0x400000u));    /* DAT_016db564 list head */
+        while (node && (node[0] != 0x21 || node[1] != 0x21)) node = (int *)(uintptr_t)node[0xf];
+    }
+    if (!node) return 0;
+    return (int *)(uintptr_t)node[4];                       /* object base（無ければ 0）*/
+}
+
+/* 仮想カード present 時、cardrw の presence/read-trigger フィールド(device_status+0x5628)を 1 に供給する。
+ * standalone には実機の「カード挿入検出」信号が無く、card-select scene(0x5e6200)の present ゲート
+ * `*(int*)(device_status+0x5628)!=0` が立たない → 「カード使用」無効。これを直接供給する。
+ * device_status+0x5628 は read シーケンサ FUN_004f30a0 の state でもあるので、1 にすると read 列に入り
+ * presence query FUN_004f6a30 も present を返す。前回の flags/state2 poke 版はクラッシュしたため、SM の
+ * 中間 state は触らずこのフィールドのみを in-band に供給する（live 検証中・要安定確認）。
+ * オフセットは cardrw_device_status_ptr(0x4f3e30): object=node[4] / device_status=object+4 / presence=+0x5628。*/
+static void card_force_present(LogicState *st) {
+    /* 【一時無効化 2026-07-01】この毎フレーム presence 供給が、カード挿入と同時に amGfetcher get_status
+     * (port 40113) のネットワーク認証フローを叩き起こし、そこが完了しない（mxgfetcher.md: recv 完了
+     * [stream+0x21C] が更新されず 0x98B260 が 1 を返さない＝SM 無限ループ）ため、ゲームが黒い
+     * 「サーバ接続中」画面で 40113 を毎フレーム再接続し続ける（実測 2138 回/3分）。レンダー自体は健全
+     * （AMD OpenGL4.6 / present.stats 正常）。amGfetcher serve-it が get_status を完了させられるように
+     * なるまで、この供給を停止して attract 表示を保つ。復帰は本 return を外すだけ。 */
+    return;
+    if (!st->card.present) return;
+    uintptr_t b = (uintptr_t)GetModuleHandleW(NULL);
+    int *obj = cardrw_object(b);
+    if (!obj) return;
+    uintptr_t ds = (uintptr_t)obj + 4;
+    if ((*(uint32_t *)ds & 0x10u) != 0) return;        /* error 中は触らない */
+    volatile int *presence = (int *)(ds + 0x5628);
+    if (*presence == 0) {
+        *presence = 1;                                  /* カード挿入検出信号を供給 */
+        if (!st->card_force_logged && st->host && st->host->log) {
+            st->host->log("info", "{\"ev\":\"card.force_present\",\"set\":\"ds+0x5628=1\"}");
+            st->card_force_logged = 1;
+        }
+    }
+}
+
 static void on_jvs_tick(LogicState *st) {
     const NrsConfig *cfg = st->host ? st->host->cfg : 0;
     NrsInput in; nrs_poll_input(&in, cfg ? cfg->bind : 0);
@@ -776,6 +999,9 @@ static void on_jvs_tick(LogicState *st) {
     mmgp_diag(st);            /* MMGP play-session 連鎖の診断（gate/state/txn のどこで止まるか確定）*/
     touch_diag(st);           /* touch device 内部状態の診断（serial→consumer 到達確認）*/
     scene_diag(st);           /* attract→credit→card-auth の scene 活性化を観測（Phase B2 停止点の切分け）*/
+    card_control_poll(st);    /* loader の nrsedge.card.json を反映（カードのライブ抜き差し→present/image）*/
+    card_force_present(st);   /* present 時、cardrw presence フィールドを供給（standalone のカード挿入信号欠落を補完）*/
+    card_sm_diag(st);         /* カード検出 SM の観測（card-select 画面でのゲート解析用・読取専用）*/
 
     /* touch_inject(st); — handshake 完了で device が mode1 動作するため bypass 注入は不要。
        実 serial 経路（on_read_file の 'T' フレーム→rx_parse→decode_T_coord）でタッチが流れる。 */

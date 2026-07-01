@@ -40,5 +40,10 @@ const NrsConfig *config_load(void) {
         }
         fclose(f);
     }
+    /* env 上書き（診断用）: NRSEDGE_WINDOWED=0 でフルスクリーン化＝windowed_install を抑止し DWM 合成を迂回。
+     * loader が cfg に windowed=1 を強制書込みするため、cfg より後で効く env を最終権威にする。
+     * DWM 2フレームビート(present.stats の stalls/doubles 多発)の切り分け用。未設定なら cfg 値のまま。 */
+    const char *ew = getenv("NRSEDGE_WINDOWED");
+    if (ew && *ew) g_cfg.windowed = atoi(ew);
     return &g_cfg;
 }

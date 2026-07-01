@@ -28,12 +28,15 @@ void card_init(CardReader *c) {
    不確実な trailer（0xF7/0x4D に "+trailer" 疑いあり）は core 長 1 とし、card.write ログで検証する。 */
 static int card_cmd_len(uint8_t op) {
     switch (op) {
-    case CARD_CMD_READ_DATA:  return 9;   /* 0x2D + 4B addr BE + 4B len BE (card_cmd_select_2D) */
+    case CARD_CMD_READ_DATA:  return 9;   /* 0x2D + 8B UID(select by UID) */
     case CARD_CMD_WRITE:      return 5;   /* 0xAD + 4B addr BE (card_cmd_commit_AD) */
     case CARD_CMD_SLOT_ADDR:  return 3;   /* 0x68, p1, p2 (card_send_68) */
     case CARD_CMD_SETSPEED:   return 2;   /* 0xB8 0xCF SET COMM SPEED (card_cmd_setspeed_B8 0x884ff0) */
-    /* 0x0D は引数無し単バイト（block index は別レジスタ DAT_016a0396 で事前設定。実機 RE 0x6704e0 確認）*/
-    default:                  return 1;   /* handshake/poll/slot-sel/0x0D 等（単バイト）*/
+    /* 0x0D read block = **3 バイト** `0d HH LL`（live 確証 2026-07-01: `0d 00 00`。static の「単バイト」推測は誤り。
+       1B 扱いだと続く `00 00` を別 opcode 0x00 として処理し card_build_response が tx をリセット→0x2B+128B 応答を消去し
+       「データ読み込み中…」で停止する）。*/
+    case CARD_CMD_READ_ATTR:  return 3;
+    default:                  return 1;   /* handshake/poll/slot-sel 等（単バイト）*/
     }
 }
 
@@ -72,9 +75,20 @@ static void card_build_response(CardReader *c) {
             /* present: byte0=0x0B が 0x4D の ACK と一致 → card_status_decode(0x66f8a0)→1（present）。
                続く 8B は card_get_uid_record(0x885260) が byteswap して UID(DAT_0169e314)/type(DAT_0169e31c)を取る。
                frame len: byte0=0x0B → count==9。
-               TODO(B2): 8B record の正確なバイト順を live で確定。*/
-            emit(c, CARD_ACK_VT);             /* 0x0B */
-            emit(c, CARD_STAT_OK); emit(c, c->card_type); emit_n(c, 0x00, 6);
+               ★ Phase B 暫定エンコード: [0B][status 1A][type][UID 4B BE][pad 1B]。
+                 8B record の **正確なバイト順は未確定**。挿入後に card.read ログの hex を実トラフィックと突き合わせて
+                 確定する（facts/devices.md §B2）。boot は present=0 経路なので本エンコード誤りは boot を壊さない。*/
+            /* frame len 則: byte0=0x0B → **計 9 バイト**（0x0B + 8B payload。card_get_uid_record 0x885260 が
+               payload 8B を DAT_01265722..29 に取り込む）。payload が 8B 未満だと re-sync 崩壊→read SM が -0x61(-97)。 */
+            emit(c, CARD_ACK_VT);             /* 0x0B（ACK・frame 先頭）*/
+            emit(c, CARD_STAT_OK);            /* payload[0] = 0x1A status */
+            emit(c, c->card_type);            /* payload[1] = 種別バイト */
+            emit(c, (uint8_t)(c->uid >> 24)); /* payload[2..5] = UID BE（whitelist 照合値・byte順は live 確証中）*/
+            emit(c, (uint8_t)(c->uid >> 16));
+            emit(c, (uint8_t)(c->uid >> 8));
+            emit(c, (uint8_t)(c->uid));
+            emit(c, 0x00);                    /* payload[6] */
+            emit(c, 0x00);                    /* payload[7] → payload 計 8B、frame 計 9B */
         } else {
             /* no-card: 単バイト 0x5A。byte0=0x5A は ACK(0x0B)と不一致→cVar1=0、DL に残る 0x5A='Z'→decode 6（nocard）。
                frame validator(0x8848d0) は byte0=0x5A を count==1 で完成扱い。
@@ -83,34 +97,58 @@ static void card_build_response(CardReader *c) {
         }
         break;
 
-    /* ---- read-attr 0x0D: ACK 0x2B + 128B（ヘッダ含む。UID = +0x04 BE）。len 129 ---- */
+    /* ---- read block 0x0D: ACK 0x2B + 128B（image[read_cursor..]を順次供給）。len 129 ----
+       card.bin = ワイヤ image そのもの（loader が UID@+0x04 BE 込みで生成）ゆえ swap せず素直に供給する。
+       ヘッダ byteswap は game 内部（card_header_byteswap_be 0x66f6d0）の仕事でエミュ側は不要。
+       0x2D select が read_cursor を立てる。未 select 時は cursor=0（先頭=ヘッダ block）から。*/
     case CARD_CMD_READ_ATTR:
         emit(c, CARD_ACK_PLUS);               /* 0x2B */
         if (c->present) {
-            /* TODO(PhaseB): image からヘッダ/属性 128B を供給（UID を +0x04 BE に配置）。 */
-            uint8_t hdr[128]; memset(hdr, 0, sizeof hdr);
-            hdr[CARD_HDR_UID_OFF + 0] = (uint8_t)(c->uid >> 24);   /* BE */
-            hdr[CARD_HDR_UID_OFF + 1] = (uint8_t)(c->uid >> 16);
-            hdr[CARD_HDR_UID_OFF + 2] = (uint8_t)(c->uid >> 8);
-            hdr[CARD_HDR_UID_OFF + 3] = (uint8_t)(c->uid);
-            for (int i = 0; i < 128; i++) emit(c, hdr[i]);
+            int off = c->read_cursor;
+            for (int i = 0; i < 128; i++) {
+                int p = off + i;
+                emit(c, (p >= 0 && p < CARD_IMAGE_BYTES) ? c->image[p] : 0x00);
+            }
+            c->read_cursor = off + 128;       /* 次 block へ前進 */
+            if (c->read_len > 0) c->read_len -= (c->read_len < 128 ? c->read_len : 128);
         } else {
             emit_n(c, 0x00, 128);
         }
         break;
 
-    /* ---- read-data 0x2D / write 0xAD: 単 ACK 0x8B（データは後続 0x0D で授受）---- */
+    /* ---- select-by-UID 0x2D（+8B UID record）: addr ではなく UID 選択。read cursor を image 先頭へ戻す ----
+       live 確証(2026-07-01): 0x2D の 8B は SEARCH で返した UID record（例 `5991...`）であって read アドレスではない。
+       以後の 0x0D 連続 read は image を先頭から順次供給する（block index は 0x68/0x0D 引数だが、まず順次供給で読込完了を狙う）。*/
     case CARD_CMD_READ_DATA:
-    case CARD_CMD_WRITE:
+        c->read_cursor = 0;                   /* image 先頭から順次 read */
+        c->read_len = 0;
         emit(c, CARD_ACK_8B);                 /* 0x8B */
         break;
 
-    /* ---- read-data2 0x8D/0xCD/0xED: ACK 0x8B + b1 + b2（out0=b2,out1=b1）---- */
+    /* ---- write commit 0xAD（+4B addr BE）: write_addr を立て ACK 0x8B（len1）----
+       ★ 後続 write データのフレーミングは **未確定**。0xAD 自体はコミット指示で本コマンドにデータは載らない
+       （card_cmd_len(0xAD)=5）。実 write が走ったときの data-bearing 経路は card.write ログで観測して確定する
+       （最も live 観測を要する箇所。facts/devices.md §B2）。確定したら image[write_addr++] へ staging＋dirty。*/
+    case CARD_CMD_WRITE:
+        if (c->rx_len >= 5)
+            c->write_addr = (uint32_t)((c->rx[1] << 24) | (c->rx[2] << 16) | (c->rx[3] << 8) | c->rx[4]);
+        emit(c, CARD_ACK_8B);                 /* 0x8B */
+        break;
+
+    /* ---- read-data2 0x8D/0xCD/0xED: ACK 0x8B + b1 + b2（card_get_status2 0x885350, 容量/free 等）---- */
     case CARD_CMD_READ_DATA2:
     case 0xCDu:
-    case 0xEDu:
-        emit(c, CARD_ACK_8B); emit(c, 0x00); emit(c, 0x00);   /* TODO(PhaseB): 実データ b1/b2 */
+    case 0xEDu: {
+        /* 暫定: card_type→容量(byte) を 2B status2 に載せる。正確な意味（free/ptr）は live 確証。 */
+        uint8_t cap_hi = 0x00, cap_lo = 0x00;
+        switch (c->card_type) {
+        case CARD_TYPE_1984: cap_hi = (CARD_DATALEN_1984 >> 8) & 0xFF; cap_lo = CARD_DATALEN_1984 & 0xFF; break;
+        case CARD_TYPE_960:  cap_hi = (CARD_DATALEN_960  >> 8) & 0xFF; cap_lo = CARD_DATALEN_960  & 0xFF; break;
+        default:             cap_hi = (CARD_DATALEN_4032 >> 8) & 0xFF; cap_lo = CARD_DATALEN_4032 & 0xFF; break;
+        }
+        emit(c, CARD_ACK_8B); emit(c, cap_hi); emit(c, cap_lo);
         break;
+    }
 
     /* ---- 0x6D slot-sel: ACK 0x4B + b1 + b2 ---- */
     case CARD_CMD_SLOT_SEL:

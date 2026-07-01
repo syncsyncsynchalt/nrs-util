@@ -79,6 +79,11 @@ typedef struct {
     uint32_t uid;               /* カード UID（ヘッダ +0x04 BE。whitelist 照合値）*/
     uint8_t  card_type;         /* 種別バイト 0x36/0xC9/0xFF → 容量 1984/960/4032 */
     uint8_t  image[CARD_IMAGE_BYTES];  /* 永続カードデータ（card.bin の中身）*/
+    /* --- Phase B R/W カーソル（0x2D select → 0x0D read / 0xAD write）--- */
+    int      read_cursor;       /* 0x0D 連続 read の image オフセット（0x2D の addr で設定, +128/回）*/
+    int      read_len;          /* 0x2D が指定した残り read 長（BE 4B。診断/境界）*/
+    uint32_t write_addr;        /* 0xAD が指定した次 write の image オフセット（BE 4B）*/
+    uint8_t  dirty;             /* image を変更済（eject/halt 契機で card.bin へ保存）*/
     /* --- 診断 --- */
     unsigned reads;             /* ReadFile 回数 */
     unsigned writes;            /* WriteFile バイト数 */

@@ -146,6 +146,50 @@ static unsigned __cdecl d_ext_install_kick(void) {
  * 対策: hwnd 未生成時のみ取得可能な窓(WGL があればそれ、無ければデスクトップ窓)を一時供給し、ゲーム自身の
  * dinput_create_device に **genuine に** SysMouse を CreateDevice/SetDataFormat/SetCooperativeLevel/Acquire させて
  * count を立てさせる（count を直接書かない＝OS 境界エミュ）。本来の WGL 窓が出来たら次回呼出で作り直される。 */
+/* ---- main per-frame 実時間計時（チラつき=30fps 二重 present の 33ms 在処を局在化） ----
+ * amApp_main_loop はフレーム制限なしのスピンなので、FUN_00643de0(per-frame tick) の実時間 ≈ フレーム周期。
+ * これが ~33ms なら 33ms は frame work 内（CPU or GPU 待ち）にある。120 frame 毎に集約 1 行。 */
+static void (*o_frametick)(void);
+static void (*o_present_drive)(void);   /* FUN_006c3930: frame_present_main + render kick + post */
+static void (*o_scene_dispatch)(void);  /* scene_list_render_dispatch 0x89dac0: scene 走査+GL 発行 */
+static LARGE_INTEGER g_pq_qpf; static int g_pq_init;
+static LONGLONG g_pq_last; static unsigned g_pq_n;
+static LONGLONG g_pq_dur_sum, g_pq_dur_max, g_pq_per_sum;
+static LONGLONG g_pq_pd_sum, g_pq_pd_max, g_pq_sc_sum, g_pq_sc_max;
+static LONGLONG pq_us(LONGLONG t){ return g_pq_qpf.QuadPart > 0 ? t * 1000000LL / g_pq_qpf.QuadPart : 0; }
+static void __cdecl d_present_drive(void) {
+    LARGE_INTEGER a, b; QueryPerformanceCounter(&a);
+    o_present_drive();
+    QueryPerformanceCounter(&b); LONGLONG d = b.QuadPart - a.QuadPart;
+    g_pq_pd_sum += d; if (d > g_pq_pd_max) g_pq_pd_max = d;
+}
+static void __cdecl d_scene_dispatch(void) {
+    LARGE_INTEGER a, b; QueryPerformanceCounter(&a);
+    o_scene_dispatch();
+    QueryPerformanceCounter(&b); LONGLONG d = b.QuadPart - a.QuadPart;
+    g_pq_sc_sum += d; if (d > g_pq_sc_max) g_pq_sc_max = d;
+}
+static void __cdecl d_frametick(void) {
+    if (!g_pq_init) { QueryPerformanceFrequency(&g_pq_qpf); g_pq_init = 1; }
+    LARGE_INTEGER a; QueryPerformanceCounter(&a);
+    if (g_pq_last) { LONGLONG p = a.QuadPart - g_pq_last; g_pq_per_sum += p; }
+    g_pq_last = a.QuadPart;
+    o_frametick();
+    LARGE_INTEGER b; QueryPerformanceCounter(&b);
+    LONGLONG d = b.QuadPart - a.QuadPart; g_pq_dur_sum += d; if (d > g_pq_dur_max) g_pq_dur_max = d;
+    if (++g_pq_n >= 120) {
+        char line[320];
+        wsprintfA(line, "{\"ev\":\"pace.main\",\"n\":%u,\"frame_avg_us\":%ld,\"frame_max_us\":%ld,"
+                  "\"present_avg_us\":%ld,\"present_max_us\":%ld,\"scene_avg_us\":%ld,\"scene_max_us\":%ld}",
+                  g_pq_n, (long)pq_us(g_pq_dur_sum / g_pq_n), (long)pq_us(g_pq_dur_max),
+                  (long)pq_us(g_pq_pd_sum / g_pq_n), (long)pq_us(g_pq_pd_max),
+                  (long)pq_us(g_pq_sc_sum / g_pq_n), (long)pq_us(g_pq_sc_max));
+        host_log("info", line);
+        g_pq_n = 0; g_pq_dur_sum = g_pq_dur_max = g_pq_per_sum = 0;
+        g_pq_pd_sum = g_pq_pd_max = g_pq_sc_sum = g_pq_sc_max = 0;
+    }
+}
+
 static int gh(unsigned va, void *det, void **orig) {
     void *a = (void *)((uintptr_t)GetModuleHandleW(NULL) + (va - IMAGE_BASE));
     return (MH_CreateHook(a, det, orig) == MH_OK && MH_EnableHook(a) == MH_OK) ? 0 : -1;
@@ -163,5 +207,8 @@ int gamehooks_install(void) {   /* MH_Initialize は hooks_install で実施済 
     e |= gh(0x679CB0, (void *)d_board_check,(void **)&o_board_check);  /* board check PRE: board index=2/flag 供給（errCode 0xa→errNo 910 解消）*/
     e |= gh(0x45A8F0, (void *)d_extimg_gate_probe,(void **)&o_extimg_gate_probe); /* image-present gate POST: DAT_01601b23=1（EXTEND IMAGE→OK skip）*/
     e |= gh(0x72EAF0, (void *)d_ext_install_kick,(void **)&o_ext_install_kick); /* extend-image install kicker POST: install_ctx 完了 provision（fallback／P_extimg 0x72B3A0 格上げ）*/
+    e |= gh(0x643DE0, (void *)d_frametick,     (void **)&o_frametick);      /* main per-frame 実時間計時（pace.main）*/
+    e |= gh(0x6C3930, (void *)d_present_drive,  (void **)&o_present_drive);  /* present 駆動部の実時間（内訳）*/
+    e |= gh(0x89DAC0, (void *)d_scene_dispatch, (void **)&o_scene_dispatch); /* scene dispatch の実時間（内訳）*/
     return e;
 }

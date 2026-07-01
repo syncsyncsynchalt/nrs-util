@@ -50,6 +50,11 @@ static COLORREF level_color(Level l){
 static wchar_t G_GAME_DIR[MAX_PATH], G_GAME_EXE[MAX_PATH];
 static wchar_t G_HOST_DLL[MAX_PATH], G_LOGIC_DLL[MAX_PATH], G_CFG[MAX_PATH], G_LOG[MAX_PATH];
 static wchar_t G_STATUS[MAX_PATH];   /* nrsedge.status.json（host が集約状態を書く。CLI が 1 ショット読取） */
+static wchar_t G_CARDCTL[MAX_PATH];  /* nrsedge.card.json（カードの抜き差し指示。loader が書き logic が毎フレーム読む）*/
+static wchar_t G_CARDS_DIR[MAX_PATH];/* カード .bin の既定保存ディレクトリ（<game>\cards）*/
+
+#define CARD_IMG_BYTES 0x1008        /* 仮想カード image 全長（64B ヘッダ + ~4032B データ）。card.h と一致 */
+#define CARD_UID_OFF   0x04          /* ヘッダ内 UID dword 位置（BE）。card.h CARD_HDR_UID_OFF と一致 */
 
 /* 入力アクションと既定バインド（VK）。順序は Python の ACTIONS と一致。 */
 #define NACT 11
@@ -78,22 +83,30 @@ enum {
     ID_LAUNCH=100, ID_STOP, ID_RELAUNCH, /* STOP/RELAUNCH は廃止・予約（起動ボタンがトグル化） */
     ID_FREEPLAY, ID_TEST, ID_WINDOWED,   /* WINDOWED は廃止・予約（ウインドウモード固定） */
     ID_STATUS, ID_TAB,
-    ID_FILTER=200, ID_HIDEIO, ID_ERRONLY, ID_SEARCH, ID_SEARCHNEXT, ID_AUTOSCROLL,
+    ID_FILTER=200, ID_HIDEIO, ID_ERRONLY, ID_SEARCH, ID_SEARCHNEXT, ID_RESUME,
     ID_PAUSE, ID_CLEAR, ID_EXPORT, ID_LOG, ID_LOGSTATUS, ID_LBL_FILTER, ID_LBL_SEARCH,
     ID_BIND_LBL=300,   /* +i */
     ID_BIND_BTN=320,   /* +i */
     ID_BIND_IND=340,   /* +i */
     ID_ANALOG=400, ID_GAME, ID_SAVE, ID_CAP, ID_INPUT_HELP,
+    /* カードタブ */
+    ID_CARD_NEW=500, ID_CARD_LOAD, ID_CARD_INSERT, ID_CARD_EJECT, ID_CARD_SAVEAS, ID_CARD_REFRESH,
+    ID_CARD_TYPE, ID_CARD_HEX, ID_CARD_LOG, ID_CARD_FIELDS, ID_CARD_HELP,
 };
 /* ワーカースレッド→UIスレッドのカスタムメッセージ */
 #define WM_APP_LOGLINE (WM_APP+1)   /* lParam = UTF-8 char* (1行、要 free) */
 #define WM_APP_STATUS  (WM_APP+2)   /* wParam = COLORREF, lParam = UTF-8 char* (要 free) */
 #define WM_APP_RUNSTATE (WM_APP+3)  /* wParam = 0/1 → 起動ボタンの running 状態を同期 */
+#define WM_APP_SYNCSCROLL (WM_APP+4) /* g_log スクロール後に追従ON/OFFを再判定（遅延実行） */
 
 /* ---- グローバル UI ハンドル ---- */
-static HWND g_main, g_tab, g_status, g_log, g_logstatus;
+static HWND g_main, g_tab, g_status, g_log, g_logstatus, g_resume;
 static HWND g_filter, g_search, g_cap, g_analog, g_game;
 static HWND g_bindlbl[NACT], g_bindind[NACT];
+static HWND g_card_hex, g_card_log, g_card_fields, g_card_type;  /* カードタブ */
+static wchar_t g_card_path[MAX_PATH];   /* 現在アクティブなカード .bin */
+static int  g_card_present = 0;          /* 挿入中フラグ（GUI 側の記録）*/
+static int  g_card_gen = 0;              /* 制御ファイル gen（変更ごとに +1）*/
 static HFONT g_font, g_fontUI;
 static HBRUSH g_brBG, g_brBG2;
 static int  g_busy = 0;           /* 起動/終了の in-flight ガード */
@@ -143,6 +156,8 @@ static void resolve_paths(void){
     _snwprintf(G_CFG,      MAX_PATH, L"%s\\nrsedge.cfg", gdir);
     _snwprintf(G_LOG,      MAX_PATH, L"%s\\nrsedge.log", gdir);
     _snwprintf(G_STATUS,   MAX_PATH, L"%s\\nrsedge.status.json", gdir);
+    _snwprintf(G_CARDCTL,  MAX_PATH, L"%s\\nrsedge.card.json", gdir);
+    _snwprintf(G_CARDS_DIR,MAX_PATH, L"%s\\cards", gdir);
     _snwprintf(G_HOST_DLL, MAX_PATH, L"%s\\build\\Debug\\host.dll",  repo);
     _snwprintf(G_LOGIC_DLL,MAX_PATH, L"%s\\build\\Debug\\logic.dll", repo);
 }
@@ -248,16 +263,91 @@ static Level level_of(const char *lvl, const char *ev, const char *msg){
 
 /* ============================================================ RichEdit ヘルパ */
 
+static int g_autoscroll = 1;        /* 1=末尾追従中 / 0=ユーザーが遡って確認中（右下に再開ボタン） */
+static void update_resume_btn(void);
+static int autoscroll_on(void){ return g_autoscroll; }
+static int g_in_rerender = 0;   /* log_rerender 中は追記ごとの位置保存をスキップ（末尾は最後にまとめて） */
+
+/* 自動スクロール OFF（ユーザーが遡って確認中）の間は追記で表示が末尾へ飛ばないよう
+ * スクロール位置を保存→復元する（EM_REPLACESEL はキャレットを可視化しようと末尾へ
+ * スクロールするため）。ON のときは保存せず、後段の log_scroll_end が末尾追従する。 */
 static void log_append_colored(const wchar_t *wtext, COLORREF color){
+    int keep = !autoscroll_on() && !g_in_rerender;
+    POINT sp={0,0}; if(keep) SendMessageW(g_log, EM_GETSCROLLPOS, 0, (LPARAM)&sp);
     int end = GetWindowTextLengthW(g_log);
     SendMessageW(g_log, EM_SETSEL, end, end);
     CHARFORMAT2W cf; ZeroMemory(&cf,sizeof cf);
     cf.cbSize=sizeof cf; cf.dwMask=CFM_COLOR; cf.crTextColor=color;
     SendMessageW(g_log, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf);
     SendMessageW(g_log, EM_REPLACESEL, FALSE, (LPARAM)wtext);
+    if(keep) SendMessageW(g_log, EM_SETSCROLLPOS, 0, (LPARAM)&sp);
 }
-static int autoscroll_on(void){ return (int)SendMessageW(GetDlgItem(g_main,ID_AUTOSCROLL),BM_GETCHECK,0,0)==BST_CHECKED; }
-static void log_scroll_end(void){ if(autoscroll_on()) SendMessageW(g_log, WM_VSCROLL, SB_BOTTOM, 0); }
+/* プログラム的な末尾スクロール中フラグ。LogProc がこれをユーザー操作と誤認して
+ * 自動追従を勝手に解除しないようにする（誤解除→表示フリーズの防止）。 */
+static int g_prog_scroll = 0;
+static void log_scroll_to_end(void){ g_prog_scroll=1; SendMessageW(g_log, WM_VSCROLL, SB_BOTTOM, 0); g_prog_scroll=0; }
+static void log_scroll_end(void){ if(autoscroll_on()) log_scroll_to_end(); }
+
+/* 任意の RichEdit に色付き 1 行を追記し末尾へ追従（カードログ抽出ペイン用。常に末尾追従）。 */
+static void re_append_colored(HWND re, const wchar_t *wtext, COLORREF color){
+    int end=GetWindowTextLengthW(re);
+    SendMessageW(re, EM_SETSEL, end, end);
+    CHARFORMAT2W cf; ZeroMemory(&cf,sizeof cf);
+    cf.cbSize=sizeof cf; cf.dwMask=CFM_COLOR; cf.crTextColor=color;
+    SendMessageW(re, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf);
+    SendMessageW(re, EM_REPLACESEL, FALSE, (LPARAM)wtext);
+    SendMessageW(re, WM_VSCROLL, SB_BOTTOM, 0);
+}
+
+/* 手動スクロール＝追従解除。位置クエリ（GetScrollInfo/EM_POSFROMCHAR）は richedit では
+ * スクロール直後に旧値を返し信頼できないため使わない。仕様どおり「手で動かしたら止める／
+ * 再開はボタン」に割り切る。状態が変わったら右下の再開ボタン表示を更新。 */
+static void sync_autoscroll_to_view(void){
+    if(g_autoscroll){ g_autoscroll=0; update_resume_btn(); }
+}
+/* g_log(RichEdit) サブクラス: ユーザーのスクロール操作（ホイール/スクロールバー/
+ * カーソルキー）を検知して追従を解除する。自前の WM_VSCROLL(SB_BOTTOM)（log_scroll_end）は
+ * g_prog_scroll でガードされ解除トリガーにならない。 */
+static WNDPROC g_log_oldproc;
+static LRESULT CALLBACK LogProc(HWND h, UINT msg, WPARAM wp, LPARAM lp){
+    LRESULT r=CallWindowProcW(g_log_oldproc,h,msg,wp,lp);
+    switch(msg){
+        case WM_MOUSEWHEEL: case WM_VSCROLL:
+        case WM_KEYDOWN:    case WM_LBUTTONUP:
+            /* ユーザー操作由来のスクロールのみ追従解除（自前 SB_BOTTOM は g_prog_scroll で除外）。 */
+            if(!g_prog_scroll) PostMessageW(g_main, WM_APP_SYNCSCROLL, 0, 0);
+            break;
+    }
+    return r;
+}
+
+/* 再開ボタン = 所有付きトップレベル・ポップアップ。RichEdit へ子/兄弟で重ねると描画破綻
+ * （子=本文と一緒にスクロール／兄弟=g_log に塗り潰される or clipsiblings がカード RichEdit と干渉）
+ * するため、別ウィンドウとして g_log の上に浮かせる。クリックは自前 WM_LBUTTONUP。 */
+static void position_resume(void){
+    if(!g_resume || !g_log) return;
+    RECT lr; GetWindowRect(g_log, &lr);          /* g_log のスクリーン矩形 */
+    int rw=200, rh=24;
+    SetWindowPos(g_resume, HWND_TOP, lr.right-rw-24, lr.bottom-rh-8, rw, rh, SWP_NOACTIVATE);
+}
+static LRESULT CALLBACK ResumeProc(HWND h, UINT msg, WPARAM wp, LPARAM lp){
+    switch(msg){
+        case WM_PAINT: {
+            PAINTSTRUCT ps; HDC dc=BeginPaint(h,&ps);
+            RECT rc; GetClientRect(h,&rc);
+            HBRUSH br=CreateSolidBrush(HEXRGB(0x3a7bd5)); FillRect(dc,&rc,br); DeleteObject(br);
+            SetBkMode(dc,TRANSPARENT); SetTextColor(dc,RGB(255,255,255));
+            HFONT of=(HFONT)SelectObject(dc,g_fontUI);
+            DrawTextW(dc, L"▼ 自動スクロール再開", -1, &rc, DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+            SelectObject(dc,of);
+            EndPaint(h,&ps); return 0;
+        }
+        case WM_LBUTTONUP:                         /* 押下 → 末尾へ追従再開 */
+            g_autoscroll=1; log_scroll_to_end(); update_resume_btn();
+            return 0;
+    }
+    return DefWindowProcW(h,msg,wp,lp);
+}
 
 /* ============================================================ フィルタ / 整形 / 描画 */
 
@@ -286,6 +376,7 @@ static void log_append_entry(const Entry *e){
 }
 static void update_counts(void);
 static void log_rerender(void){
+    g_in_rerender = 1;
     SendMessageW(g_log, WM_SETREDRAW, FALSE, 0);
     SetWindowTextW(g_log, L"");
     g_disp=0; g_shown=0;
@@ -301,6 +392,7 @@ static void log_rerender(void){
     }
     SendMessageW(g_log, WM_SETREDRAW, TRUE, 0);
     InvalidateRect(g_log, NULL, TRUE);
+    g_in_rerender = 0;
     log_scroll_end();
     update_counts();
 }
@@ -377,6 +469,13 @@ static void ingest(const char *raw){
         memmove(g_ent, g_ent+drop, (g_ent_n-drop)*sizeof(Entry)); g_ent_n-=drop;
     }
     if(!g_paused && passes(e)) log_append_entry(e);
+
+    /* カードログ抽出: ev が "card" で始まる行をカードタブの専用ペインへも色付き追記。 */
+    if(g_card_log && strncmp(e->src, "card", 4)==0){
+        char line[1200]; fmt_entry(e, line, sizeof line);
+        strcat_s(line, sizeof line, "\r\n");
+        wchar_t *w=u8tow(line); re_append_colored(g_card_log, w, level_color(e->lvl)); free(w);
+    }
 }
 
 /* GUI 自身のイベント（loader 出力等）を JSONL 経路へ合流（PostMessage で UI スレッドへ）。 */
@@ -396,13 +495,16 @@ static void emit(const char *ev, const char *msg, const char *lvl){
 
 static DWORD WINAPI tail_thread(LPVOID arg){
     (void)arg;
-    LONGLONG pos=0;
+    LONGLONG pos=0; int first=1;
     char carry[2048]; int carry_n=0;
     for(;;){
         HANDLE h=CreateFileW(G_LOG, GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
                              NULL, OPEN_EXISTING, 0, NULL);
         if(h!=INVALID_HANDLE_VALUE){
             LARGE_INTEGER sz; GetFileSizeEx(h,&sz);
+            /* 初回は既存分を読み飛ばし即起動（前回ログを画面へ流し込まない＝高速・非破壊）。
+             * 以後 ▶起動の truncate で sz<pos になれば pos=0 にリセットし新セッションを頭から表示。 */
+            if(first){ pos=sz.QuadPart; first=0; }
             if(sz.QuadPart < pos){ pos=0; carry_n=0; }   /* ローテーション/truncate */
             LARGE_INTEGER mv; mv.QuadPart=pos; SetFilePointerEx(h,mv,NULL,FILE_BEGIN);
             char buf[8192]; DWORD rd;
@@ -622,6 +724,98 @@ static void log_clear(void){
     SetWindowTextW(g_log, L""); update_counts();
 }
 
+/* ============================================================ カードタブ ヘルパ
+ * loader は abi を変えず、抜き差し指示を **nrsedge.card.json**（present/image/type/gen）で logic に渡す。
+ * 可視化は loader が管理する .bin を直接読んで hex 描画する（live でゲームが書いた分も logic が同 .bin へ
+ * 永続化するので〔更新〕で反映される）。card_type は .bin に入れず制御ファイル側に持つ（.bin = 純ワイヤ image）。*/
+
+/* type コンボの選択 → card_type バイト（0=4032/1=1984/2=960）。 */
+static int card_type_selected(void){
+    int sel=(int)SendMessageW(g_card_type, CB_GETCURSEL, 0, 0);
+    switch(sel){ case 1: return 0x36; case 2: return 0xC9; default: return 0xFF; }
+}
+static int card_type_capacity(int type){ return type==0x36?1984 : type==0xC9?960 : 4032; }
+
+/* nrsedge.card.json を書く（present 切替の唯一経路。gen を必ず進めて logic に変化を伝える）。 */
+static void card_write_control(int present){
+    g_card_gen++;
+    FILE *f=_wfopen(G_CARDCTL, L"w"); if(!f) return;
+    char *pu=wtou8(g_card_path); char esc[700]; int j=0;
+    for(char *p=pu; *p && j<690; p++){ if(*p=='\\'||*p=='"') esc[j++]='\\'; esc[j++]=*p; }
+    esc[j]=0; free(pu);
+    fprintf(f, "{\"present\":%d,\"image\":\"%s\",\"type\":%d,\"gen\":%d}\n",
+            present, esc, card_type_selected(), g_card_gen);
+    fclose(f);
+    g_card_present=present;
+}
+
+/* 解析フィールド欄を更新（hex 描画で得た uid/サイズを使う・再読込しない）。 */
+static void card_update_fields(unsigned uid, int n){
+    int type=card_type_selected();
+    char buf[800];
+    if(g_card_path[0]){
+        char *pu=wtou8(g_card_path);
+        _snprintf(buf, sizeof buf,
+            "パス: %s\r\nサイズ: %d B\r\nUID (@+0x04 BE): %08X\r\n種別: 0x%02X (%d B)\r\n状態: %s",
+            pu, n, uid, type, card_type_capacity(type), g_card_present?"挿入中":"取出済");
+        free(pu);
+    } else {
+        _snprintf(buf, sizeof buf, "（カード未選択）\r\n〔新規作成〕または〔読込〕でカードを用意してください。");
+    }
+    wchar_t *w=u8tow(buf); SetWindowTextW(g_card_fields, w); free(w);
+}
+
+/* アクティブ .bin を読んで hex ダンプを描画（+解析フィールド更新）。 */
+static void card_render_hex(void){
+    unsigned char data[CARD_IMG_BYTES]; int n=0;
+    if(g_card_path[0]){
+        FILE *f=_wfopen(g_card_path, L"rb");
+        if(f){ n=(int)fread(data,1,sizeof data,f); fclose(f); }
+    }
+    if(n<=0){ SetWindowTextW(g_card_hex, L""); card_update_fields(0,0); return; }
+    size_t cap=(size_t)(n/16+2)*92 + 64;
+    char *t=(char*)malloc(cap); size_t o=0;
+    for(int i=0;i<n;i+=16){
+        o+=(size_t)_snprintf(t+o,cap-o,"%04X  ",i);
+        for(int j=0;j<16;j++){
+            if(i+j<n) o+=(size_t)_snprintf(t+o,cap-o,"%02X ",data[i+j]);
+            else      o+=(size_t)_snprintf(t+o,cap-o,"   ");
+            if(j==7 && o<cap-1) t[o++]=' ';
+        }
+        if(o<cap-2){ t[o++]=' '; t[o++]='|'; }
+        for(int j=0;j<16 && i+j<n && o<cap-1;j++){ unsigned char ch=data[i+j]; t[o++]=(ch>=0x20&&ch<0x7f)?(char)ch:'.'; }
+        o+=(size_t)_snprintf(t+o,cap-o,"|\r\n");
+    }
+    t[o]=0;
+    wchar_t *w=u8tow(t); SetWindowTextW(g_card_hex, w); free(w); free(t);
+    unsigned uid=((unsigned)data[CARD_UID_OFF]<<24)|((unsigned)data[CARD_UID_OFF+1]<<16)
+               | ((unsigned)data[CARD_UID_OFF+2]<<8)|data[CARD_UID_OFF+3];
+    card_update_fields(uid, n);
+}
+
+/* 新規 4104B カードを作成（全 0 + ランダム UID を +0x04 BE に配置）。type は制御ファイル側で持つ。 */
+static int card_new_file(const wchar_t *path){
+    unsigned char img[CARD_IMG_BYTES]; memset(img,0,sizeof img);
+    srand((unsigned)time(NULL) ^ GetTickCount());
+    unsigned uid=(((unsigned)rand())<<17) ^ (((unsigned)rand())<<2) ^ GetTickCount();
+    img[CARD_UID_OFF+0]=(uid>>24)&0xFF; img[CARD_UID_OFF+1]=(uid>>16)&0xFF;
+    img[CARD_UID_OFF+2]=(uid>>8)&0xFF;  img[CARD_UID_OFF+3]=uid&0xFF;
+    FILE *f=_wfopen(path, L"wb"); if(!f) return 0;
+    int n=(int)fwrite(img,1,sizeof img,f); fclose(f);
+    return n==CARD_IMG_BYTES;
+}
+
+/* カード .bin 用ファイルダイアログ（save=1 で保存ダイアログ）。成功で path に格納し 1。 */
+static int card_pick_file(int save, wchar_t *path){
+    path[0]=0;
+    OPENFILENAMEW ofn; ZeroMemory(&ofn,sizeof ofn); ofn.lStructSize=sizeof ofn;
+    ofn.hwndOwner=g_main; ofn.lpstrFilter=L"カードイメージ\0*.bin\0すべて\0*.*\0";
+    ofn.lpstrFile=path; ofn.nMaxFile=MAX_PATH; ofn.lpstrDefExt=L"bin";
+    ofn.lpstrInitialDir=G_CARDS_DIR;
+    ofn.Flags = save ? OFN_OVERWRITEPROMPT : (OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST);
+    return save ? GetSaveFileNameW(&ofn) : GetOpenFileNameW(&ofn);
+}
+
 /* ============================================================ UI 構築 / レイアウト */
 
 static HWND mk(const wchar_t *cls, const wchar_t *txt, DWORD style, int id, HFONT font){
@@ -649,6 +843,7 @@ static void build_ui(void){
     TCITEMW ti; ti.mask=TCIF_TEXT;
     ti.pszText=(LPWSTR)L"ログ";              SendMessageW(g_tab, TCM_INSERTITEMW, 0, (LPARAM)&ti);
     ti.pszText=(LPWSTR)L"入力設定"; SendMessageW(g_tab, TCM_INSERTITEMW, 1, (LPARAM)&ti);
+    ti.pszText=(LPWSTR)L"カード";        SendMessageW(g_tab, TCM_INSERTITEMW, 2, (LPARAM)&ti);
 
     /* --- ログタブ --- */
     mk(L"STATIC", L"Filter:", SS_RIGHT, ID_LBL_FILTER, g_fontUI);
@@ -658,7 +853,8 @@ static void build_ui(void){
     mk(L"STATIC", L"検索:", SS_RIGHT, ID_LBL_SEARCH, g_fontUI);
     g_search = mk(L"EDIT", L"", WS_BORDER|ES_AUTOHSCROLL, ID_SEARCH, g_fontUI);
     mk(L"BUTTON", L"次へ", BS_PUSHBUTTON, ID_SEARCHNEXT, g_fontUI);
-    c=mk(L"BUTTON", L"自動スクロール", BS_AUTOCHECKBOX, ID_AUTOSCROLL, g_fontUI); SendMessageW(c,BM_SETCHECK,BST_CHECKED,0);
+    /* 自動スクロールは内部状態 g_autoscroll で持つ（チェックボックス廃止）。手動スクロールで
+     * 自動 OFF、OFF の間だけ右下に「再開」ボタン(g_resume)を浮かせる。 */
     mk(L"BUTTON", L"一時停止", BS_AUTOCHECKBOX, ID_PAUSE, g_fontUI);
     mk(L"BUTTON", L"クリア", BS_PUSHBUTTON, ID_CLEAR, g_fontUI);
     mk(L"BUTTON", L"JSONL書出", BS_PUSHBUTTON, ID_EXPORT, g_fontUI);
@@ -669,7 +865,15 @@ static void build_ui(void){
     SendMessageW(g_log, WM_SETFONT, (WPARAM)g_font, TRUE);
     SendMessageW(g_log, EM_SETBKGNDCOLOR, 0, (LPARAM)C_BG);
     SendMessageW(g_log, EM_EXLIMITTEXT, 0, (LPARAM)0x7FFFFFFF);
+    /* スクロール検知のためサブクラス化（手動スクロール→自動追従を停止/再開）。
+     * 注意: g_log に WS_CLIPSIBLINGS は付けない。カードタブの RichEdit(g_card_hex/g_card_log)が
+     * g_log 領域にほぼ全面で重なり高z順のため、clipsiblings だと g_log が全面クリップされ描画消失する。 */
+    g_log_oldproc=(WNDPROC)SetWindowLongPtrW(g_log, GWLP_WNDPROC, (LONG_PTR)LogProc);
     g_logstatus = mk(L"STATIC", L"", SS_LEFT, ID_LOGSTATUS, g_fontUI);
+    /* 「自動スクロール再開」ボタン = 所有付きトップレベル・ポップアップ（g_log の上に浮かせる）。
+     * 既定は非表示（追従中）、停止中のみ position_resume で位置決めして表示。 */
+    g_resume = CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE, L"nrsResume", L"",
+        WS_POPUP, 0,0,200,24, g_main, NULL, GetModuleHandleW(NULL), NULL);
 
     /* --- 入力タブ --- */
     mk(L"STATIC",
@@ -688,6 +892,37 @@ static void build_ui(void){
     g_game  =mk(L"STATIC", L"game-side: (nrs.exe 起動時にゲームが受け取った入力)", SS_LEFT, ID_GAME, g_font);
     mk(L"BUTTON", L"保存（nrsedge.cfg）", BS_OWNERDRAW, ID_SAVE, g_fontUI);
     g_cap   =mk(L"STATIC", L"", SS_LEFT, ID_CAP, g_fontUI);
+
+    /* --- カードタブ --- */
+    mk(L"STATIC", L"カードの抜き差し・新規作成・保存・データ可視化・カードログ抽出", SS_LEFT, ID_CARD_HELP, g_fontUI);
+    mk(L"BUTTON", L"新規作成", BS_PUSHBUTTON, ID_CARD_NEW, g_fontUI);
+    mk(L"BUTTON", L"読込",     BS_PUSHBUTTON, ID_CARD_LOAD, g_fontUI);
+    g_card_type = mk(L"COMBOBOX", L"", CBS_DROPDOWNLIST|WS_VSCROLL, ID_CARD_TYPE, g_fontUI);
+    SendMessageW(g_card_type, CB_ADDSTRING, 0, (LPARAM)L"4032B (0xFF)");
+    SendMessageW(g_card_type, CB_ADDSTRING, 0, (LPARAM)L"1984B (0x36)");
+    SendMessageW(g_card_type, CB_ADDSTRING, 0, (LPARAM)L"960B (0xC9)");
+    SendMessageW(g_card_type, CB_SETCURSEL, 0, 0);
+    mk(L"BUTTON", L"挿入",     BS_PUSHBUTTON, ID_CARD_INSERT, g_fontUI);
+    mk(L"BUTTON", L"取り出し", BS_PUSHBUTTON, ID_CARD_EJECT, g_fontUI);
+    mk(L"BUTTON", L"別名保存", BS_PUSHBUTTON, ID_CARD_SAVEAS, g_fontUI);
+    mk(L"BUTTON", L"更新",     BS_PUSHBUTTON, ID_CARD_REFRESH, g_fontUI);
+    g_card_fields = mk(L"STATIC", L"（カード未選択）", SS_LEFT, ID_CARD_FIELDS, g_font);
+
+    g_card_hex = CreateWindowExW(0, MSFTEDIT_CLASS, L"",
+        WS_CHILD|WS_VISIBLE|WS_CLIPSIBLINGS|WS_VSCROLL|WS_HSCROLL|ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL,
+        0,0,10,10, g_main, (HMENU)ID_CARD_HEX, GetModuleHandleW(NULL), NULL);
+    SendMessageW(g_card_hex, WM_SETFONT, (WPARAM)g_font, TRUE);
+    SendMessageW(g_card_hex, EM_SETBKGNDCOLOR, 0, (LPARAM)C_BG);
+    SendMessageW(g_card_hex, EM_EXLIMITTEXT, 0, (LPARAM)0x7FFFFFFF);
+    { CHARFORMAT2W cf; ZeroMemory(&cf,sizeof cf); cf.cbSize=sizeof cf; cf.dwMask=CFM_COLOR; cf.crTextColor=C_FG;
+      SendMessageW(g_card_hex, EM_SETCHARFORMAT, SCF_DEFAULT, (LPARAM)&cf); }   /* SetWindowText の既定色を明色に */
+
+    g_card_log = CreateWindowExW(0, MSFTEDIT_CLASS, L"",
+        WS_CHILD|WS_VISIBLE|WS_CLIPSIBLINGS|WS_VSCROLL|ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL,
+        0,0,10,10, g_main, (HMENU)ID_CARD_LOG, GetModuleHandleW(NULL), NULL);
+    SendMessageW(g_card_log, WM_SETFONT, (WPARAM)g_font, TRUE);
+    SendMessageW(g_card_log, EM_SETBKGNDCOLOR, 0, (LPARAM)C_BG);
+    SendMessageW(g_card_log, EM_EXLIMITTEXT, 0, (LPARAM)0x7FFFFFFF);
 }
 
 /* タブ表示領域 */
@@ -700,11 +935,19 @@ static RECT tab_display(void){
 }
 static void mv(int id,int x,int y,int w,int h){ MoveWindow(GetDlgItem(g_main,id),x,y,w,h,TRUE); }
 
+/* 再開ボタンは「ログタブ表示中」かつ「追従OFF」のときだけ最前面に出す。 */
+static void update_resume_btn(void){
+    int show = (TabCtrl_GetCurSel(g_tab)==0 && !g_autoscroll);
+    if(show){ position_resume(); ShowWindow(g_resume, SW_SHOWNOACTIVATE); }
+    else ShowWindow(g_resume, SW_HIDE);
+}
+
 static void show_page(int page){
     int log_ids[]={ID_LBL_FILTER,ID_FILTER,ID_HIDEIO,ID_ERRONLY,ID_LBL_SEARCH,ID_SEARCH,
-                   ID_SEARCHNEXT,ID_AUTOSCROLL,ID_PAUSE,ID_CLEAR,ID_EXPORT,ID_LOG,ID_LOGSTATUS};
+                   ID_SEARCHNEXT,ID_PAUSE,ID_CLEAR,ID_EXPORT,ID_LOG,ID_LOGSTATUS};
     for(int i=0;i<(int)(sizeof log_ids/sizeof*log_ids);i++)
         ShowWindow(GetDlgItem(g_main,log_ids[i]), page==0?SW_SHOW:SW_HIDE);
+    update_resume_btn();
     ShowWindow(GetDlgItem(g_main,ID_INPUT_HELP), page==1?SW_SHOW:SW_HIDE);
     ShowWindow(g_analog,page==1?SW_SHOW:SW_HIDE);
     ShowWindow(g_game,page==1?SW_SHOW:SW_HIDE);
@@ -716,6 +959,10 @@ static void show_page(int page){
         ShowWindow(GetDlgItem(g_main,ID_BIND_BTN+i),page==1?SW_SHOW:SW_HIDE);
         ShowWindow(g_bindind[i],page==1?SW_SHOW:SW_HIDE);
     }
+    int card_ids[]={ID_CARD_HELP,ID_CARD_NEW,ID_CARD_LOAD,ID_CARD_TYPE,ID_CARD_INSERT,
+                    ID_CARD_EJECT,ID_CARD_SAVEAS,ID_CARD_REFRESH,ID_CARD_FIELDS,ID_CARD_HEX,ID_CARD_LOG};
+    for(int i=0;i<(int)(sizeof card_ids/sizeof*card_ids);i++)
+        ShowWindow(GetDlgItem(g_main,card_ids[i]), page==2?SW_SHOW:SW_HIDE);
 }
 
 static void layout(void){
@@ -734,12 +981,14 @@ static void layout(void){
     mv(ID_LBL_FILTER,lx,ly+4,46,18); lx+=50; mv(ID_FILTER,lx,ly,150,22); lx+=158;
     mv(ID_HIDEIO,lx,ly,80,22); lx+=84; mv(ID_ERRONLY,lx,ly,90,22); lx+=98;
     mv(ID_LBL_SEARCH,lx,ly+4,40,18); lx+=42; mv(ID_SEARCH,lx,ly,110,22); lx+=116;
-    mv(ID_SEARCHNEXT,lx,ly,48,22); lx+=54; mv(ID_AUTOSCROLL,lx,ly,120,22); lx+=126;
+    mv(ID_SEARCHNEXT,lx,ly,48,22); lx+=54;
     mv(ID_PAUSE,lx,ly,80,22); lx+=84; mv(ID_CLEAR,lx,ly,60,22); lx+=66; mv(ID_EXPORT,lx,ly,86,22);
     /* RichEdit + log status */
     int top2=ly+30;
-    MoveWindow(g_log, p.left+4, top2, (p.right-p.left)-8, (p.bottom-top2)-26, TRUE);
-    mv(ID_LOGSTATUS, p.left+4, p.bottom-22, (p.right-p.left)-8, 20);
+    int lw=(p.right-p.left)-8, lh=(p.bottom-top2)-26;
+    MoveWindow(g_log, p.left+4, top2, lw, lh, TRUE);
+    mv(ID_LOGSTATUS, p.left+4, p.bottom-22, (p.right-p.left)-8, 20);   /* ステータスは全幅 */
+    update_resume_btn();   /* 再開ボタン(ポップアップ)を g_log の右下へ追従させる（表示中のみ） */
     /* 入力タブ */
     mv(ID_INPUT_HELP, p.left+10, p.top+8, (p.right-p.left)-20, 20);
     int gy=p.top+38;
@@ -755,6 +1004,27 @@ static void layout(void){
     MoveWindow(g_game,   p.left+12, by, (p.right-p.left)-24, 20, TRUE); by+=26;
     mv(ID_SAVE, p.left+12, by, 180, 26); by+=30;
     MoveWindow(g_cap,    p.left+12, by, (p.right-p.left)-24, 20, TRUE);
+
+    /* カードタブ */
+    int cw=(p.right-p.left);
+    int cx=p.left+6, cy=p.top+6;
+    mv(ID_CARD_HELP, cx, cy, cw-12, 18); cy+=24;
+    /* 操作ボタン行 */
+    mv(ID_CARD_NEW,    cx, cy, 80, 24); cx+=86;
+    mv(ID_CARD_LOAD,   cx, cy, 60, 24); cx+=66;
+    mv(ID_CARD_TYPE,   cx, cy, 120,200); cx+=128;     /* COMBOBOX 高さはドロップ領域込み */
+    mv(ID_CARD_INSERT, cx, cy, 60, 24); cx+=66;
+    mv(ID_CARD_EJECT,  cx, cy, 76, 24); cx+=82;
+    mv(ID_CARD_SAVEAS, cx, cy, 76, 24); cx+=82;
+    mv(ID_CARD_REFRESH,cx, cy, 60, 24);
+    cy+=32;
+    /* 解析フィールド（5 行ぶん）*/
+    mv(ID_CARD_FIELDS, p.left+6, cy, cw-12, 80); cy+=86;
+    /* hex（左半）/ カードログ（右半）*/
+    int half=(cw-18)/2;
+    int ch2=(p.bottom-cy)-6;
+    MoveWindow(g_card_hex, p.left+6,         cy, half, ch2, TRUE);
+    MoveWindow(g_card_log, p.left+6+half+6,  cy, half, ch2, TRUE);
 }
 
 /* ============================================================ WndProc */
@@ -782,6 +1052,7 @@ static LRESULT CALLBACK WndProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp){
     case WM_CREATE:
         return 0;
     case WM_SIZE: layout(); return 0;
+    case WM_MOVE: if(IsWindowVisible(g_resume)) position_resume(); return 0;   /* ポップアップを追従 */
 
     case WM_CTLCOLORSTATIC: {
         HDC dc=(HDC)wp; HWND c=(HWND)lp; int id=GetDlgCtrlID(c);
@@ -841,6 +1112,36 @@ static LRESULT CALLBACK WndProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp){
         else if(id==ID_CLEAR){ log_clear(); }
         else if(id==ID_EXPORT){ export_jsonl(); }
         else if(id==ID_SAVE){ write_cfg(); SetWindowTextW(g_cap, L"保存しました（再起動で反映）"); }
+        else if(id==ID_CARD_NEW){
+            CreateDirectoryW(G_CARDS_DIR, NULL);           /* 既定 dir を用意（既存でも無害）*/
+            wchar_t path[MAX_PATH];
+            if(card_pick_file(1, path) && card_new_file(path)){
+                wcsncpy(g_card_path, path, MAX_PATH-1); g_card_path[MAX_PATH-1]=0;
+                card_render_hex();
+                emit("card.new", "new card created", "info");
+            }
+        }
+        else if(id==ID_CARD_LOAD){
+            wchar_t path[MAX_PATH];
+            if(card_pick_file(0, path)){
+                wcsncpy(g_card_path, path, MAX_PATH-1); g_card_path[MAX_PATH-1]=0;
+                card_render_hex();
+                if(g_card_present) card_write_control(1);   /* 挿入中なら新イメージを即反映 */
+            }
+        }
+        else if(id==ID_CARD_INSERT){
+            if(!g_card_path[0]){ emit("card.insert", "no active card (新規作成/読込してください)", "warn"); }
+            else { card_write_control(1); card_update_fields(0,CARD_IMG_BYTES); card_render_hex(); }
+        }
+        else if(id==ID_CARD_EJECT){
+            card_write_control(0); card_render_hex();
+        }
+        else if(id==ID_CARD_SAVEAS){
+            if(!g_card_path[0]){ emit("card.saveas", "no active card", "warn"); }
+            else { wchar_t path[MAX_PATH];
+                if(card_pick_file(1, path)) CopyFileW(g_card_path, path, FALSE); }
+        }
+        else if(id==ID_CARD_REFRESH){ card_render_hex(); }
         else if(id>=ID_BIND_BTN && id<ID_BIND_BTN+NACT){
             g_capture_act=id-ID_BIND_BTN;
             for(int vk=0;vk<256;vk++) g_prev_down[vk]=(GetAsyncKeyState(vk)&0x8000)!=0;
@@ -856,6 +1157,9 @@ static LRESULT CALLBACK WndProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp){
     }
     case WM_APP_RUNSTATE:
         set_run_button((int)wp);   /* 起動失敗を検知したワーカーがボタンを ▶起動 へ戻す等 */
+        return 0;
+    case WM_APP_SYNCSCROLL:
+        sync_autoscroll_to_view();   /* g_log スクロール後の追従ON/OFF再判定（スクロール情報更新後） */
         return 0;
     case WM_APP_STATUS: {
         g_status_color=(COLORREF)wp; char *t=(char*)lp;
@@ -1132,6 +1436,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmd, int show){
     wc.lpfnWndProc=WndProc; wc.hInstance=hInst; wc.lpszClassName=L"nrsEdgePanel";
     wc.hbrBackground=g_brBG; wc.hCursor=LoadCursorW(NULL,(LPCWSTR)IDC_ARROW);
     RegisterClassW(&wc);
+    /* 再開ボタン用のポップアップクラス（手のひらカーソルで押せると分かるよう IDC_HAND） */
+    WNDCLASSW rc2; ZeroMemory(&rc2,sizeof rc2);
+    rc2.lpfnWndProc=ResumeProc; rc2.hInstance=hInst; rc2.lpszClassName=L"nrsResume";
+    rc2.hCursor=LoadCursorW(NULL,(LPCWSTR)IDC_HAND);
+    RegisterClassW(&rc2);
 
     g_main=CreateWindowExW(0, L"nrsEdgePanel", L"nrs-edge control panel",
         WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,CW_USEDEFAULT, 1200,780,
@@ -1143,6 +1452,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmd, int show){
     ShowWindow(g_main, SW_SHOW); UpdateWindow(g_main);
 
     SetTimer(g_main, 1, 50, NULL);                 /* 入力ポーリング（Python _poll_keys 50ms） */
+    /* 起動高速化はファイル破壊ではなく tail の初回 EOF シークで実現（前回ログを消さない）。
+     * 新セッションのフレッシュ化は ▶起動時の core_launch 側 truncate が担う。 */
     CreateThread(NULL,0,tail_thread,NULL,0,NULL);  /* nrsedge.log tail */
 
     MSG m;

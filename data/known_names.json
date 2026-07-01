@@ -300,9 +300,20 @@
     "0x45ad50": "amDebug_eventLogBridge",
     "0x4566f0": "amSehLog_walkStack",
     "0x456900": "amSehLog_emitFrame",
-    "0x89d610": "errlog_path_init"
+    "0x89d610": "errlog_path_init",
+    "0x801e80": "render_thread_main = 専用レンダースレッドのメインループ。毎フレーム: 描画23パス(FUN_008026a0)→glFlush→SwapBuffers(gl_hdc)→SetEvent(render_done_event)→InterlockedCompareExchange(state@ctx+0x20)→自己 SuspendThread。frame_present_main(0x89cb80) が resume し render_done_event 待ち。producer/consumer 分離レンダラ＝present タイミングに敏感(facts/app.md §present)",
+    "0x89cb80": "frame_present_main = メインスレッドの present+フレームペーシング。(*wglSwapIntervalEXT_ptr)(interval) で vsync 設定(swap_interval_cur/min でクランプ)、render_threaded_flag!=0 なら WaitForSingleObject(render_done_event)+spin、=0 なら直接 SwapBuffers(gl_hdc)",
+    "0x8036e0": "render_frame_setup = render_thread_main の毎フレーム前処理。viewport 計算+FUN_0075f090(shadow/depth プリパス: glClear(0x500)=depth|stencil のみ, glColorMask off)。本筋の色クリアは別(glClear(0x4500)=FUN_008028a0/00802de0/00803340/00888600)",
+    "0x644a60": "set_vsync_on = (*wglSwapIntervalEXT_ptr)(1) で vsync ON にする"
   },
   "globals": {
+    "0x16f5388": "wglSwapIntervalEXT_ptr = wglGetProcAddress で解決した wglSwapIntervalEXT。frame_present_main/set_vsync_on が vsync 制御に call(0=未解決)",
+    "0x16d8284": "swap_interval_cur = 最後に設定した swap interval（frame_present_main がキャッシュ）",
+    "0x16d8288": "swap_interval_min = swap interval のクランプ下限",
+    "0x22548c8": "render_threaded_flag = !=0 で render_thread_main による threaded present、=0 でメインスレッド直接 SwapBuffers",
+    "0x2254e1c": "render_done_event = レンダースレッドが present 完了で SetEvent、メインが WaitForSingleObject で受ける同期 event",
+    "0x20f3e3c": "gl_hdc = present 対象の HDC（SwapBuffers/wglMakeCurrent 引数）",
+    "0x20f3e44": "gl_hglrc = GL レンダリングコンテキスト（wglMakeCurrent 引数）",
     "0x160199c": "amNet_state",
     "0x160199b": "amNet_pending",
     "0x1601a00": "amNet_result",
