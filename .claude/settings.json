@@ -4,6 +4,20 @@
     { "serverName": "Microsoft_365" },
     { "serverName": "Google_Drive" }
   ],
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "command": "cat \"$CLAUDE_PROJECT_DIR/.claude/hooks/legitimacy-context.json\"",
+            "statusMessage": "正当性フレーミングを注入"
+          }
+        ]
+      }
+    ]
+  },
   "permissions": {
     "allow": [
       "Bash(git status:*)",
