@@ -28,7 +28,7 @@ static DWORD WINAPI host_init(LPVOID arg) {
     host_log("info", "{\"ev\":\"host.attach\"}");                                                  /* breadcrumb 0 */
     if (hooks_install() != 0)        { host_log("error", "{\"ev\":\"hooks.fail\"}"); return 1; }
     host_log("info", "{\"ev\":\"hooks.ok\"}");                                                      /* breadcrumb 1 */
-    netobs_install();    /* U1 観測スパイク: billing の connect/resolve を log（path B 確定後に撤去）*/
+    allnet_install();    /* ALL.Net HTTP バックエンド emu（PowerOn/card-info）＋ winsock redirect（netobs 内包）*/
     exitlog_install();   /* 終了経路を早期にフック（なぜ落ちる/終わるかの診断）*/
     if (reload_load_initial() != 0)  { host_log("error", "{\"ev\":\"logic.load.fail\"}"); return 1; }
     host_log("info", "{\"ev\":\"logic.ok\"}");                                                      /* breadcrumb 2 */

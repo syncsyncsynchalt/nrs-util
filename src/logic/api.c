@@ -406,29 +406,26 @@ static void dipsw_force_ready(LogicState *st) {
         st->host->log("info", "{\"ev\":\"dipsw.force_ready\",\"dev\":\"mxsmbus\",\"addr\":\"0x20\"}");
 }
 
-/* ALL.Net / alAbEx keychip auth を「成功」詐称（network/matching 層が未実装のため）。
- * 根本原因: BBS は boot network SM `hlsm_boot_network_sm`(0x457FE0) で alAbEx auth 完了を要求し、
- * 未完だと attract から credit/card-auth scene へ進めない（"全国対戦の受付を終了しました" 既定状態）。
- * auth 完了の PROVEN gating reads（RE: facts/amnetwork 参照）を毎フレーム立てる:
- *   0x210AED0 session / 0x210AED2 auth_ok（→FUN_006ff650 auth ready）/ 0x210AED4 dlinstr /
- *   0x210B508 auth_complete / 0x16019A5 net_link_up / 0x16019A6 net_ip_match。
- * region errCode=4 は既存 NOP patch(0x459109/0x45A846, patches.c)で抑止済み。
- * ※経験的検証中: これで attract→entry/card-auth が開通するか live で確認（不可なら scene 側 guard を追う）。*/
-static void network_auth_force_ready(LogicState *st) {
+/* ALL.Net を「正しくエミュレート」する方針転換（2026-07-02, ユーザー指示）。
+ * 旧実装は alAbEx auth 完了フラグ(0x210AED0/AED2/AED4/B508)を毎フレーム直接 poke して詐称していた＝ALL.Net を
+ * 「つぶす」メモリパッチ。これは genuine な auth-OK 遷移(alAbExGetStatus==0x67)を起こさないため AuthEvent が発火せず、
+ * ALL.Net タスク登録(FUN_00559270 が NUPL に uri 代入)が走らない→ card-info POST 先 URL が空→「このカードは使用できません」。
+ * ＝詐称が card-auth を根本から阻害していた。
+ * 【新方針】alAbEx auth を allnet.c の ALL.Net HTTP サーバ(PowerOn/DownloadOrder 応答)で **genuine に成立**させる。
+ * よって alAbEx auth の直接 poke(AED0/AED2/AED4/B508)は全撤去。ゲーム自身が実 PowerOn を POST→応答受理→0x67→AuthEvent→
+ * uri 供給→NUPL POST が純正経路で流れる。
+ * NIC レベル(0x16019A5 link / 0x16019A6 ip_match)は amNet 層(keychip_server 40104 の query_nic_status 応答)が供給すべきだが、
+ * 現状 amNet SM が inline 経路で立てきらない場合の橋渡しとして暫定保持（genuine 化できたら撤去）。 */
+static void network_nic_bridge(LogicState *st) {
     uintptr_t b = (uintptr_t)GetModuleHandleW(NULL);
-    /* (1) alAbEx boot auth（subsys network:ok の前提。scene gate ではないが boot SM 充足）*/
-    *(uint8_t *)(b + (0x210AED0u - 0x400000u)) = 1;   /* g_alabex_started */
-    *(uint8_t *)(b + (0x210AED2u - 0x400000u)) = 1;   /* g_alabex_auth_ok */
-    *(uint8_t *)(b + (0x210AED4u - 0x400000u)) = 1;   /* g_alabex_dlinstr_ok */
-    *(uint8_t *)(b + (0x210B508u - 0x400000u)) = 1;   /* g_alabex_complete */
+    /* NIC link/ip（amNet NIC-level。alAbEx auth ではない）。genuine amNet 供給に置換予定の暫定橋渡し。*/
     *(uint8_t *)(b + (0x16019A5u - 0x400000u)) = 1;   /* g_net_link_up */
     *(uint8_t *)(b + (0x16019A6u - 0x400000u)) = 1;   /* g_net_ip_match */
-    /* 注: MMGP input/service gate(DAT_0227fe6c|0x400 等)の強制は 2026-06-30 に試行→ gate は開いたが
-       MMGP は state0 のまま不変（mmgp_diag で確認: credit scene が非 active で mmgp_request_start 未呼出）＝無効、
-       かつ JVS 入力語を触り「メンテ countdown」副作用を誘発したため撤去。真の停止点は credit scene 活性化（上流の
-       scene manager）。facts/gameflow.md 参照。*/
+    /* network_type_LAN_flag / phase の poke は撤去。allnet.c が ALL.Net ホストを擬似 LAN IP(192.168.11.1)へ解決する
+     * ことで LAN 判定 FUN_006ff140 が **genuine に** network_type_LAN_flag=1 を立て（router レコード IP 一致）、
+     * alAbExInit の IP バリデータ(FUN_00a02bb0)も loopback 拒否を回避して通過する＝auth SM が genuine に PowerOn を撃つ。 */
     if (!st->netauth_logged && st->host && st->host->log) {
-        st->host->log("info", "{\"ev\":\"netauth.force_ready\",\"flags\":\"alabex(aed0/aed2/aed4/b508/19a5/19a6)\"}");
+        st->host->log("info", "{\"ev\":\"net.nic_bridge\",\"note\":\"genuine ALL.Net auth via allnet.c (LAN IP presentation)\"}");
         st->netauth_logged = 1;
     }
 }
@@ -1035,6 +1032,91 @@ static void card_force_present(LogicState *st) {
     }
 }
 
+/* JSON 文字列値の最小エスケープ（"..."付き, 制御/非ASCII は '.'）。診断ログ用。 */
+static void json_escape(char *dst, int cap, const char *s, int maxlen) {
+    int j = 0;
+    if (cap < 3) { if (cap > 0) dst[0] = 0; return; }
+    dst[j++] = '"';
+    for (int i = 0; s && s[i] && i < maxlen && j + 2 < cap; i++) {
+        unsigned char c = (unsigned char)s[i];
+        if (c == '"' || c == '\\') { dst[j++] = '\\'; dst[j++] = (char)c; }
+        else if (c >= 0x20 && c < 0x7f) dst[j++] = (char)c;
+        else dst[j++] = '.';
+    }
+    dst[j++] = '"'; dst[j] = 0;
+}
+
+/* NUPL(ALL.Net セッションタスク)の状態を READ-ONLY で診断する（正しい ALL.Net エミュ検証用）。
+ * card-auth scene(0x5e6200) は読取 UID を NetDataCardinfoRequest として NUPL 経由で POST するが、その POST 先 URL は
+ * NUPL オブジェクト obj+8(std::string)＝実 PowerOn の uri(FUN_006fe670→FUN_006ff7e0→FUN_00559270 で供給)。
+ * genuine 経路（alAbEx auth が 0x67 到達→AuthEvent→タスク URL 設定）が成立すれば obj+8 が埋まり POST が飛ぶ。
+ * task node: +0x04=uid("NUPL"=0x4c50554e) / +0x10=object-ptr の slot / +0x3c=next。object = *(int*)(node[4])（double deref,
+ * FUN_00717da0 と一致）。obj+8=URL std::string（+0x18 size / +0x1c capacity、SSO は cap<0x10 で inline buffer）/
+ * +0xd8=応答 status（0=ok,1=inprogress,-1=err）/ +0x200fc=SM state（3=応答準備完了）。
+ * ※ obj+8 を直接 poke するのは鉄則（OS 境界エミュ）に反するため行わない。genuine auth を成立させて uri を供給する。 */
+static void nupl_diag(LogicState *st) {
+    static int last_sig = -0x7fffffff, logged_bad = 0;
+    uintptr_t b = (uintptr_t)GetModuleHandleW(NULL);
+    int *node = *(int **)(b + (0x16DB564u - 0x400000u));   /* DAT_016db564 task list head */
+    for (int g = 0; node && g < 128; g++) {
+        if (node[1] == 0x4C50554E) {                        /* uid "NUPL" */
+            int *slot = (int *)(uintptr_t)node[4];          /* node+0x10 = &object-ptr */
+            unsigned char *obj = slot ? (unsigned char *)(uintptr_t)slot[0] : 0;  /* *(node[4]) = object */
+            if (!obj || (uintptr_t)obj < 0x10000) {
+                if (!logged_bad && st->host && st->host->log) {
+                    logged_bad = 1; st->host->log("warn", "{\"ev\":\"nupl.obj_bad\"}");
+                }
+                return;
+            }
+            uint32_t cap  = *(uint32_t *)(obj + 0x1c);      /* URL std::string capacity */
+            uint32_t size = *(uint32_t *)(obj + 0x18);      /* URL std::string size */
+            int state = *(int *)(obj + 0x200fc);            /* SM state */
+            int d8    = *(int *)(obj + 0xd8);               /* 応答 status */
+            int exp_id = *(int *)(obj + 0x20130);           /* recv が待つ command_common id */
+            int req_id = *(int *)(obj + 0x20134);           /* 送信時の command_common id */
+            int sig = state * 131 + d8 * 17 + (int)size + exp_id * 7;
+            if (sig != last_sig && st->host && st->host->log) {
+                const char *cstr = (cap < 0x10) ? (const char *)(obj + 8) : *(const char **)(obj + 8);
+                char m[300], ub[128];
+                json_escape(ub, sizeof ub, cstr, 60);
+                wsprintfA(m, "{\"ev\":\"nupl.state\",\"url\":%s,\"size\":%u,\"cap\":%u,\"d8\":%d,\"sm\":%d,\"exp_id\":%d,\"req_id\":%d}",
+                          ub, size, cap, d8, state, exp_id, req_id);
+                st->host->log("info", m);
+                last_sig = sig;
+            }
+            return;
+        }
+        node = (int *)(uintptr_t)node[0xf];                 /* next +0x3c */
+    }
+}
+
+/* alAbEx ALL.Net auth SM の状態を READ-ONLY 診断（genuine auth が走っているか＝PowerOn POST 不発の切り分け）。
+ * status = *(0x0249682c)（ctx=&DAT_02496820 の +0xc）: 0x65 REVALIDATION / 0x66 BUSY / 0x67 AUTH-OK /
+ *   0x69 RETRY-WAIT / 0x6a/0x6b DownloadOrder / 負値=error(-0xc6 SYSTEM/-0x1f1 COMM/-499 NG/-0x1f2 TIMEOUT/-199 NOINIT)。
+ * poller FUN_006fe3e0 は status 0x65 で DAT_0210af48==0 なら FUN_009fff90(revalidation kick)を呼び executor を起動。
+ * flags: 0x210AED0 started / 0x210AED2 auth_ok / 0x210B508 complete / 0x210AF48 reval_gate / 0x210B509 lan_reachable。*/
+static void alabex_diag(LogicState *st) {
+    static int last = -0x7fffffff;
+    uintptr_t b = (uintptr_t)GetModuleHandleW(NULL);
+    int status  = *(int32_t *)(b + (0x0249682Cu - 0x400000u));
+    int started = *(uint8_t *)(b + (0x210AED0u - 0x400000u));
+    int authok  = *(uint8_t *)(b + (0x210AED2u - 0x400000u));
+    int complete= *(uint8_t *)(b + (0x210B508u - 0x400000u));
+    int reval   = *(int32_t *)(b + (0x210AF48u - 0x400000u));
+    int lan     = *(uint8_t *)(b + (0x210B509u - 0x400000u));
+    int phase   = *(int32_t *)(b + (0x210AEE0u - 0x400000u));   /* alAbEx driver phase */
+    int lanflag = *(uint8_t *)(b + (0x210B50Cu - 0x400000u));   /* network_type_LAN_flag */
+    int sig = status * 7 + started * 3 + authok * 5 + complete * 11 + phase * 131 + (reval ? 1 : 0);
+    if (sig != last && st->host && st->host->log) {
+        char m[260];
+        wsprintfA(m, "{\"ev\":\"alabex.diag\",\"status\":%d,\"started\":%d,\"authok\":%d,\"complete\":%d,"
+                     "\"phase\":%d,\"lanflag\":%d,\"reval_gate\":%d,\"lan\":%d}",
+                  status, started, authok, complete, phase, lanflag, reval, lan);
+        st->host->log("info", m);
+        last = sig;
+    }
+}
+
 static void on_jvs_tick(LogicState *st) {
     const NrsConfig *cfg = st->host ? st->host->cfg : 0;
     NrsInput in; nrs_poll_input(&in, cfg ? cfg->bind : 0);
@@ -1042,7 +1124,7 @@ static void on_jvs_tick(LogicState *st) {
     dinput_diag(st);          /* DirectInput/951 状態観測（実 SysMouse 供給で 951 純正解消する前提調査）*/
     eeprom_force_ready(st);   /* EEPROM 未 provisioning なら provisioning（amBackup -3 洪水の解消）*/
     dipsw_force_ready(st);    /* dipsw ctx 未 provisioning なら provisioning（board index errCode 0xa/0xb の解消）*/
-    network_auth_force_ready(st); /* ALL.Net alAbEx auth 成功詐称（attract→card-auth 開通の試験）*/
+    network_nic_bridge(st);   /* NIC link/ip 暫定橋渡し（alAbEx auth 詐称は撤去＝genuine ALL.Net を allnet.c で成立させる）*/
     mmgp_diag(st);            /* MMGP play-session 連鎖の診断（gate/state/txn のどこで止まるか確定）*/
     touch_diag(st);           /* touch device 内部状態の診断（serial→consumer 到達確認）*/
     scene_diag(st);           /* attract→credit→card-auth の scene 活性化を観測（Phase B2 停止点の切分け）*/
@@ -1050,6 +1132,8 @@ static void on_jvs_tick(LogicState *st) {
     card_control_poll(st);    /* loader の nrsedge.card.json を反映（カードのライブ抜き差し→present/image）*/
     card_force_present(st);   /* present 時、cardrw presence フィールドを供給（standalone のカード挿入信号欠落を補完）*/
     card_sm_diag(st);         /* カード検出 SM の観測（card-select 画面でのゲート解析用・読取専用）*/
+    nupl_diag(st);            /* NUPL(ALL.Net card-info)タスクの URL/status/SM を観測（正しい ALL.Net auth→uri 供給の検証）*/
+    alabex_diag(st);          /* alAbEx ALL.Net auth SM の status 観測（genuine PowerOn auth が走るか＝POST 不発の切り分け）*/
 
     /* touch_inject(st); — handshake 完了で device が mode1 動作するため bypass 注入は不要。
        実 serial 経路（on_read_file の 'T' フレーム→rx_parse→decode_T_coord）でタッチが流れる。 */

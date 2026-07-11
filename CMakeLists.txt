@@ -27,7 +27,7 @@ add_library(host SHARED src/host/host.c src/host/hook.c src/host/log.c src/host/
                         src/host/gamehook.c src/host/keychip_server.c src/host/keychip_proto.c
                         src/host/windowed.c src/host/exitlog.c src/host/config.c
                         src/host/dbglog.c src/host/capture.c src/host/status.c
-                        src/host/netobs.c)
+                        src/host/netobs.c src/host/allnet.c)
 target_include_directories(host PRIVATE src/logic src/host third_party/minhook/include)
 target_link_libraries(host PRIVATE minhook ws2_32 opengl32 gdiplus)
 

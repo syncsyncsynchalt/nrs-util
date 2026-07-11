@@ -190,6 +190,27 @@ static void __cdecl d_frametick(void) {
     }
 }
 
+/* ALL.Net uri getter (FUN_006ff7e0) override: standalone は network_auth_force_ready(api.c) が alAbEx auth を
+ * 「成功」詐称するため、実 PowerOn の応答パーサ FUN_006fe670 が走らず uri(DAT_0210b530) が空のまま
+ * ＝ NUPL(ALL.Net セッションタスク)の POST 先 URL が空＝ card-auth の NetDataCardinfoRequest が飛ばず、
+ * card-auth scene(0x5e6200) が「このカードは使用できません」を出す（応答が永遠に来ない）。
+ * FUN_006ff7e0 は g_alabex_started && g_alabex_auth_ok のとき uri の c_str を返す（唯一の caller=FUN_00559270 が
+ * upload/matching タスクの URL に代入）。detour で「orig が非null(=flags 成立)なら我々の loopback backend URL を返す」
+ * ＝ boot の force を壊さず uri を供給し、card POST を allnet.c の HTTP サーバ(127.0.0.1:80→connect hook で :40080)へ導く。
+ * orig が null(flags 未成立)なら null 維持で gating 温存。std::string 内部を触らない clean な関数戻り override。 */
+static void *(*o_allnet_url)(void);
+static const char g_allnet_url[] = "http://127.0.0.1/nrsedge";   /* 127.0.0.1:80 → connect hook が :40080 へ */
+static int g_allnet_url_logged;
+static void *__cdecl d_allnet_url(void) {
+    void *r = o_allnet_url();                 /* orig: flags 成立時のみ非null（副作用なし）*/
+    if (r == 0) return 0;                     /* flags 未成立→null 維持 */
+    if (!g_allnet_url_logged) {               /* 初回: uri override が発火した証跡（obj+8 供給経路の確認）*/
+        g_allnet_url_logged = 1;
+        host_log("info", "{\"ev\":\"allnet.url.override\",\"uri\":\"http://127.0.0.1/nrsedge\"}");
+    }
+    return (void *)g_allnet_url;              /* uri を loopback backend へ override */
+}
+
 static int gh(unsigned va, void *det, void **orig) {
     void *a = (void *)((uintptr_t)GetModuleHandleW(NULL) + (va - IMAGE_BASE));
     return (MH_CreateHook(a, det, orig) == MH_OK && MH_EnableHook(a) == MH_OK) ? 0 : -1;
@@ -207,6 +228,7 @@ int gamehooks_install(void) {   /* MH_Initialize は hooks_install で実施済 
     e |= gh(0x679CB0, (void *)d_board_check,(void **)&o_board_check);  /* board check PRE: board index=2/flag 供給（errCode 0xa→errNo 910 解消）*/
     e |= gh(0x45A8F0, (void *)d_extimg_gate_probe,(void **)&o_extimg_gate_probe); /* image-present gate POST: DAT_01601b23=1（EXTEND IMAGE→OK skip）*/
     e |= gh(0x72EAF0, (void *)d_ext_install_kick,(void **)&o_ext_install_kick); /* extend-image install kicker POST: install_ctx 完了 provision（fallback／P_extimg 0x72B3A0 格上げ）*/
+    e |= gh(0x6FF7E0, (void *)d_allnet_url,      (void **)&o_allnet_url);        /* ALL.Net uri getter override: 空 uri を loopback backend URL に（card-auth の NetDataCardinfoRequest を allnet.c へ導く）*/
     e |= gh(0x643DE0, (void *)d_frametick,     (void **)&o_frametick);      /* main per-frame 実時間計時（pace.main）*/
     e |= gh(0x6C3930, (void *)d_present_drive,  (void **)&o_present_drive);  /* present 駆動部の実時間（内訳）*/
     e |= gh(0x89DAC0, (void *)d_scene_dispatch, (void **)&o_scene_dispatch); /* scene dispatch の実時間（内訳）*/
