@@ -109,7 +109,7 @@
       "options": { "cwd": "${workspaceFolder}" },
       "problemMatcher": [],
       "presentation": { "reveal": "always", "panel": "shared" },
-      "detail": "Ghidra MCP(mcp__ghidra__*) を起動。既起動なら no-op。connection refused 時に実行。data/known_names.json を次回適用。"
+      "detail": "Ghidra MCP(mcp__ghidra__*) を起動。既起動なら no-op。connection refused 時に実行。readiness まで待って exit 0。停止は -Stop（graceful・DB 保存）。"
     }
   ],
   "inputs": []

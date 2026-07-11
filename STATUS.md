@@ -1,5 +1,7 @@
 # STATUS — 現在地と次の一手
 
+> **作業ツリー現況（2026-07-12）**: ALL.Net 層の bring-up に着手中＝未追跡 `src/host/allnet.c` ＋ `src/host/gamehook.c`/`host.c`/`host.h`・`src/logic/api.c` 変更中。直近コミット `card in`/`broken` は WIP でツリー未確定。下記フェーズ（card/gfetcher・2026-07-01）は直前までの到達点。
+
 ## フェーズ: ★★カード挿入が反映されない件を解消＝amGfetcher get_status 無限ループ根絶（card_force_present 復帰）— 2026-07-01
 
 **「カードを抜き差ししても反映されない」の真因を live capture で確定・genuine 修正**。カード sel 画面(EntryModeCheckCard 0x5e6200)の
@@ -16,7 +18,7 @@ present gate `device_status+0x5628` を供給する `card_force_present`(api.c) 
   card data read(0x0D/0x2D)の実挙動＝Phase B card data 層。
 
 ### ★続き: attract→card-select 自動到達を試行＝gameflow フロンティア前進＋headless 限界の確定（2026-07-01）
-- **EntryMode scene factory を特定**: `entrymode_scene_factory`(0x5ec6e0)`(mgr,sel)` が sel 0=card-auth/1=credit… を生成（`data/known_names.json`・`facts/gameflow.md`）。
+- **EntryMode scene factory を特定**: `entrymode_scene_factory`(0x5ec6e0)`(mgr,sel)` が sel 0=card-auth/1=credit… を生成（`Ghidra DB`・`facts/gameflow.md`）。
   **呼出元は間接**（entry-mode マネージャの vtable slot）＝**sel を進める gate がこのマネージャ内**＝attract→credit/card-auth の真の gate。cdb live トレース向き。
 - **headless 限界を実測確定**（`facts/gameflow.md`「headless 限界」）: (a) boot が ~50% で attract 手前停滞（CREATE_NO_WINDOW のループ差）、
   (b) touch device が attract で未 poll になる run が多く（COM1 read 0〜2）注入タッチを消費しない。⇒ **完全自動の card-select 到達は不可、GUI/実機が確実**。
@@ -209,7 +211,7 @@ errCode latch のため**最初の error が後続を mask**し、attract だけ
 **ゼロ**。自称 "IC Card R/W"、`.?AVJcvCard@@` はゲームデータ class（HW無関係）。実体 = **SEGA 独自 bare-byte
 command/ACK シリアル（checksum無, 8E1/9600）**。Aime/FeliCa ではない。詳細・コマンド表は `facts/devices.md` §カードリーダー。
 - **既存 DB バグ修正**: `cardrw_ready_bit1/rw_error_bit4/device_status_ptr` を `0x8f…`→`0x4f…`（4↔8 transposition）に訂正。
-  `data/known_names.json` に card プロトコル関数 28 個追記（opcode builder/ACK表/status decode/容量map/FSM）。
+  `Ghidra DB` に card プロトコル関数 28 個追記（opcode builder/ACK表/status decode/容量map/FSM）。
 - **方針確定 = 仮想カード永続 R/W**（UID+データブロックの仮想カード, card.bin 永続化。TeknoParrot 流）。
 - **Phase A done + live 検証成功**（`src/logic/driver/card.{h,c}` + api.c 配線）: COM2 を `0xC0114003` で仮想化し
   byte-exact handshake を実装。`loader.exe restart --wait` で実走 → **handshake 完全動作**:
@@ -326,7 +328,7 @@ mxsram/mxsuperio/mxsmbus eeprom) / amplatform(AAL) / freeplay / keychip present 
 旧 Frida 実装は破棄済み。native C（host + reloadable logic）へ完全移行。**全ターゲットがビルド通過**。
 
 ### 完了
-- **P0 RE 帯**: `facts/`(旧 FACTS 保全) / `data/known_names.json`(serial/transport 追記) / `ref.md` /
+- **P0 RE 帯**: `facts/`(旧 FACTS 保全) / `Ghidra DB`(serial/transport 追記) / `ref.md` /
   COM map・kdserial・JVS=COM4・columba=DMI 反映。drift 訂正済み。
 - **破壊的移行**: 旧 Frida 製品・旧ツール・docs・captures 削除。RE エンジン/知見は保全。
 - **骨格 + ビルド検証**:

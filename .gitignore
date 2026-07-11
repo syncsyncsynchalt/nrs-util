@@ -20,9 +20,9 @@ captures/
 nrsedge.log
 
 # ── 解析データ（Ghidra 生成・大容量・再生成可能）─────────────
-# known_names.json のみ追跡（Ghidra へ適用される正）
+# re_symbols.json のみ追跡（Ghidra DB からの一方向 DR ダンプ。手編集禁止・再生成は export_symbols.py）
 data/*
-!data/known_names.json
+!data/re_symbols.json
 
 # ── 外部ツール／ベンダ成果物（GitHub releases 等から再取得）───
 tools/ghidra_mcp/*.zip

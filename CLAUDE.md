@@ -22,7 +22,7 @@ CrackProof 残置のみ）。**Frida は使わない。** 旧 Frida 実装は破
 | 知りたいこと | 場所 |
 |---|---|
 | RE で確定した事実（アドレス/構造体/プロトコル/COM map） | `facts/<subsys>.md`（索引 `facts/_index.md`、live bug `facts/bugs.md`）|
-| 関数名/型（Ghidra へ適用される正） | `data/known_names.json` |
+| 関数名/型/コメントの正 | **Ghidra DB**（MCP で書き戻し・永続）。`data/re_symbols.json` は DB からの一方向 DR ダンプ（手編集禁止） |
 | 外部オラクルの所在と権威範囲 | `ref.md` |
 | 製品ソース（host + reloadable logic） | `src/`（下記） |
 | ビルド/反復/起動 | `CMakeLists.txt` / VSCode タスク(`.vscode/tasks.json`) / `loader.exe`(GUI＋CLI) / 下記 |
@@ -67,18 +67,19 @@ src/
 | 地金 disasm / imports / segments | `mcp__ghidra__disassemble_function_by_address`(static_VA) / `list_imports` / `list_segments` |
 
 - **RE 効率の核 = Ghidra DB への書き戻し**。解いた関数は名前/型/コメントを即 DB へ → 次の decompile が
-  自己説明的になり読む量が減る。恒久名は **`data/known_names.json`**（static_VA→名）に追記
-  （`tools/ghidra_mcp/start_headless.ps1` が次回適用）。表せない事実だけ `facts/<subsys>.md` に terse 追記。**二度解かない。**
-- サーバ起動: `powershell -File tools\ghidra_mcp\start_headless.ps1`（冪等）。bridge は `.mcp.json`。
+  自己説明的になり読む量が減る。**DB は永続化される**（MCP の変更は analyzeHeadless の終了時保存で焼かれる）ので、
+  必ず `start_headless.ps1 -Stop`（graceful）で止める。**force-kill するとそのセッションの書き戻しが失われる。**
+  表せない事実だけ `facts/<subsys>.md` に terse 追記。**二度解かない。**（旧 `known_names.json` 再適用は廃止。）
+- サーバ起動: `powershell -File tools\ghidra_mcp\start_headless.ps1`（冪等・readiness まで待って exit 0）。bridge は `.mcp.json`。
 - 1 関数単位で取得、全読み禁止、grep 先行。decompiler が reg/暗黙引数を隠したら `disassemble_function_by_address` + `set_function_prototype`。
 
 ## RE ループ
 
 ```
-位置特定: facts/ と data/known_names.json を grep → 無ければ Ghidra search_decompiled/list_strings
+位置特定: facts/ を grep ＋ Ghidra を直接引く（DB が名前/型/コメント保持）→ 無ければ search_decompiled/list_strings
 読む:    decompile（1関数）。隠れたら mcp__ghidra__disassemble_function_by_address
 確証:    micetools/ringedge を狙い撃ち grep（ref.md）。必要時のみ cdb
-書き戻し: Ghidra rename + set_function_prototype/型 + comment、data/known_names.json に追記
+書き戻し: Ghidra rename + set_function_prototype/型 + comment（DB に永続。graceful -Stop で保存）
 記録:    名前で表せない事実だけ facts/<subsys>.md に terse 追記
 ```
 

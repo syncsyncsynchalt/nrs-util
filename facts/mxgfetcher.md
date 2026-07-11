@@ -31,7 +31,9 @@ next=7)→7(alabex_auth_ready 待ち)→8→9。get_status が完走しないと
 
 ---
 
-### amGfetcher get_status（旧 serve-it 記述・参考）[S]
+### amGfetcher get_status（旧 fake-it パッチ群・Frida・**native 未使用**・参考のみ）[S]
+
+> 注意: 本節は破棄済み Frida の fake-it 戦略の記録。現行の正しい結論は本ファイル上部（serve-it）。ここのパッチ表に従わないこと。
 
 **現行 native は serve-it**: `src/host/keychip_server.c` が 40113 を bind し本物の get_status 交換で SM を自然前進させ、
 `src/logic/patches.c` は 0x6FF980→ret1（state0 gate）＋ JL2JMP 3 個のみ。下の fake-it パッチ群は **native 未使用**

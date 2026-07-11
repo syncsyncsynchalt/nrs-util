@@ -60,12 +60,26 @@ sub(
 '''    @Override
     public void run() throws Exception {
         Msg.info(this, "GhidraMCPHeadless starting...");
+        // Graceful-shutdown sentinel. start_headless.ps1 -Stop creates this file; we then break the
+        // serve loop and RETURN so analyzeHeadless reaches its save-on-exit step and persists all
+        // MCP mutations (rename/type/comment). NOTE: currentProgram.save() from within a postScript
+        // fails with "Unable to lock due to active transaction" (HeadlessAnalyzer holds an outer
+        // transaction for the whole run), so returning is the only durable persistence path. A
+        // force-kill (TerminateProcess) skips this and loses the session's work.
+        java.io.File scriptsDir = getSourceFile().getParentFile().getFile(false);
+        java.io.File repoRoot = scriptsDir.getParentFile().getParentFile().getParentFile();
+        final java.io.File shutdownReq = new java.io.File(repoRoot,
+                "captures" + java.io.File.separator + "ghidra_shutdown.request");
+        if (shutdownReq.exists()) { shutdownReq.delete(); }
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             if (server != null) { server.stop(0); }
         }));
         startServer();
         Msg.info(this, "GhidraMCP HTTP server listening on port " + DEFAULT_PORT + " (headless).");
-        while (true) { Thread.sleep(3600000L); }
+        while (!shutdownReq.exists()) { Thread.sleep(500L); }
+        Msg.info(this, "GhidraMCP shutdown requested; stopping server, program will be saved on exit.");
+        shutdownReq.delete();
+        if (server != null) { server.stop(0); }
     }''')
 
 # 5. tool options ではなく固定ポートを使う

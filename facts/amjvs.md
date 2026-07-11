@@ -26,7 +26,7 @@ START 押下で `node+0x643 bit7=0x80`）。
 (11 12 13 14) → 毎フレーム polling: READ_SW(20 02 02)+READ_ANALOG(22 08)+READ_COIN(21 02)+**WRITE_GPIO2(37)×2**`。
 
 **入出力ワイヤ仕様 — 送受信を逆コンパイルで byte 完全確定（2026-06-29, jvs_per_node_output 0x67b280 起点）[S]**:
-poll フレームは `jvs_per_node_output` が 1 フレームに連結組立。組立/解析関数（known_names 反映済）:
+poll フレームは `jvs_per_node_output` が 1 フレームに連結組立。組立/解析関数（Ghidra DB 反映済）:
 - **送信(req)**: `amJvspReqSwInput`(0x988310→`20 players swbytes`=`20 02 02`) / `amJvspReqAnalogInput`(0x9885a0→`22 ch`=`22 08`)
   / `amJvspReqCoinInput`(0x9884b0→`21 slots`, slots=node+0x60c) / `amJvspReqGeneralOutput`(0x9886d0→`37 idx val`, idx=1,2 の2発)。
   低層 appender=`jvsp_append_command`(0x9875e0)。**出力は 0x37 のみ（0x38 は未送）**。

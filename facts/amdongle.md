@@ -57,7 +57,7 @@ dongle/keychip ステートマシン:
 | 0x457822 | outerSM_6state_FSM |
 | 0x457910 | keychipSM_FSM |
 | 0x978450 | amDongle7_dispatcher (reads [CCF0EC]+0x18) |
-| 0x975E00 | amDongleBusy（patches.c で `xor eax,eax; ret`） |
+| 0x975E00 | amDongleBusy（ctx[0xc] を返す。旧 `xor eax,eax; ret` patch は 2026-07-01 撤去＝§amInstall 参照。現在は genuine 完走） |
 
 keychipSM expected flow: state0→state1→state2→state3→state4→state5→state6→state7(done)
 

@@ -2,8 +2,7 @@
 
 nrs.exe で確定した事実（アドレス/構造体/プロトコル）をサブシステム別に置く。
 1 サブシステムの作業は当該ファイル閉で完結する（全読み不要）。**正は実装**＝値は使う前に
-Ghidra(static_VA)／**RingEdge 1 純正バイナリ**（`RingOSUpdate\common\segadriver\` + `ringedge_system_63.01.10\system\`）／実走ログで裏取りする（`../CLAUDE.md` 鉄則）。
-**注意**: 各 facts に残る「micetools を正」「authoritative（micetools）」表記は旧来の優先順位。現行は **RE1/RE2 純正バイナリ > micetools/TP**（`../ref.md` 階層）。値が両者で食い違ったら純正を正に補正する。
+Ghidra(static_VA)／**RingEdge 1 純正バイナリ**（`RingOSUpdate\common\segadriver\` + `ringedge_system_63.01.10\system\`）／実走ログで裏取りする（`../CLAUDE.md` 鉄則）。オラクル階層は **RE1/RE2 純正バイナリ > micetools/TP**（`../ref.md`）。
 
 confidence 凡例: [S]=静的解析(Ghidra) [L]=ライブ実走確認 [I]=推論
 [F]=旧 Frida 計装で確認（**履歴的来歴**。Frida は破棄済み＝再取得は Ghidra/実走で行う）
@@ -12,6 +11,7 @@ confidence 凡例: [S]=静的解析(Ghidra) [L]=ライブ実走確認 [I]=推論
 
 - [workflow.md](workflow.md)：作業方法論・運用知見（自律ゲームテスト起動法 / 実体再導出 / パッチ監査 read-fake vs action-block / 静的パッチ clobber / パッチ削減の定石 / 日本語清書 / 脱 Python 移植）
 - [bugs.md](bugs.md)：live bug / RISK / ANTI-PATTERN（解決済みは `git log`）
+- [gameflow.md](gameflow.md)：ゲームシーン遷移（attract→credit→card-auth）の gating・EntryMode scene factory 等（現在地の frontier。`../STATUS.md` から多数参照）
 - [port_status.md](port_status.md)：旧 Frida 動的群を native で移植「しなかった」理由（serve-it / root-cause 静的化）
 
 ## サブシステム別
@@ -36,5 +36,5 @@ confidence 凡例: [S]=静的解析(Ghidra) [L]=ライブ実走確認 [I]=推論
 ## 外部オラクル・ツール
 
 - 外部オラクル（① nrs.exe → ② RingEdge 1 純正バイナリ → ③ RingEdge 2 → ④ micetools/TeknoParrot）の所在・権威階層 → `../ref.md`
-- 関数名/型の正（Ghidra へ適用） → `../data/known_names.json`
+- 関数名/型/コメントの正 → **Ghidra DB**（MCP で書き戻し・永続）。`../data/re_symbols.json` は DB からの一方向 DR ダンプ（手編集禁止）
 - 静的解析 = Ghidra MCP（`mcp__ghidra__*`, static_VA）。起動 `tools/ghidra_mcp/start_headless.ps1`

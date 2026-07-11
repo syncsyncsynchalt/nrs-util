@@ -8,10 +8,10 @@ nrs.exe の逆コンパイル/xref/全文検索を `mcp__ghidra__*` で提供す
 | file | 役割 |
 |---|---|
 | `bridge_mcp_ghidra.py` | **正典のブリッジ**。Claude ──`mcp__ghidra__*`──▶ これ ──HTTP:8080──▶ Ghidra。`search_decompiled` 等の自前拡張を含む（上流 fork）。MCP が起動するのはこれ。 |
-| `ghidra_scripts/ApplyKnownNames.java` | `data/known_names.json`（static_VA→名）を毎起動時に適用 |
-| `ghidra_scripts/GhidraMCPHeadless.java` | headless で HTTP サーバを立てるエントリ |
-| `build_headless.py` | プラグイン jar をビルド（`src/` を入力にする） |
-| `start_headless.ps1` | サーバ起動（冪等・GUI 不要）。connection refused 時に叩く |
+| `ghidra_scripts/GhidraMCPHeadless.java` | headless で HTTP サーバを立てるエントリ（`build_headless.py` の生成物・手編集しない）。graceful shutdown で終了時に DB 保存 |
+| `build_headless.py` | `src/` の GUI 用 `GhidraMCPPlugin.java` を headless 版 `GhidraMCPHeadless.java` に**コード生成**（jar ビルドではない） |
+| `export_symbols.py` | 稼働中サーバから named 関数を `data/re_symbols.json` へ**一方向ダンプ**（DR バックアップ・手編集禁止） |
+| `start_headless.ps1` | サーバ起動/停止（冪等・GUI 不要・readiness まで待って exit 0）。`-Stop` は graceful（DB 保存）。connection refused 時に叩く |
 
 ## `src/`（vendor の上流スナップショット。触らない）
 
@@ -23,4 +23,9 @@ nrs.exe の逆コンパイル/xref/全文検索を `mcp__ghidra__*` で提供す
   python ブリッジの単一ソースは直下のみ。）
 - `src/.github/modernize/` 配下は Java upgrade ワークフローのスクラッチで gitignore 対象。RE には無関係。
 
-詳細な起動・トラブルシュートは `../../docs/ghidra_mcp_setup.md`。
+## 永続化（重要）
+
+MCP の rename/型/コメントは **Ghidra DB に永続**する。仕組みは「analyzeHeadless の正常終了時保存」で、
+`start_headless.ps1 -Stop`（sentinel ファイルで `GhidraMCPHeadless.run()` を抜けさせる）が到達させる。
+**force-kill するとそのセッションの書き戻しは保存されない。** スクリプト内 `program.save()` は外側トランザクションで
+失敗するため使わない。`.gpr` は git 非追跡なので、名前は `export_symbols.py` で `data/re_symbols.json` に定期バックアップする。

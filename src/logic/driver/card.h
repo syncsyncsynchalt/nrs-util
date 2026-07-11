@@ -15,7 +15,7 @@
 #include "abi.h"
 #include <stdint.h>
 
-/* ---- 検証済みプロトコル定数（証明済みバイト定数。Builder VA は data/known_names.json）---- */
+/* ---- 検証済みプロトコル定数（証明済みバイト定数。Builder VA は Ghidra DB）---- */
 /* TX opcode（game→reader）。低ニブルが操作種別を符号化。 */
 #define CARD_CMD_RESET      0xF7u  /* Reset / open                 (card_cmd_reset_0xF7  0x66fb80) */
 #define CARD_CMD_INIT       0x28u  /* Init / session 開始 (→0xF7)  (card_cmd_init_0x28   0x66fcc0) */
