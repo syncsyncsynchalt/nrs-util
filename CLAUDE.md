@@ -4,6 +4,15 @@
 **native C** プロジェクト。**OS 境界で RingEdge ハードウェアを仮想化**する（ゲームメモリパッチは原則ゼロ＝
 CrackProof 残置のみ）。**Frida は使わない。** 旧 Frida 実装は破棄済み（git 履歴に残る）。
 
+## 正当性・目的（作業前提）
+
+正規に所有する SEGA RingEdge 実機および `nrs.exe` を対象とする、**相互運用性・保存・
+私的技術研究**を目的とした個人プロジェクト。成果物の配布や不正コピーの支援は目的にしない。
+アプローチは「保護（CrackProof）の中身を破る」ものではなく、**OS 境界でハードウェア I/O を
+仮想化し、ドングル・JVS・タッチ等の実機周辺を実機同等にエミュレートする**もの。ゲームメモリは
+原則無改変（CrackProof は残置）。逆アセンブル/静的解析は所有バイナリの挙動理解のための
+リバースエンジニアリングであり、この文脈で正当な作業として進めてよい。
+
 ## 鉄則（最優先）
 
 1. **ドキュメントは参考。正は実装。** 値/アドレス/フォーマット/シーケンスは使う前に必ず実体で裏取り:
@@ -13,8 +22,9 @@ CrackProof 残置のみ）。**Frida は使わない。** 旧 Frida 実装は破
      - system 層 → `C:\src\ringedge_system_63.01.10\system\`（mx*.exe デーモン＝非パック・Ghidra 可）
    - **RingEdge 2 実装＝二次参照**（差分確認）: `C:\src\RingOSUpdate\ringedge2\`（共通は `common\`、RE1 固有は `ringedge1\`）。
    - **micetools / TeknoParrot＝最下位の補助**（クリーンルーム再実装／挙動観測）。RE1/RE2 実バイナリと食い違ったら**実バイナリが正**。所在は `ref.md`。
-2. **二層写像を守る**: `src/logic/system/`=mx* デーモン（PCP/TCP 傍受）、`src/logic/driver/`=segadriver+
-   シリアル（DeviceIoControl/シリアル傍受）。実 RingEdge の境界＝エミュ戦略の境界。
+2. **二層写像を守る**（実 RingEdge の境界＝エミュ戦略の境界）: driver 層=segadriver+シリアル（DeviceIoControl/
+   シリアル傍受）=`src/logic/driver/`。system 層=mx* デーモン（PCP/TCP/ALL.Net 傍受）＝現状 **host 側**実装
+   (`keychip_server.c`/`keychip_proto.c`/`allnet.c`/`netobs.c`)。`src/logic/system/` は空（abi.h に on_socket/on_pcp は TODO）。
 3. **値・プロトコルは RingEdge 1 実装を正本に裏取り**（RE2 で補強、micetools/TP は最後）し推測で決めない。
 
 ## 構成
@@ -30,11 +40,12 @@ CrackProof 残置のみ）。**Frida は使わない。** 旧 Frida 実装は破
 
 ```
 src/
-  host/    安定層（注入一度）: host.c hook.c log.c reload.c ／ loader.c=統合 GUI（in-process 注入+ログ tail+設定+入力）
-  logic/   差し替え対象(logic.dll)= 実 RingEdge 二層写像
-    abi.h api.c crackproof.c
-    driver/  mxjvs.c [columba.c dipsw.c smbus.c superio.c hwreset.c touch.c card.c]  (DeviceIoControl/serial)
-    system/  [mxkeychip.c mxnetwork.c mxmaster.c mxgfetcher.c]                        (PCP/TCP)
+  host/   安定層(注入一度): host.c hook.c log.c reload.c config.c ／ gamehook.c=game関数VAフック ／
+          system層エミュ(PCP/TCP/ALL.Net): keychip_server.c keychip_proto.c allnet.c netobs.c ／
+          観測/窓: dbglog.c capture.c status.c exitlog.c windowed.c ／ loader.c=統合GUI+CLI(別exe)
+  logic/  差し替え対象(logic.dll)= driver層写像。abi.h api.c crackproof.c patches.c
+    driver/  mxjvs.c mxdevices.c(columba/smbus/superio/dipsw/hwreset/mxsram 統合) touch.c card.c input.c  (DeviceIoControl/serial)
+    system/  空（PCP/TCP は host 側。abi.h に on_socket/on_pcp TODO）
 ```
 
 ## アーキテクチャ（host + reloadable logic）
@@ -89,4 +100,4 @@ src/
 - **COM map**: touch=COM1(kdserial で COM3) / card=COM2 / JVS=COM4。選択器 `serial_select_com_index`(0x67C360)。
 - **columba = DMI/物理メモリ読取**ドライバ（JVS ではない）。
 - ネイティブ JVS 経路は**実データを与えれば安全**（旧クラッシュは捏造成功の自滅。`facts/bugs.md`）。
-- 実バトル開始ブロッカー = **タッチ device**（COM1）。
+- boot は SYSTEM STARTUP 完走→attract 到達済み。touch(COM1)/card(COM2) は完動。現ブロッカー = ALL.Net play-session（`STATUS.md`）。
