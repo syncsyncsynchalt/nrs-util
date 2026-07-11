@@ -63,9 +63,9 @@ static void l_bind(HostServices *host, LogicState **state) {
         touch_init(&(*state)->touch);
         card_init(&(*state)->card);
     }
-    (*state)->host = host;   /* reload 後の再バインド（jvs 状態は arena 上で生存）*/
-    mxdev_init(host);        /* nvram 永続バッキング用に host サービスを渡す（map は初回 IO で遅延）*/
-    if (!(*state)->patched) { patches_apply(host); (*state)->patched = 1; }  /* 旧 impl 静的パッチ */
+    (*state)->host = host;   /* reload 後の再バインド（状態は arena 上で生存）*/
+    mxdev_init(host);        /* nvram 永続バッキング用（map は初回 IO で遅延）*/
+    if (!(*state)->patched) { patches_apply(host); (*state)->patched = 1; }
     host->log("info", "{\"ev\":\"logic.bind\",\"abi\":1}");
 }
 
@@ -97,8 +97,7 @@ static HANDLE on_create_file(LogicState *st, const wchar_t *name, DWORD a, DWORD
         *handled = 1;
         return st->jvs_handle;
     }
-    /* COM1 = タッチパネル（class 0x22, 9600 8N1）。実機 standalone は kdserial OFF で COM1 固定。
-       JVS が COM1 に設定されている異常時は JVS を優先（上の is_jvs_com で既に処理済み）。 */
+    /* COM1 = タッチパネル（class 0x22, 9600 8N1）。standalone は kdserial OFF で COM1 固定。 */
     if (is_com(name, L"COM1") && !is_jvs_com(st, name)) {
         st->touch_handle = (HANDLE)(uintptr_t)0xC0114001;   /* sentinel */
         touch_init(&st->touch);
@@ -107,8 +106,7 @@ static HANDLE on_create_file(LogicState *st, const wchar_t *name, DWORD a, DWORD
         *handled = 1;
         return st->touch_handle;
     }
-    /* COM2 = IC Card R/W（class 0x21, SEGA 独自・Aime 非該当）。bring-up: 仮想化して open を成功させ、
-       game の TX/RX 生バイトを観測する（フレーミング確証 → protocol logic 確定の順）。 */
+    /* COM2 = IC Card R/W（class 0x21, SEGA 独自・Aime 非該当）。 */
     if (is_com(name, L"COM2") && !is_jvs_com(st, name)) {
         st->card_handle = (HANDLE)(uintptr_t)0xC0114003;   /* sentinel */
         card_init(&st->card);
@@ -117,9 +115,8 @@ static HANDLE on_create_file(LogicState *st, const wchar_t *name, DWORD a, DWORD
         *handled = 1;
         return st->card_handle;
     }
-    /* C:\System\SystemVersion.txt（amPlatformGetOsVersion 0x981d60 が読む）を仮想化。gate FUN_0045a6f0 は
-       OsVersion の戻り 0 のみ要求し値は捨てる（直後の memory size 取得で上書き）。8 バイトが非ゼロ version に
-       parse されれば DAT_00ccf44c!=0 → 戻り 0。standalone に実ファイルが無く欠損＝戻り -3→errCode 3 なので host で供給。 */
+    /* C:\System\SystemVersion.txt（amPlatformGetOsVersion 0x981d60 が読む）を仮想化。8 バイトが非ゼロ version に
+       parse されれば DAT_00ccf44c!=0 → gate FUN_0045a6f0 戻り 0。欠損だと -3→errCode 3。 */
     if (is_com(name, L"SystemVersion.txt")) {          /* is_com は汎用 suffix マッチ */
         st->sysver_handle = (HANDLE)(uintptr_t)0xC0114002;   /* sentinel */
         st->sysver_off = 0;
@@ -142,8 +139,7 @@ static int jvs_to_hex(char *dst, int cap, const uint8_t *p, int n) {
     return o;
 }
 
-/* JVS 1 トランザクション(req+resp)をログ出力。連続同一フレームは dedup（READ_SW poll が ~60Hz で回るため、
- * idle 中は無音・入力やコマンドが変化したときだけ出る）。dedup 状態は ephemeral(reload でリセット可・診断用)。 */
+/* JVS 1 トランザクション(req+resp)をログ。連続同一フレームは dedup（READ_SW poll が ~60Hz で回るため）。 */
 static void jvs_io_log(LogicState *st, const uint8_t *req, int rn, const uint8_t *resp, int sn) {
     static uint8_t last_req[260];  static int last_rn = -1;
     static uint8_t last_resp[260]; static int last_sn = -1;
@@ -161,10 +157,9 @@ static void jvs_io_log(LogicState *st, const uint8_t *req, int rn, const uint8_t
     if (sc) { memcpy(last_resp, resp, sn); last_sn = sn; }
 }
 
-/* WriteFile(COM4): 書込みバイトを 1 JVS フレームとして処理し応答をバッファ（同期: write 時に応答生成）。
- * 入力は毎フレーム poll → mxjvs_set_input でボードへ反映 → READ_SW 応答に乗る。native amJvst poll スレッドが
- * overlapped で write→read する（host が overlapped 完了をシグナル, hook.c）。JVS はマスタ駆動の req/resp なので
- * 「1 write=1 frame」同期で十分（logic にスレッドを持たず reload 安全）。実機 discovery〜polling 動作を実走確認済み。 */
+/* WriteFile(COM4): 書込みバイトを 1 JVS フレームとして処理し応答をバッファ（write 時に応答生成）。
+ * 入力は毎フレーム poll → mxjvs_set_input → READ_SW 応答に乗る。JVS はマスタ駆動 req/resp なので
+ * 「1 write=1 frame」同期で十分（logic にスレッドを持たず reload 安全）。 */
 static BOOL on_write_file(LogicState *st, HANDLE h, const void *buf, DWORD n, DWORD *put, int *hd) {
     if (h == st->jvs_handle) {
         NrsInput in; nrs_poll_input(&in, st->host && st->host->cfg ? st->host->cfg->bind : 0);
@@ -178,7 +173,7 @@ static BOOL on_write_file(LogicState *st, HANDLE h, const void *buf, DWORD n, DW
         return TRUE;
     }
     if (h == st->touch_handle) {                  /* COM1: game→panel コマンド（'p'/'P'/'R'）→ ack 積む */
-        {   /* 診断: game が COM1 に何を書くか（handshake が動いているかの確証）*/
+        {   /* game が COM1 に書くバイトをログ */
             const uint8_t *b = (const uint8_t *)buf;
             char m[160]; int o = wsprintfA(m, "{\"ev\":\"touch.write\",\"n\":%d,\"hex\":\"", (int)n);
             for (DWORD i = 0; i < n && i < 16 && o + 3 < (int)sizeof m; i++) o += wsprintfA(m + o, "%02x", b[i]);
@@ -191,7 +186,7 @@ static BOOL on_write_file(LogicState *st, HANDLE h, const void *buf, DWORD n, DW
         return TRUE;
     }
     if (h == st->card_handle) {                   /* COM2: game→reader コマンド（生バイト観測）*/
-        {   /* 診断: game が COM2 に書く opcode 列（フレーミング確証用の核データ）*/
+        {   /* game が COM2 に書く opcode 列をログ */
             const uint8_t *b = (const uint8_t *)buf;
             char m[160]; int o = wsprintfA(m, "{\"ev\":\"card.write\",\"n\":%d,\"hex\":\"", (int)n);
             for (DWORD i = 0; i < n && i < 16 && o + 3 < (int)sizeof m; i++) o += wsprintfA(m + o, "%02x", b[i]);
@@ -293,30 +288,24 @@ static BOOL on_close(LogicState *st, HANDLE h, int *hd) {
     *hd = 0; return FALSE;
 }
 
-/* COM 制御傍受。仮想 COM(JVS)ハンドルなら成功を返す（amJvstThreadInit の comm-config を満たす）。
- * GetCommState 等は DCB を埋めなくてよい（ゲームは設定値を上書きするだけで読まない。micetools comdevice 同様）。 */
+/* COM 制御傍受。仮想 COM ハンドルなら成功を返す。DCB は埋めなくてよい（game は設定するだけで読まない）。
+ * serial RX ポンプ(FUN_0067c0c0)は ClearCommError の cbInQue!=0 のときだけ ReadFile するので cbInQue を申告する。 */
 static BOOL on_comm_control(LogicState *st, HANDLE h, int op, void *p1, DWORD p2, void *p3, int *hd) {
     if (h == st->touch_handle) {
-        /* COM1 タッチ: serial_open_comport(GetCommState→SetCommState→PurgeComm) と poll の COM 制御を
-           全て成功化（micetools comdevice 同様、DCB は埋めなくてよい＝game は設定するだけで読まない）。 */
         (void)p2;
         *hd = 1;
-        if (op == COMCTL_GET_MODEM_STATUS) { if (p1) *(DWORD *)p1 = 0; }       /* modem status = 0 */
+        if (op == COMCTL_GET_MODEM_STATUS) { if (p1) *(DWORD *)p1 = 0; }
         else if (op == COMCTL_CLEAR_ERROR) {
-            /* serial RX ポンプ(FUN_0067c0c0)は ClearCommError の cbInQue!=0 のときだけ ReadFile する。
-               touch はストリーミング型（panel が 'T' を常時送出）なので「常に 1 フレーム受信待ち」と申告し、
-               ポンプに ReadFile を発行させる（→ on_read_file が現マウス座標の 'T' フレームを返す）。
-               cbInQue=0 を返すと ReadFile が一度も来ず touch 入力がゼロになる。 */
-            if (p1) *(DWORD *)p1 = 0;                                          /* errors = 0 */
+            /* touch はストリーミング型（panel が 'T' を常時送出）→ 常に 1 フレーム受信待ちと申告。
+               cbInQue=0 だと ReadFile が来ず touch 入力ゼロ。 */
+            if (p1) *(DWORD *)p1 = 0;
             if (p3) { COMSTAT *cs = (COMSTAT *)p3; memset(cs, 0, sizeof *cs);
-                      cs->cbInQue = TOUCH_FRAME_LEN; }                         /* 1 フレーム受信待ち */
+                      cs->cbInQue = TOUCH_FRAME_LEN; }
         }
         return TRUE;
     }
     if (h == st->card_handle) {
-        /* COM2 card: serial_open_comport の COM 制御を全成功化（DCB は埋めなくてよい）。
-           card は request/response ゆえ CLEAR_ERROR の cbInQue は「キュー済み応答の残量」を申告する
-           （touch の常時 1 フレームと違い、応答がある時だけ RX ポンプに ReadFile を発行させる）。 */
+        /* card は request/response → cbInQue はキュー済み応答の残量（応答がある時だけ RX ポンプが ReadFile）。 */
         (void)p2;
         *hd = 1;
         if (op == COMCTL_GET_MODEM_STATUS) { if (p1) *(DWORD *)p1 = 0; }
@@ -332,9 +321,8 @@ static BOOL on_comm_control(LogicState *st, HANDLE h, int op, void *p1, DWORD p2
     *hd = 1;
     switch (op) {
     case COMCTL_GET_MODEM_STATUS:
-        /* JVS SENSE ライン = modem status の DSR ビットで伝える（micetools mxjvs_GetCommModemStatus 準拠）。
-           sense=1(未割当/sense アサート)→0、sense=0(割当済み=チェーン終端)→MS_DSR_ON。
-           これが無いとマスタは未割当機器が残ると誤認し SETADDR を無限に振り node 確定しない。 */
+        /* JVS SENSE = modem status DSR ビット。sense=1(未割当)→0、sense=0(割当済=終端)→MS_DSR_ON。
+           無いとマスタが SETADDR を無限に振り node 確定しない。 */
         if (p1) *(DWORD *)p1 = st->jvs.sense ? 0 : MS_DSR_ON;
         break;
     case COMCTL_CLEAR_ERROR:
@@ -346,24 +334,10 @@ static BOOL on_comm_control(LogicState *st, HANDLE h, int op, void *p1, DWORD p2
     return TRUE;
 }
 
-/* jvs_update_main PRE フック。
- * 注意: プレイヤ入力(sw/analog/coin)は **native JVS 経路(COM4)** で流れる — on_write_file が READ_SW 等の
- * 応答を mxjvs_set_input で組むので、ここでの node BSS 直書きは不要（旧 B 経路は撤去済み。詳細 facts/amjvs.md）。
- * 本フックは「毎フレーム必要な system 系上書き」だけを担う: 筐体 TEST/SERVICE(0x160194c) と free-play 保証。
- * （これらは JVS node とは別系統で、native JVS 化後も必要。） */
-/* EEPROM(amBackup の area0,1=STATIC/CREDIT/NETWORK/HISTORY) 強制 provisioning。
- * 根本原因: amEepromCreateDeviceFile(0x984910) は SetupDi*(PnP GUID 列挙)+CreateFileA でデバイスを開くが、
- * standalone には mxsmbus の PnP デバイスが無く SetupDiEnumDeviceInterfaces 失敗 → デバイス未オープン →
- * amEepromInit(0x985160) 失敗（後始末 0x984bd0 が initFlag を 0 に戻す）→ EEPROM write fn(0x984E20) が
- * initFlag(0xccf4e0)==0 を見て -3 を返し続け、amBackupRecordWriteDup が洪水化（boot を塞ぐ）。
- * 名前ベースの mxsmbus エミュ(mxdev_create L"mxsmbus")はこの SetupDi 経路では一度もヒットしない。
- *
- * 対策: 実 amEepromInit が設定する eeprom ctx(base 0xccf4e0)を再現する。device handle を H_MXSMBUS にすると
- * read/write fn の DeviceIoControl(0x9c40200c, i2c@0x57)が既存 mxsmbus エミュ(mxdev_ioctl→eeprom.bin)へ流れる。
- * ctx レイアウト（amEepromInit 逆コンパイルで確定）:
- *   +0x00 initFlag / +0x04,+0x08 サイズ=6 / +0x0c mutex / +0x10 device handle / +0x14 i2c addr=0x57
- * on_jvs_tick は main loop（storage init 後）で回るので amEepromInit は既に試行済み＝initFlag==0 を見て安全に
- * 上書きできる（実 init 成功時は initFlag==1 で skip）。*/
+/* EEPROM ctx(base 0xccf4e0) を再現し provisioning。standalone では amEepromInit(0x985160) の SetupDi 列挙失敗で
+ * initFlag==0 → write fn が -3 洪水化。device handle を H_MXSMBUS にすると read/write fn の
+ * DeviceIoControl(0x9c40200c,i2c@0x57)が mxsmbus エミュ(→eeprom.bin)へ流れる。
+ * ctx: +0x00 initFlag / +0x04,+0x08 サイズ=6 / +0x0c mutex / +0x10 handle / +0x14 i2c addr=0x57。詳細 facts/mxdrivers.md。*/
 static void eeprom_force_ready(LogicState *st) {
     if (st->eeprom_fixed) return;
     st->eeprom_fixed = 1;
@@ -381,13 +355,10 @@ static void eeprom_force_ready(LogicState *st) {
         st->host->log("info", "{\"ev\":\"eeprom.force_ready\",\"dev\":\"mxsmbus\",\"hdl\":\"H_MXSMBUS\"}");
 }
 
-/* dipsw ctx 強制 provisioning（board index 0xa/0xb の patches.c 0x45A0F5/F9 を置換）。
- * amDipswInit(0x9842a0) も amDipswCreateDeviceFile(0x983430) で SetupDi(PnP GUID 列挙)+CreateFileA を使うが、
- * standalone に mxsmbus PnP デバイスが無く列挙失敗 → handle(0xccf490)=-1。EEPROM と違い initFlag(0xccf488)は失敗時も 1。
- * すると amDipswReadByte(0x983bb0)が handle==-1 で即 return → dipsw byte 未読 → board index ゴミ → errCode 0xa/0xb。
- * ctx を再現すれば read fn の DeviceIoControl(0x9c402004,cmd=5)が既存 mxsmbus エミュ(mxdev_ioctl)へ流れ、index0=0x20
- * → board index=(0x20>>4)&7=2 を自然に得る（patch 不要）。ctx レイアウト（amDipswInit 逆コンパイルで確定, base 0xccf488）:
- *   +0x04 mutex / +0x08 handle / +0x0c smbus addr=0x20 / +0x38 busy=0 / +0x50 event / +0x00 initFlag */
+/* dipsw ctx(base 0xccf488) を再現し provisioning。standalone では amDipswInit(0x9842a0) の SetupDi 列挙失敗で
+ * handle=-1 → amDipswReadByte 即 return → board index ゴミ → errCode 0xa/0xb。ctx 再現で read fn の
+ * DeviceIoControl(0x9c402004,cmd=5)が mxsmbus エミュへ流れ index0=0x20 → board index=(0x20>>4)&7=2。
+ * ctx: +0x00 initFlag / +0x04 mutex / +0x08 handle / +0x0c smbus addr=0x20 / +0x38 busy=0 / +0x50 event。詳細 facts/devices.md。*/
 static void dipsw_force_ready(LogicState *st) {
     if (st->dipsw_fixed) return;
     st->dipsw_fixed = 1;
@@ -406,24 +377,13 @@ static void dipsw_force_ready(LogicState *st) {
         st->host->log("info", "{\"ev\":\"dipsw.force_ready\",\"dev\":\"mxsmbus\",\"addr\":\"0x20\"}");
 }
 
-/* ALL.Net を「正しくエミュレート」する方針転換（2026-07-02, ユーザー指示）。
- * 旧実装は alAbEx auth 完了フラグ(0x210AED0/AED2/AED4/B508)を毎フレーム直接 poke して詐称していた＝ALL.Net を
- * 「つぶす」メモリパッチ。これは genuine な auth-OK 遷移(alAbExGetStatus==0x67)を起こさないため AuthEvent が発火せず、
- * ALL.Net タスク登録(FUN_00559270 が NUPL に uri 代入)が走らない→ card-info POST 先 URL が空→「このカードは使用できません」。
- * ＝詐称が card-auth を根本から阻害していた。
- * 【新方針】alAbEx auth を allnet.c の ALL.Net HTTP サーバ(PowerOn/DownloadOrder 応答)で **genuine に成立**させる。
- * よって alAbEx auth の直接 poke(AED0/AED2/AED4/B508)は全撤去。ゲーム自身が実 PowerOn を POST→応答受理→0x67→AuthEvent→
- * uri 供給→NUPL POST が純正経路で流れる。
- * NIC レベル(0x16019A5 link / 0x16019A6 ip_match)は amNet 層(keychip_server 40104 の query_nic_status 応答)が供給すべきだが、
- * 現状 amNet SM が inline 経路で立てきらない場合の橋渡しとして暫定保持（genuine 化できたら撤去）。 */
+/* NIC link/ip（amNet NIC-level）の暫定橋渡し。alAbEx auth は allnet.c の ALL.Net HTTP サーバで genuine に成立させる
+ * ため poke しない（擬似 LAN IP 192.168.11.1 解決 → LAN 判定 FUN_006ff140 が network_type_LAN_flag=1 →
+ * PowerOn POST → 0x67 → AuthEvent → uri 供給）。詳細 facts/mxnetwork.md。 */
 static void network_nic_bridge(LogicState *st) {
     uintptr_t b = (uintptr_t)GetModuleHandleW(NULL);
-    /* NIC link/ip（amNet NIC-level。alAbEx auth ではない）。genuine amNet 供給に置換予定の暫定橋渡し。*/
     *(uint8_t *)(b + (0x16019A5u - 0x400000u)) = 1;   /* g_net_link_up */
     *(uint8_t *)(b + (0x16019A6u - 0x400000u)) = 1;   /* g_net_ip_match */
-    /* network_type_LAN_flag / phase の poke は撤去。allnet.c が ALL.Net ホストを擬似 LAN IP(192.168.11.1)へ解決する
-     * ことで LAN 判定 FUN_006ff140 が **genuine に** network_type_LAN_flag=1 を立て（router レコード IP 一致）、
-     * alAbExInit の IP バリデータ(FUN_00a02bb0)も loopback 拒否を回避して通過する＝auth SM が genuine に PowerOn を撃つ。 */
     if (!st->netauth_logged && st->host && st->host->log) {
         st->host->log("info", "{\"ev\":\"net.nic_bridge\",\"note\":\"genuine ALL.Net auth via allnet.c (LAN IP presentation)\"}");
         st->netauth_logged = 1;
@@ -545,32 +505,25 @@ static void touch_diag(LogicState *st) {
     }
 }
 
-/* scene_va_name — task node の update slot(+0x24) VA → **nrs.exe 埋め込みの実 C++ クラス名**（RTTI 由来、
- * 推測ではない）。update VA はその scene クラスの vtable slot#2（仮想メソッド）の生アドレスなので、
- * vtable[-4]=COL → +0x0c=TypeDescriptor → +0x08=mangled name で実名を確定できる（裏取り: nrs.exe 直読、
- * EntryModeGamePoint/CheckCard を facts のライブ観測 VA と一致確認）。
- *   表は EntryMode* 系（attract→credit→card-auth entry flow の scene 群）。VA は static_VA。
- * ・継承で slot#2 を共有する組（Regist/UpdateBase/UpdateCard/VersionUp = 0x5ea0a0）は update VA だけでは
- *   一意化できないため意図的に未掲載（生 VA で出す。disambiguate は実行時 obj の RTTI 読みが要る）。
- * ・attract(0x7274d0)/net-session(0x6f42c0) は C++ scene クラスではない素の task callback で RTTI が無い
- *   → 実名が存在しないので名付けない（生 VA のまま）。捏造しない。 */
+/* scene_va_name — task node の update slot(+0x24) VA → 実 C++ クラス名（RTTI 由来: vtable[-4]=COL →
+ * +0x0c=TypeDescriptor → +0x08=mangled name）。VA は static_VA。継承で slot#2 を共有する組（Regist/
+ * UpdateBase/… = 0x5ea0a0）と非クラスの task callback（attract=0x7274d0 等）は名付けず生 VA で出す。 */
 static const char *scene_va_name(unsigned va) {
     switch (va) {
-        case 0x5e6200: return "EntryModeCheckCard";    /* COL 0xca9538 / vtbl 0xbb34bc（旧ラベル card-auth）*/
-        case 0x5eaae0: return "EntryModeGamePoint";    /* COL 0xca9318 / vtbl 0xbb3584（旧ラベル credit, GP 入金）*/
+        case 0x5e6200: return "EntryModeCheckCard";    /* COL 0xca9538 / vtbl 0xbb34bc */
+        case 0x5eaae0: return "EntryModeGamePoint";    /* COL 0xca9318 / vtbl 0xbb3584（GP 入金）*/
         case 0x5e90b0: return "EntryModeNameEntry";    /* COL 0xca94a0 / vtbl 0xbb34ec */
         case 0x5e8710: return "EntryModeSelectChara";  /* COL 0xca94ec / vtbl 0xbb34d4 */
         case 0x5eb000: return "EntryModeDotNetRegist"; /* COL 0xca92cc / vtbl 0xbb359c */
         case 0x5ec340: return "EntryModePassword";     /* COL 0xca9234 / vtbl 0xbb35cc */
         case 0x5eb6b0: return "EntryModeReIssue";      /* COL 0xca9280 / vtbl 0xbb35b4 */
         case 0x62fb50: return "EntryModeBase";         /* COL 0xca9584 / vtbl 0xbb34a4（基底）*/
-        default:       return 0;                        /* RTTI 未解決/非クラス → 生 VA で出す */
+        default:       return 0;                        /* RTTI 未解決/非クラス → 生 VA */
     }
 }
 
-/* scene_tag_fourcc — uid(tag) を ASCII FourCC へ。ゲーム自身が amTaskOpen の重複警告で
- * `uid=%08x(%s)` と出すのと同じ**低位バイト順**（DAT_02283014 = uid&0xff から）。
- * 非表示文字は '.'（JSON 安全のため " と \ も '.' に潰す）。例: 0x50474d4d→"MMGP", 0x45→"E...". */
+/* scene_tag_fourcc — uid(tag) を ASCII FourCC へ（低位バイト順、amTaskOpen の重複警告と同順）。
+ * 非表示文字と " \ は '.'（JSON 安全）。例: 0x50474d4d→"MMGP"。 */
 static void scene_tag_fourcc(char out[5], unsigned tag) {
     for (int i = 0; i < 4; i++) {
         unsigned c = (tag >> (i * 8)) & 0xffu;
@@ -579,8 +532,7 @@ static void scene_tag_fourcc(char out[5], unsigned tag) {
     out[4] = 0;
 }
 
-/* scene_node_json — delta の 1 エントリ。cls = 実 RTTI クラス名（無ければ null＝次の解析対象＝生 VA）、
- * tag = uid 生 hex、tag4 = uid を FourCC 文字列化（ゲーム公認のタグ表記。amTaskOpen 0x89dcb0 で裏取り）。 */
+/* scene_node_json — delta の 1 エントリ。cls=RTTI クラス名(無ければ null) / tag=uid hex / tag4=FourCC。 */
 static int scene_node_json(char *dst, int cap, unsigned va, unsigned tag) {
     char fc[5]; scene_tag_fourcc(fc, tag);
     const char *cls = scene_va_name(va);
@@ -590,12 +542,10 @@ static int scene_node_json(char *dst, int cap, unsigned va, unsigned tag) {
     return wsprintfA(dst, "{\"va\":\"%x\",\"tag\":\"%x\",\"tag4\":\"%s\",\"cls\":null}", va, tag, fc);
 }
 
-/* scene_diag — task/scene list(DAT_016db564) を walk し、各ノードの update vtable slot(+0x24) の VA を集める。
- * 目的: attract→credit→card-auth の scene 活性化を観測する。Phase B2 の停止点は「credit scene が非 active」
- * （gameflow.md 経験的検証）なので、touch 時に credit(0x5eaae0)/card-auth(0x5e6200) update fn を持つノードが
- * 生成・active 化されるかを直接見る。ノード: +4=uid tag / +8=flags(&1 active,&2 init,&4 remove) / +0x24=update / +0x3c=next。
- * 既知 scene update VA: attract=0x7274d0 / credit=0x5eaae0 / card-auth=0x5e6200。変化時＋約2秒毎にログ。 */
-#define SCENE_CAP 64   /* active set ~35。診断 static の上限（超過分は切詰めて trunc を出す）*/
+/* scene_diag — task/scene list(DAT_016db564) を walk し active ノードの update VA(+0x24) を観測。
+ * ノード: +4=uid tag / +8=flags(&1 active,&2 init,&4 remove) / +0x24=update / +0x3c=next。
+ * 既知 update VA: attract=0x7274d0 / credit=0x5eaae0 / card-auth=0x5e6200。変化時＋約2秒毎にログ。 */
+#define SCENE_CAP 64   /* active set ~35。超過分は trunc */
 static void scene_diag(LogicState *st) {
     static unsigned n; static unsigned last_sig = 0xFFFFFFFFu; static int last_flags = -1;
     /* delta 用の前フレーム snapshot（(va,tag) の多重集合）。reload で 0 → 1 度だけ無音 seed。 */
@@ -620,9 +570,7 @@ static void scene_diag(LogicState *st) {
         }
         node = *(unsigned char **)(node + 0x3c);
     }
-    /* scene.delta — active(va,tag) 多重集合を前フレームと diff。add/del を出し、未知 VA は生 hex で温存
-     * （＝生成主を辿る次の Ghidra リード）。RE は「フレーム N で何が現れ／消えたか」で進むのでこれが主軸。
-     * 35 ノードを目視 diff する摩擦を排し、各行を static_VA としてそのまま Ghidra に貼れる形にする。 */
+    /* scene.delta — active(va,tag) 多重集合を前フレームと diff し add/del を出す。未知 VA は生 hex で温存。 */
     if (!seeded) {                                          /* 初回（reload 後含む）は無音で baseline を確定 */
         for (int i = 0; i < cur_n; i++) { prev_va[i] = cur_va[i]; prev_tag[i] = cur_tag[i]; }
         prev_n = cur_n; seeded = 1;
@@ -688,15 +636,11 @@ static void scene_diag(LogicState *st) {
     }
 }
 
-/* 実マウス→消費側へ直接注入（SEGA の replay/debug 経路と同じ report_push 機構を自前で駆動）。
- * serial COM1 経路は game 内部の TX ワーカースレッド(FUN_0067c1a0)が touch ポートで動かず handshake 不全。
- * 一方、消費側 report バッファ +0x2b8 → report_promote(+0x30c dirty)→ +0x210/+0x234 は poll_update で毎フレーム
- * 処理される（mode 非依存）。よって +0x2b8 に「現マウス位置＋押下」を書き +0x30c=1 で消費側へ届ける。
- * ctx レイアウト（report_promote 0x8B37F0 逆コンパイルで確定）:
- *   +0x2b8[0]=press / +0x2b9,+0x2ba=down/move flags / +0x2dc(float)=X / +0x2e0(float)=Y → promote で +0x210/+0x234/+0x238
- * 座標空間は native(想定 1024x600)。窓 client(0..w/h)を native へスケール。要調整なら係数を変える。 */
+/* 実マウス→消費側 report バッファへ直接注入（report_promote 0x8B37F0 と同機構）。現在は未使用（serial 経路で足りる）。
+ * ctx: +0x2b8[0]=press / +0x2b9,+0x2ba=down/move / +0x2dc(float)=X / +0x2e0(float)=Y → promote で +0x210/+0x234/+0x238。
+ * 座標空間は native(1024x600)。窓 client を native へスケール。 */
 static void touch_inject(LogicState *st) {
-    /* 以前の実験で立てた amDebug_flag_hi(demo 自動入力)が残ると +0x2b8 を奪い合うので毎フレーム clear。 */
+    /* amDebug_flag_hi(demo 自動入力)が +0x2b8 を奪うので毎フレーム clear。 */
     { uint8_t *f = (uint8_t *)((uintptr_t)GetModuleHandleW(NULL) + (0x1696F2Cu - 0x400000u)); *f &= (uint8_t)~1u; }
     unsigned char *c = touch_data_ctx();
     if (!c) return;
@@ -748,16 +692,9 @@ static void touch_inject(LogicState *st) {
     st->touch_last_press = (uint8_t)press;
 }
 
-/* DirectInput / 951 診断: 起動時 dinput_create_device(0x67CBE0)が usbio_board_count を立てたか、
- * どの段で失敗して count=0(=Error 951)になるかを観測する。目的 = 951 を byte patch(0x6F0B80)ではなく
- * 実 SysMouse 供給で解消する前提調査（OS 境界仮想化・鉄則）。読み取り globals:
- *   usbio_board_count(0x16b88dc): dinput_create_device 成功数。<1 で usbio_io_status=-0x70→errCode 0xf→951。
- *   dinput_ctx(0x16f3a4c): IDirectInput8*（0 = DirectInput8Create 失敗）
- *   dev0/dev1(0x16f3a50/54): EnumDevices(DI8DEVCLASS_GAMECTRL)で埋まる joystick（不在なら 0）
- *   dinput_device2/mouse(0x16f3a58): CreateDevice(GUID_SysMouse)+SetDataFormat+SetCooperativeLevel 成功で非0
- *   hwnd(0x1696e0c): SetCooperativeLevel に渡すゲームウィンドウ HWND（0 = 未作成→SetCoopLevel が E_HANDLE で失敗）
- * 切り分け: ctx!=0 && mouse==0 && hwnd==0 → ウィンドウ未生成が原因。ctx!=0 && mouse==0 && hwnd!=0 → CreateDevice/環境。
- *          ctx==0 → DirectInput8Create 自体が失敗。 */
+/* DirectInput/951 診断: dinput_create_device(0x67CBE0)が count を立てたか、どこで count=0(Error 951)になるか観測。
+ *   usbio_board_count(0x16b88dc): <1 で errCode 0xf→951 / dinput_ctx(0x16f3a4c): IDirectInput8*(0=Create 失敗) /
+ *   dev0/dev1(0x16f3a50/54): GAMECTRL joystick / mouse(0x16f3a58): SysMouse device / hwnd(0x1696e0c): SetCoopLevel 用。 */
 static void dinput_diag(LogicState *st) {
     static int last_count = -1, last_state = -1; static unsigned n;
     uintptr_t b = (uintptr_t)GetModuleHandleW(NULL);
@@ -779,11 +716,8 @@ static void dinput_diag(LogicState *st) {
     }
 }
 
-/* ============================================================ カード制御ファイル（loader → 稼働中 logic）
- * loader が抜き差し操作のたびに **ゲーム dir の nrsedge.card.json** を書く（present/image/type/gen）。
- * logic は on_jvs_tick で last-write 変化時のみ再読込し present/uid/card_type/image を反映する。
- * ファイル I/O は **host->orig（フック迂回）** で行う（自フック再入＝SRW deadlock 回避。mxdev と同流儀）。
- * GetFileAttributesExW は非フック API ゆえ直接呼んでよい（安価な変化検知）。 */
+/* カード制御ファイル（loader → 稼働中 logic）: loader が抜き差しで nrsedge.card.json を書き、logic は
+ * last-write 変化時のみ再読込。ファイル I/O は host->orig（自フック再入＝SRW deadlock 回避）。 */
 
 typedef HANDLE (WINAPI *CreateFileW_fn)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
 typedef BOOL   (WINAPI *ReadFile_fn)(HANDLE, LPVOID, DWORD, LPDWORD, LPOVERLAPPED);
@@ -907,11 +841,8 @@ static void card_control_poll(LogicState *st) {
     }
 }
 
-/* ============================================================ headless タッチ注入（nrsedge.touch.json）
- * loader/スクリプトが `{"press":0|1,"x":<0..1>,"y":<0..1>,"gen":N}` を書く。x/y は client 正規化(左上原点)。
- * card_control_poll と同流儀（orig CreateFile 経由・mtime 変化で再読込）。touch_force 有効時は
- * on_read_file(COM1) で touch_sample_mouse を置換して serial 'T' 経路へ流す（前面窓/カーソル非依存）。
- * これで attract→credit→card-auth の scene 遷移を headless で駆動・自動テストできる。 */
+/* headless タッチ注入（nrsedge.touch.json）: loader/スクリプトが press/xm/ym を書く。card_control_poll と同流儀。
+ * touch_force 有効時は on_read_file(COM1) が touch_sample_mouse を置換し serial 'T' 経路へ流す（窓/カーソル非依存）。 */
 static void touch_control_poll(LogicState *st) {
     wchar_t path[MAX_PATH]; GetModuleFileNameW(NULL, path, MAX_PATH);
     wchar_t *p = wcsrchr(path, L'\\'); if (p) p[1] = 0; else path[0] = 0;
@@ -1003,19 +934,11 @@ static int *cardrw_object(uintptr_t b) {
     return (int *)(uintptr_t)node[4];                       /* object base（無ければ 0）*/
 }
 
-/* 仮想カード present 時、cardrw の presence/read-trigger フィールド(device_status+0x5628)を 1 に供給する。
- * standalone には実機の「カード挿入検出」信号が無く、card-select scene(0x5e6200)の present ゲート
- * `*(int*)(device_status+0x5628)!=0` が立たない → 「カード使用」無効。これを直接供給する。
- * device_status+0x5628 は read シーケンサ FUN_004f30a0 の state でもあるので、1 にすると read 列に入り
- * presence query FUN_004f6a30 も present を返す。前回の flags/state2 poke 版はクラッシュしたため、SM の
- * 中間 state は触らずこのフィールドのみを in-band に供給する。
- * オフセットは cardrw_device_status_ptr(0x4f3e30): object=node[4] / device_status=object+4 / presence=+0x5628。*/
+/* 仮想カード present 時、cardrw presence フィールド(device_status+0x5628)を 1 に供給する。standalone には実機の
+ * カード挿入検出信号が無く、card-select scene(0x5e6200)の present ゲート `+0x5628!=0` が立たない。これに 1 を書くと
+ * read シーケンサ FUN_004f30a0 が read 列に入り presence query FUN_004f6a30 も present を返す。SM 中間 state は触らない。
+ * offset: cardrw_device_status_ptr(0x4f3e30): object=node[4] / device_status=object+4 / presence=+0x5628。*/
 static void card_force_present(LogicState *st) {
-    /* 【有効化 2026-07-01】かつてこの presence 供給は amGfetcher get_status(40113)の無限再接続を誘発したが、
-     * その真因は本関数でなく keychip_proto の amGfetcher 応答 result=0（result_field_checker 0x975140 が
-     * result!="success" を -5 扱い）だったと live capture で確定。keychip_proto を result=success 化して
-     * get_status/set_auth_params/resume 系が各1回で settle（loop 消滅）したため presence 供給を genuine 復帰。
-     * これで card-select scene(0x5e6200)の present gate が立ち、カード抜き差しが反映される。詳細 facts/mxgfetcher.md。 */
     if (!st->card.present) return;
     uintptr_t b = (uintptr_t)GetModuleHandleW(NULL);
     int *obj = cardrw_object(b);
@@ -1046,14 +969,9 @@ static void json_escape(char *dst, int cap, const char *s, int maxlen) {
     dst[j++] = '"'; dst[j] = 0;
 }
 
-/* NUPL(ALL.Net セッションタスク)の状態を READ-ONLY で診断する（正しい ALL.Net エミュ検証用）。
- * card-auth scene(0x5e6200) は読取 UID を NetDataCardinfoRequest として NUPL 経由で POST するが、その POST 先 URL は
- * NUPL オブジェクト obj+8(std::string)＝実 PowerOn の uri(FUN_006fe670→FUN_006ff7e0→FUN_00559270 で供給)。
- * genuine 経路（alAbEx auth が 0x67 到達→AuthEvent→タスク URL 設定）が成立すれば obj+8 が埋まり POST が飛ぶ。
- * task node: +0x04=uid("NUPL"=0x4c50554e) / +0x10=object-ptr の slot / +0x3c=next。object = *(int*)(node[4])（double deref,
- * FUN_00717da0 と一致）。obj+8=URL std::string（+0x18 size / +0x1c capacity、SSO は cap<0x10 で inline buffer）/
- * +0xd8=応答 status（0=ok,1=inprogress,-1=err）/ +0x200fc=SM state（3=応答準備完了）。
- * ※ obj+8 を直接 poke するのは鉄則（OS 境界エミュ）に反するため行わない。genuine auth を成立させて uri を供給する。 */
+/* NUPL(ALL.Net セッションタスク) READ-ONLY 診断。POST 先 URL = obj+8(std::string) は genuine PowerOn の uri。
+ * node: +0x04=uid("NUPL"=0x4c50554e) / +0x10=&object-ptr / +0x3c=next。object = *(int*)(node[4])（double deref）。
+ * obj+8=URL(+0x18 size/+0x1c cap、SSO は cap<0x10) / +0xd8=status(0 ok,1 inprogress,-1 err) / +0x200fc=SM state(3=準備完了)。 */
 static void nupl_diag(LogicState *st) {
     static int last_sig = -0x7fffffff, logged_bad = 0;
     uintptr_t b = (uintptr_t)GetModuleHandleW(NULL);
@@ -1090,10 +1008,8 @@ static void nupl_diag(LogicState *st) {
     }
 }
 
-/* alAbEx ALL.Net auth SM の状態を READ-ONLY 診断（genuine auth が走っているか＝PowerOn POST 不発の切り分け）。
- * status = *(0x0249682c)（ctx=&DAT_02496820 の +0xc）: 0x65 REVALIDATION / 0x66 BUSY / 0x67 AUTH-OK /
- *   0x69 RETRY-WAIT / 0x6a/0x6b DownloadOrder / 負値=error(-0xc6 SYSTEM/-0x1f1 COMM/-499 NG/-0x1f2 TIMEOUT/-199 NOINIT)。
- * poller FUN_006fe3e0 は status 0x65 で DAT_0210af48==0 なら FUN_009fff90(revalidation kick)を呼び executor を起動。
+/* alAbEx ALL.Net auth SM READ-ONLY 診断。status = *(0x0249682c): 0x65 REVALIDATION / 0x66 BUSY / 0x67 AUTH-OK /
+ *   0x69 RETRY-WAIT / 0x6a,0x6b DownloadOrder / 負値=error(-0xc6 SYSTEM/-0x1f1 COMM/-499 NG/-0x1f2 TIMEOUT/-199 NOINIT)。
  * flags: 0x210AED0 started / 0x210AED2 auth_ok / 0x210B508 complete / 0x210AF48 reval_gate / 0x210B509 lan_reachable。*/
 static void alabex_diag(LogicState *st) {
     static int last = -0x7fffffff;
@@ -1135,12 +1051,10 @@ static void on_jvs_tick(LogicState *st) {
     nupl_diag(st);            /* NUPL(ALL.Net card-info)タスクの URL/status/SM を観測（正しい ALL.Net auth→uri 供給の検証）*/
     alabex_diag(st);          /* alAbEx ALL.Net auth SM の status 観測（genuine PowerOn auth が走るか＝POST 不発の切り分け）*/
 
-    /* touch_inject(st); — handshake 完了で device が mode1 動作するため bypass 注入は不要。
-       実 serial 経路（on_read_file の 'T' フレーム→rx_parse→decode_T_coord）でタッチが流れる。 */
+    /* touch_inject は不要（serial 経路でタッチが流れる）。 */
 
-    /* 筐体 TEST/SERVICE を毎フレーム上書き（dipsw byte2=3 の常時 ON を入力で打ち消す。on_sys_override 相当だが
-       on_sys_override(dipsw/sysinput hook)は attract 中に発火しない場合があるため、
-       毎フレーム呼ばれる jvs_update_main でも DAT_0160194c bit0/1 を F1/F2 から書く。 */
+    /* 筐体 TEST/SERVICE 毎フレーム上書き（dipsw byte2=3 の常時 ON を入力で打ち消す）。on_sys_override は
+       attract 中に発火しない場合があるため、毎フレーム呼ばれる本フックでも DAT_0160194c bit0/1 を書く。 */
     {
         uint32_t *sw = (uint32_t *)((uintptr_t)GetModuleHandleW(NULL) + (0x160194Cu - 0x400000u));
         *sw = (*sw & ~3u) | (in.test ? 1u : 0u) | (in.service ? 2u : 0u);
@@ -1184,22 +1098,17 @@ static void on_sys_override(LogicState *st) {
     *p = (*p & ~3u) | (in.test ? 1u : 0u) | (in.service ? 2u : 0u);
     st->sys_tick++;
 
-    /* テストメニュー入口（実機 RE で確定・実測検証済み）:
-       入口は 0x160194c(TEST スイッチ)ではなく scene システム。scene マネージャ scene_request_consume(0x6F0750)
-       が毎フレーム要求 scene id DAT_016B8B54 を読み、≠-1 ならその scene を生成→ id を -1 へ戻す（ワンショット）。
-       id=13 = テストモード容器 scene（enter cb open_test_menu 0x89DF80 → testmenu_tick 0x89E240 を生成）。
-       通常は scene-init 0x6F06F0 が「DAT_016F5A9C!=0 のとき id=13 を要求」する。standalone はそのフラグが立たない
-       ため入らない。ここで main ループ安定後（boot 完了後）に id=13 を一度だけ書いて入場させる。
-       注: TEST は保持しない。メニュー内ナビはエッジ駆動で、保持するとホールドカウンタ誤発火で即退出するため
-       （入場後の操作は実機同様 F1=TEST / F2=SERVICE のエッジ）。 */
+    /* テストメニュー入口: 入口は TEST スイッチではなく scene 要求。scene_request_consume(0x6F0750)が要求 scene id
+       DAT_016B8B54 を読み ≠-1 なら生成→id を -1（ワンショット）。id=13 = テストモード容器 scene。standalone は
+       通常の要求フラグ(DAT_016F5A9C)が立たないため、boot 完了後に id=13 を一度だけ書いて入場させる。
+       TEST は保持しない（メニュー内ナビはエッジ駆動、保持すると即退出）。 */
     if (cfg && cfg->test_mode && !st->test_entered && st->sys_tick > 20) {
         *(uint32_t *)((uintptr_t)GetModuleHandleW(NULL) + (0x16B8B54u - 0x400000u)) = 13;  /* requested scene id */
         st->test_entered = 1;
         if (st->host && st->host->log) st->host->log("info", "{\"ev\":\"testmenu.enter\",\"scene\":13}");
     }
 
-    /* 診断: この override(=sysinput 0x89B230 / dipsw 0x45A0E0 hook)が発火しているか（先頭3回のみ）*/
-    if (st->sys_tick <= 3) {
+    if (st->sys_tick <= 3) {   /* このフックが発火しているかの診断（先頭3回のみ）*/
         char m[120];
         wsprintfA(m, "{\"ev\":\"sys.ovr\",\"n\":%u,\"T\":%d,\"S\":%d,\"194c\":%u}", st->sys_tick, in.test, in.service, *p);
         if (st->host && st->host->log) st->host->log("info", m);
@@ -1207,9 +1116,8 @@ static void on_sys_override(LogicState *st) {
 
 }
 
-/* keychip present flag hold（旧 mxkeychip/setup.js）: ctx(0xCCF000)+4 && +8 が非ゼロ＝真正 present の
- * とき keychip_present_flag(0x16014A2)=1 を保持（一方向ラッチの誤クリアを毎回打ち消す）。
- * 注: 真正 present 化には PCP サーバ(pcpa_server.py)移植が前提（未移植時は ctx 未認証で発火せず）。 */
+/* keychip present flag hold: ctx(0xCCF000)+4 && +8 が非ゼロ＝真正 present のとき keychip_present_flag(0x16014A2)=1
+ * を保持（一方向ラッチの誤クリアを打ち消す）。真正 present 化には PCP サーバ(keychip_server)が前提。 */
 static void on_keychip_hold(LogicState *st) {
     uintptr_t b = (uintptr_t)GetModuleHandleW(NULL);
     uint32_t  c = *(uint32_t *)(b + (0xCCF000u - 0x400000u));   /* keychip ctx ptr */
@@ -1221,11 +1129,8 @@ static void on_keychip_hold(LogicState *st) {
     (void)st;
 }
 
-/* amRtcGetServerTime POST（旧 amrtc/rtc.js 移植）。方針 = only-on-failure:
- * 実 RTC が応答(orig != -1)すればその値を温存、失敗(-1)のときだけ PC ローカル時刻で
- * amRtcTime 構造体を埋め成功(0)を返す。caller(amRtcGetServerTime 0x974040)は ret != -1 で成功判定。
- * 構造体レイアウトは converter amRtcConvertTimetToStruct(0x973F20)で確証:
- *   +0 WORD year / +2 BYTE month / +3 day / +4 hour / +5 minute / +6 second(60→59 クランプ) */
+/* amRtcGetServerTime(0x974040) POST, only-on-failure: 実 RTC 応答(orig!=-1)は温存、失敗(-1)時のみ PC ローカル時刻で
+ * amRtcTime を埋め成功(0)を返す。構造体: +0 WORD year / +2 month / +3 day / +4 hour / +5 min / +6 sec(60→59 クランプ)。 */
 static long long on_rtc_get(LogicState *st, void *time_out, unsigned *flag_out, long long orig_ret) {
     if (orig_ret != -1) return orig_ret;          /* 実 RTC 成功 → 温存 */
     if (!time_out) return orig_ret;
@@ -1248,18 +1153,12 @@ static long long on_rtc_get(LogicState *st, void *time_out, unsigned *flag_out, 
     return 0;   /* ≠ -1 = success */
 }
 
-/* amEepromInit(0x985160) detour 本体: EEPROM ctx を storage-init の最中に provisioning する。
- * eeprom_force_ready を再利用（initFlag==0 の今だけ書く・冪等）。host 側 detour は本関数の後 0 を返し、
- * amlib_storage_init_all が amlib_eeprom_ok=1 で STATIC(area0) を読む → seed 済み region_game_pcb=01。
- * per-frame force（on_jvs_tick 経由）は init 後で遅すぎるため、ここで早期化する（force 側は冪等で no-op 化）。*/
+/* amEepromInit(0x985160) detour: storage-init の最中に EEPROM ctx を早期 provisioning（per-frame force は init 後で遅い）。 */
 static void on_eeprom_init(LogicState *st) {
     eeprom_force_ready(st);
 }
 
-/* dipsw read(0x45A0E0=amDipswRead) PRE detour 本体: dipsw ctx を読取の直前に provisioning する。
- * dipsw_force_ready を再利用（dipsw_fixed の冪等 one-shot）。board check(amlib_storage_board_check)が使う
- * board_index は amDipswRead が書くので、その読取前に ctx を H_MXSMBUS にしておけば IOCTL(cmd5,vcode0)→0x20
- * → index 2 → table[2]=8 で errCode 0xa(→errNo 910)を断つ。per-frame force(on_jvs_tick)は board check 後で遅い。*/
+/* amDipswRead(0x45A0E0) PRE detour: board check が使う board_index の読取前に dipsw ctx を provisioning（per-frame force は遅い）。 */
 static void on_dipsw_provision(LogicState *st) {
     dipsw_force_ready(st);
 }

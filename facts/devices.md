@@ -213,6 +213,14 @@ card-auth scene(0x5e6200) は読んだ UID で `RequestSendAdapter<NetDataCardin
   3. card-auth scene(0x5e6200) case3: `local_1204`(=card-data +0x3c, 応答のカードステータス)で分岐。**==1=有効カード**（使用可）/ default=無効。
   → 注入点 = **NUPL task ctx**（+0xd8=0 にし、応答 binary 域に status=1＋profile の `NetDataCardinfoResponse` を置く）。
 
+- **【解決済】ALL.Net NUPL セッション init ハンドシェイクの応答書式（S+L 実証）**: cardinfo 以前に NUPL セッションが `init` で確立する必要がある。standalone は init 応答が拒否され `NUPL obj+0xd8: 1→-1` で 60s 毎に無限リトライ＝session 未確立＝cardinfo が飛ばず「使用できません」。真因は応答の `command` field 書式:
+  - **二段階で消費される**: ① 封筒パーサ `nupl_recv_envelope_parse`(0x712710, __thiscall(obj,body,len)) が body を '&'(`DAT_00bb39dc`)/'='(`DAT_00ba4d88`) で分割し `command_common` id 一致＋`response_header` status0 で **obj+0xd8=0**（成功）。② その後 NUPL SM が **init 専用パーサ `nupl_init_response_parse`(0x92bb10)** で同 body を再パース、失敗時 obj+0xd8=-1。
+  - **init パーサの必須 gate**: `command` field 値が `DAT_0126728c="init_response"`(0xc8df04, 静的初期化 0xad8a62) と **strcmp 一致必須**（不一致で即 -1）。以降 `protocol_version`/`command_common`/`response_header`/`local_uid`/`db_start_time`/`db_stop_time` が全て present かつ各 parse OK で成功（map lookup ゆえ順序非依存）。
+  - **正しい init 応答**（`src/host/allnet.c build_nupl_inner` init 枝・実装済）: `command=init_response&protocol_version=92b2d258&command_common=<echo>&response_header=0del&local_uid=0000000000000000&db_start_time=2000-01-01 00:00:00.0&db_stop_time=2030-01-01 00:00:00.0&`（zlib STORED+base64+`Pragma:DFI`）。
+  - **確証（headless）**: 修正後 `nupl.state d8:0 sm:2`＝init 受理・session SM 前進、`alabex.diag authok:1 lan:1`。診断は host hook `d_recv_parse`(0x712710 PRE/POST, `recv.parse.pre/post`) と `nupl_diag`（`api.c`）。req(`init_request`)/応答(`init_response`)は動詞ペア名（応答値は request に現れず binary の parser のみが正）。
+  - **write-back**: 上記関数名は Ghidra DB に永続化済（`nupl_recv_envelope_parse`/`nupl_init_response_parse`/`nupl_init_response_serialize`(0x92c3b0)/`nupl_init_response_cmdname_getter`(0x92cd30)）。
+  - **残**: cardinfo 応答（5611B binary, 別 consumer `FUN_00717cb0`/Binary2Class 0x913590）は card-select 到達＝GUI+実タッチが要り headless 未確証。init 確立でその経路は unblock 済。
+
 **cardrw object SM の memory-state 経路（認識はシリアル経由でない）**: card-select 画面でもゲームは serial SEARCH(0x4D) を撃たない（撃つのは handshake の f7/68/48/b8 のみ）。認識は cardrw object SM の memory state 経由で、present 詐称＝serial emu を ready にするだけでは届かない。
 - **scene の present ゲート（全 case 共通）**: `obj=node[4]`（class 0x21,0x21 ノード, `cardrw_device_status_ptr` 0x4f3e30）、`device_status=obj+4`。判定 = `*(int*)(device_status+0x5628)!=0`（presence/read-seq state）かつ `flags(+0)&0x10(error)==0`、または `FUN_004f2d20()`。
 - **cardrw_object_update_sm(0x4f2ad0) 検出鎖**: case0 state2(=`device_status+8`) 0→1 は `flags&0xc0` / case1 `advance_to_present`(0x4f6810, state2 1→2＋flags|0x1000) 呼出は `(flags&0x400)==0 && bit7 clear` / case2 は presence query `FUN_004f6a30`(=`device_status+0x5628!=0`)が真でないと hold せず state2→0 へ revert。

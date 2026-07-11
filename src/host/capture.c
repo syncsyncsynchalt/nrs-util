@@ -173,9 +173,8 @@ static void present_probe(void) {
     }
 }
 
-/* 診断レバー: NRSEDGE_SWAP_INTERVAL=N が設定されていれば、ゲームが解決済みの wglSwapIntervalEXT を
- * 毎 swap 直前に (N) で上書き呼びする（ゲームの global は触らない）。N=0 で vsync OFF。
- * TP(windowed) がビート無し＝present 設定差の疑い。vsync OFF で 33ms ビートが消えるかの対照実験用。 */
+/* 診断レバー: NRSEDGE_SWAP_INTERVAL=N が設定されていれば、ゲーム解決済みの wglSwapIntervalEXT を毎 swap 直前に
+ * (N) で上書き呼びする（ゲームの global は触らない）。N=0 で vsync OFF＝33ms ビートの対照実験用。 */
 static void apply_forced_swapinterval(void) {
     static int forced = -2;   /* -2=未判定, -1=無効, それ以外=強制値 */
     static void (WINAPI *fn)(int);

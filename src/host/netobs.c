@@ -1,10 +1,6 @@
-/* netobs.c — winsock 観測（passive 診断）。billing path B 調査で新設、現在は観測専用。
- * 確定済み所見（facts/ambilling.md, 2026-06-30）:
- *   - billing(alpbEx)は getaddrinfo("ib.naominet.jp") 後 DNS 失敗で :8443 connect に至らず（U1）。
- *   - DNS を 127.0.0.1 へ redirect し 8443 に listener を立てても connect は来ない＝attract では TLS session 非発生（U2）。
- *   - 実トラフィックは keychip_server.c の localhost PCPA 群 40100–40113。bbrouter.loc/tenporouter.loc も resolve のみ。
- * よって redirect/listener は撤去し、connect/resolve を log するだけの passive 観測に戻した
- *   （Phase B2 のネットワーク経路調査で接続先を可視化する診断として有用）。挙動は変えない（log→原関数）。
+/* netobs.c — winsock connect/resolve の passive 観測（log→原関数、挙動は変えない）。詳細 facts/ambilling.md。
+ *   billing(alpbEx)は "ib.naominet.jp" DNS 失敗で :8443 connect に至らず、実トラフィックは keychip_server の
+ *   localhost PCPA 群 40100–40113。接続先を可視化する診断用。
  * 前提: MinHook は hooks_install()→MH_Initialize() 済み。host.c は hooks.ok の後で netobs_install を呼ぶ。 */
 #include "host.h"
 #include <winsock2.h>   /* WIN32_LEAN_AND_MEAN(abi.h)で winsock.h は排除済み→衝突なし */

@@ -1,26 +1,15 @@
-/* allnet.c — ALL.Net HTTP バックエンドのエミュ（standalone 用・平文 HTTP・生 winsock）。
+/* allnet.c — ALL.Net HTTP バックエンドのエミュ（standalone 用・平文 HTTP・生 winsock）。詳細 facts/mxnetwork.md。
+ * 目的: card-auth scene(0x5e6200) が UID を NUPL 経由で POST→NetDataCardinfoResponse で有効判定する経路を成立させる。
  *
- * 目的: card-auth scene(0x5e6200) の「このカードは使用できません」を genuine に解消する。
- *   真因（RE 実証）: card-auth は読み取った UID を NUPL(ALL.Net セッションタスク)経由でサーバへ POST し、
- *   NetDataCardinfoResponse を受信して有効判定する。standalone は応答が来ず無効。
+ * 二段構え:
+ *   1. boot: http://naominet.jp/sys/servlet/PowerOn へ POST。応答パーサ FUN_006fe670 が stat=1 を要求し uri= から
+ *      バックエンド URL を抽出→DAT_0210b530(=NUPL obj+8)。PowerOn 成功なしでは URL 空でカード POST が飛ばない。
+ *   2. card-info はその uri へ POST。エンベロープ `command_common=..&response_header=..&command=<b64>&`
+ *      （recv FUN_00712710 が id/status を抽出、command= の base64 を Binary2Class で 5611B 構造体にパース）。
  *
- * ALL.Net の二段構え（実体マップ）:
- *   1. boot 時 ゲームは http://naominet.jp/sys/servlet/PowerOn へ POST（ハードコード, port80, 平文）。
- *      応答パーサ FUN_006fe670 が stat=1 を要求し uri= からゲームバックエンド URL を抽出→DAT_0210b530
- *      （= NUPL obj+8）。PowerOn 成功なしでは URL 空＝カード POST が飛ばない（online 詐称だけでは不十分と確認済み）。
- *   2. 以後 card-info はその uri へ POST。エンベロープ = `command_common=..&response_header=..&command=<b64>&`
- *      （field sep `&`、kv sep `=`。recv=FUN_00712710 が command_common→id / response_header→status を抽出、
- *      command= の base64 を ResponseRecvAdapter が復号→Binary2Class で 5611B 構造体にパース）。
- *   3. card-info 応答 5611B の先頭に版数 0x92B2D258・cmd 0x23、offset143 に card-status=1（有効）。
- *
- * トランスポート傍受（TLS 不要＝card 経路は生 winsock 平文 HTTP。billing の OpenSSL は別系統 ib.naominet）:
- *   - getaddrinfo/gethostbyname: naominet.jp（ib. 除く）→ 127.0.0.1 に解決。
- *   - connect: dest==127.0.0.1 && port==80 → 127.0.0.1:ALLNET_PORT へ書換え（:80 バインド不要）。
- *   - 127.0.0.1:ALLNET_PORT で平文 HTTP を listen し PowerOn/DownloadOrder/card-info に応答。
- *   ＝ゲーム自身の htmg クライアント→FUN_00712710 が genuine に応答を消費する（OS 境界エミュ）。
- *
- * 本モジュールは winsock フックを所有する（旧 netobs.c の connect/resolve ログを内包＝netobs_install は呼ばない）。
- * reload-safe のため安定 host 側に常駐。 */
+ * トランスポート傍受（card 経路は平文 HTTP。billing の OpenSSL ib.naominet は別系統・非対象）:
+ *   getaddrinfo/gethostbyname: naominet.jp(ib. 除く)→ LAN IP / connect: <LAN IP>:80 → 127.0.0.1:ALLNET_PORT。
+ * winsock フックを所有（netobs の connect/resolve ログを内包）。reload-safe のため host 側常駐。 */
 #include "host.h"
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -32,19 +21,14 @@
 
 #pragma comment(lib, "ws2_32.lib")
 
-#define ALLNET_PORT 40080   /* 平文 HTTP リスナー（loopback）。connect <FAKE_LAN_IP>:80 を here へ書換える */
-/* ALL.Net ホストの解決先＝非 loopback の擬似 LAN IP。理由（RE 実証）:
- *   ① alAbExInit の IP バリデータ FUN_00a02bb0 は loopback(127.x)を INVALID とし auth init を失敗させる（→auth 停止）。
- *      192.168.11.1 は VALID（ntohl+0x81000000 が非オーバーフロー）。
- *   ② LAN 判定 FUN_006ff140 は ALL.Net router レコード2つの IP 一致で network_type_LAN_flag=1（genuine LAN）。
- *      全 ALL.Net ホストを同一 IP に解決すれば LAN が genuine に成立（flag poke 不要）。
- *   実接続は connect hook が <FAKE_LAN_IP>:80 → 127.0.0.1:ALLNET_PORT へ振替えるので、この IP に物理到達性は不要。 */
+#define ALLNET_PORT 40080   /* 平文 HTTP リスナー（loopback）。connect <LAN IP>:80 を here へ書換える */
+/* ALL.Net ホストの解決先＝非 loopback の擬似 LAN IP。loopback(127.x)は IP バリデータ FUN_00a02bb0 が INVALID とし
+ * auth init を失敗させる。全 ALL.Net ホストを同一 IP に解決すれば LAN 判定 FUN_006ff140 が network_type_LAN_flag=1。
+ * 到達性は connect hook が :80→127.0.0.1:ALLNET_PORT へ振替えるので不要。 */
 #define FAKE_LAN_IP "192.168.11.1"
 
-/* ALL.Net ホストの解決先 IP（実行時にマシンの実 LAN IP へ設定。理由: alAbEx auth の AuthHops(FUN_006ff230)は
- * サーバへ traceroute(altrStartTraceroute)で hop 数を測る。実在しない IP だと probe タイムアウトを重ね ~46s 停滞する。
- * マシン自身の LAN IP なら traceroute は 0-1 hop で即完了し、かつ非 loopback で IP 検証(FUN_00a02bb0)も通過する。
- * 取得失敗時は FAKE_LAN_IP にフォールバック。実接続は connect hook が <this IP>:80 → 127.0.0.1:ALLNET_PORT へ振替え。 */
+/* 実行時にマシンの実 LAN IP へ設定（auth の AuthHops FUN_006ff230 が traceroute で hop 数を測るため、実在 IP なら
+ * 即完了し ~46s 停滞を避ける）。取得失敗時は FAKE_LAN_IP へフォールバック。 */
 static char          g_lan_ip[16] = FAKE_LAN_IP;
 static unsigned char g_lan_b[4]   = { 192, 168, 11, 1 };
 
@@ -185,9 +169,9 @@ static void build_cardinfo_binary(unsigned char *buf /* CARDINFO_RESP_LEN */) {
     put_be32(buf + 143, 0x00000001u);   /* card status = valid */
 }
 
-/* ---- zlib transport codec（NUPL コマンドは base64(zlib_deflate(平文)) でやり取り。scratchpad で実データ検証済み）----
- * 復号: base64-decode → inflate（RFC1951, tinfl-lite）。符号化: zlib STORED ブロック（無圧縮でも valid・deflate 圧縮器不要）。
- * ゲームの zlib 1.2.3(FUN_009a2440 inflate)が STORED を受理。応答 HTTP に "Pragma: DFI" を付けると受信側が復号する。 */
+/* ---- zlib transport codec（NUPL コマンドは base64(zlib_deflate(平文))）----
+ * 復号: base64-decode → inflate。符号化: zlib STORED ブロック（無圧縮でも game の zlib 1.2.3 が受理）。
+ * 応答 HTTP に "Pragma: DFI" を付けると受信側が復号する。 */
 static int b64_val(int c) {
     if (c >= 'A' && c <= 'Z') return c - 'A';
     if (c >= 'a' && c <= 'z') return c - 'a' + 26;
@@ -344,30 +328,28 @@ static int mem_contains(const unsigned char *hay, int n, const char *tok) {
     return 0;
 }
 
-/* NUPL コマンドの内部平文応答を組む（decode 済リクエスト req から）。
- * エンベロープ = command=base64(payload)&command_common=<req の id をエコー>&protocol_version=92b2d258&response_header=0&
- *   recv(FUN_00712710): command_common id 一致(obj+0x20130) ＋ response_header status0(FUN_0094a9b0) で obj+0xd8=0 前進。
- *   payload はコマンド別: card-info=5611B binary / init=key=value テキスト / attend 等=最小。 戻り=内部平文長。 */
+/* NUPL コマンドの内部平文応答を組む（decode 済リクエスト req から）。エンベロープ = command_common(id echo)/
+ * protocol_version=92b2d258/response_header=0 + command=base64(payload)。recv(FUN_00712710)が id 一致
+ * (obj+0x20130) ＋ status0 で obj+0xd8=0 前進。payload はコマンド別: card-info=5611B / init=key=value。戻り=平文長。 */
 static int build_nupl_inner(const unsigned char *req, int reqlen, char *out, int cap) {
     char cc[512]; field_value((const char *)req, reqlen, "command_common=", cc, sizeof cc);  /* echo */
-    /* command= の値は値内に 0x30 挿入がある（"init_re0que0st"）ため prefix stem で判定（0x30 前の部分は clean）。*/
+    /* command= の値内に 0x30 挿入がある（"init_re0que0st"）ため prefix stem で判定。*/
     char cmd[64]; field_value((const char *)req, reqlen, "command=", cmd, sizeof cmd);
     (void)mem_contains;
 
-    /* フィールド順: response_header/command_common/protocol_version を先に、大きな command=base64 を最後に置く
-       （末尾フィールドが decode 末端の影響を受ける懸念を排除）。区切り sub-field = literal "del"（0x64 65 6c）。 */
+    /* command=base64 は末尾に置く（decode 末端の影響回避）。区切り sub-field = literal "del"。 */
     if (strncmp(cmd, "cardinfo", 8) == 0) {
         unsigned char bin[CARDINFO_RESP_LEN]; build_cardinfo_binary(bin);
         static char pb64[CARDINFO_RESP_LEN * 2]; b64_encode(bin, CARDINFO_RESP_LEN, pb64, sizeof pb64);
         return _snprintf(out, cap, "response_header=0del&command_common=%s&protocol_version=92b2d258&command=%s&", cc, pb64);
     }
     if (strncmp(cmd, "init", 4) == 0) {
-        char payload[512];
-        int pl = _snprintf(payload, sizeof payload,
+        /* init 応答は flat key=value レコード（serializer FUN_0092c3b0 と同型）。command は "init_response" 固定
+         * （parser FUN_0092bb10 が strcmp 一致を要求）。local_uid/db_*_time は TOP-LEVEL フィールド。日付書式 "YYYY-MM-DD HH:MM:SS.f"。 */
+        return _snprintf(out, cap,
+            "command=init_response&protocol_version=92b2d258&command_common=%s&response_header=0del&"
             "local_uid=0000000000000000&db_start_time=2000-01-01 00:00:00.0&"
-            "db_stop_time=2030-01-01 00:00:00.0&datetime=2026-07-02 00:00:00.0&");
-        char pb64[768]; b64_encode((unsigned char *)payload, pl, pb64, sizeof pb64);
-        return _snprintf(out, cap, "response_header=0del&command_common=%s&protocol_version=92b2d258&command=%s&", cc, pb64);
+            "db_stop_time=2030-01-01 00:00:00.0&", cc);
     }
     return _snprintf(out, cap, "response_header=0del&command_common=%s&protocol_version=92b2d258&command=&", cc);
 }

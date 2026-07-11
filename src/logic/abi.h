@@ -1,64 +1,58 @@
 /* abi.h — host(安定) ↔ logic(差し替え) の唯一の契約。
- *
- * 依存規律（CLAUDE.md）:
- *   - host は logic を `logic_get_api()` の関数テーブル経由でのみ呼ぶ。
- *   - logic は host を HostServices vtable 経由でのみ呼ぶ（名前で直接呼ばない）。
- *   - 状態は host 所有の arena に置く。logic は永続 global を持たない。
- *   - この abi.h を変えたら host+logic 両方を再ビルドし restart（hot-reload 不可）。それ以外は reload 可。
- */
+ * host→logic は logic_get_api() テーブル、logic→host は HostServices vtable のみ。
+ * 状態は host 所有 arena（logic は永続 global 禁止）。この abi.h 変更時は host+logic 再ビルド+restart。 */
 #pragma once
 #ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN   /* winsock.h を排除（bind 等の名前衝突回避。PCP は後で winsock2 を明示 include） */
+#define WIN32_LEAN_AND_MEAN   /* winsock.h の bind 等と衝突回避 */
 #endif
 #include <windows.h>
 #include <stdint.h>
 
-#define NRSEDGE_ABI_VERSION 6u   /* v6: on_dipsw_provision 追加（dipsw read 0x45A0E0 PRE で dipsw ctx を早期 provisioning し board index errCode 0xa→errNo 910 "Wrong Resolution Setting" を解消）。v5: on_eeprom_init。v4: on_set_file_pointer */
+#define NRSEDGE_ABI_VERSION 6u
 
 /* host が hook している原関数(トランプリン)の識別子。logic は services->orig(id) で呼び戻す。 */
 enum { ORIG_CREATE_FILE_W = 1, ORIG_CREATE_FILE_A, ORIG_READ_FILE, ORIG_WRITE_FILE,
        ORIG_DEVICE_IOCONTROL, ORIG_CLOSE_HANDLE, ORIG_SET_FILE_POINTER };
 
-/* COM 制御 API（host が傍受。仮想 COM ハンドルなら logic の on_comm_control へ委譲し成功を返す）。
- * native JVS 経路(amJvstThreadInit)は GetCommState→SetCommState→SetCommTimeouts→SetupComm→PurgeComm が
- * 全て成功しないと init を中断するため、仮想ポートでこれらを TRUE 化する必要がある（micetools comdevice 準拠）。*/
+/* COM 制御 op。amJvstThreadInit は GetCommState/SetCommState/SetCommTimeouts/SetupComm/PurgeComm が
+ * 全成功しないと init 中断するため、仮想ポートで TRUE 化する。 */
 enum { COMCTL_GET_STATE = 1, COMCTL_SET_STATE, COMCTL_GET_TIMEOUTS, COMCTL_SET_TIMEOUTS,
        COMCTL_SETUP, COMCTL_PURGE, COMCTL_GET_MODEM_STATUS, COMCTL_CLEAR_ERROR };
 
-/* 入力アクション（GUI 入力設定/テストと config.bind[] の index）。NrsInput と対応。 */
+/* 入力アクション。config.bind[] の index。 */
 enum { ACT_TEST, ACT_SERVICE, ACT_COIN, ACT_START, ACT_UP, ACT_DOWN, ACT_LEFT, ACT_RIGHT,
        ACT_JUMP, ACT_DASH, ACT_ACTION, ACT_COUNT };
 
-/* 統合 GUI(loader.exe)が nrsedge.cfg に書き host が読む実行時設定。 */
+/* GUI が nrsedge.cfg に書き host が読む実行時設定。 */
 typedef struct NrsConfig {
-    int freeplay;                    /* free-play flag 強制 */
-    int test_mode;                   /* TEST スイッチ常時 ON（テストメニュー起動）*/
-    int windowed;                    /* ウィンドウモード化 */
-    int jvs_com;                     /* JVS が開く COM 番号（既定 4）。0xAE11F0 文字列パッチ + is_com マッチに連動 */
-    unsigned short bind[ACT_COUNT];  /* 各アクションの Win32 VK コード */
+    int freeplay;
+    int test_mode;                   /* TEST スイッチ常時 ON */
+    int windowed;
+    int jvs_com;                     /* JVS が開く COM 番号（既定 4）。0xAE11F0 文字列パッチと連動 */
+    unsigned short bind[ACT_COUNT];  /* Win32 VK コード */
 } NrsConfig;
 
-/* host が logic に提供するサービス（logic→host の唯一経路） */
+/* logic→host の唯一経路。 */
 typedef struct HostServices {
     uint32_t abi_version;
-    void  (*log)(const char *level, const char *json_line); /* 構造化ログ(JSONL) */
-    void *(*arena_alloc)(size_t n);                          /* host 所有・reload を跨いで生存 */
-    void *(*orig)(int orig_id);                              /* 原 Win32 関数ポインタ取得 */
-    const NrsConfig *cfg;                                    /* 実行時設定（host 所有・GUI が nrsedge.cfg で指定）*/
+    void  (*log)(const char *level, const char *json_line);
+    void *(*arena_alloc)(size_t n);   /* reload を跨いで生存 */
+    void *(*orig)(int orig_id);       /* 原 Win32 関数ポインタ */
+    const NrsConfig *cfg;
 } HostServices;
 
-/* logic 永続状態。host からは不透明（arena に置く）。型変更=restart。 */
+/* logic 永続状態。host からは不透明（arena）。型変更=restart。 */
 typedef struct LogicState LogicState;
 
-/* host→logic 呼び出しテーブル。各 on_* は handled=1 を立てたら host は原関数を呼ばない。 */
+/* on_* は handled=1 を立てたら host は原関数を呼ばない。 */
 typedef struct LogicApi {
     uint32_t abi_version;
 
-    /* 初回ロード／reload 後に呼ぶ。state==NULL なら新規確保し *state に格納、既存なら再バインド。 */
+    /* 初回ロード／reload 後。*state==NULL なら新規確保、既存なら再バインド。 */
     void (*bind)(HostServices *host, LogicState **state);
 
     /* ---- driver 層: シリアル/COM + DeviceIoControl 境界 ---- */
-    /* CreateFileW 傍受。name が仮想デバイス(COM1/2/4 等)なら擬似 HANDLE を返し *handled=1。 */
+    /* name が仮想デバイス(COM1/2/4 等)なら擬似 HANDLE を返し *handled=1。 */
     HANDLE (*on_create_file)(LogicState *st, const wchar_t *name, DWORD access, DWORD share,
                              DWORD disp, DWORD flags, int *handled);
     BOOL (*on_read_file)(LogicState *st, HANDLE h, void *buf, DWORD n, DWORD *got, int *handled);
@@ -66,39 +60,27 @@ typedef struct LogicApi {
     BOOL (*on_device_iocontrol)(LogicState *st, HANDLE h, DWORD code, void *in, DWORD inlen,
                                 void *out, DWORD outlen, DWORD *ret, int *handled);
     BOOL (*on_close_handle)(LogicState *st, HANDLE h, int *handled);
-    /* COM 制御傍受。op=COMCTL_*。p1/p2/p3 は操作別引数（GetCommState→p1=LPDCB, SetupComm→p2=in/p3=out 等）。
-       仮想 COM ハンドルなら *handled=1 と戻り値(BOOL)を確定。overlapped は read/write 同様 host が処理。 */
+    /* op=COMCTL_*。p1/p2/p3 は操作別引数（GetCommState→p1=LPDCB, SetupComm→p2=in/p3=out）。 */
     BOOL (*on_comm_control)(LogicState *st, HANDLE h, int op, void *p1, DWORD p2, void *p3, int *handled);
-    /* SetFilePointer 傍受。仮想ブロックデバイス(mxsram)ハンドルなら *handled=1 とし新ポインタ(low DWORD)を返す。
-       実 RingEdge では amSram が SetFilePointer(handle, recordAddr, FILE_BEGIN)→ReadFile/WriteFile で記録を
-       読み書きする（mxsram.sys IRP_MJ_READ が ByteOffset で memcard0 を読む実装と一致）。method=FILE_BEGIN/CURRENT/END。
-       dist_high は 32bit デバイスにつき未使用（あれば 0 を書く）。 */
+    /* mxsram ハンドルなら *handled=1 とし新ポインタ(low DWORD)を返す。amSram が SetFilePointer→ReadFile/WriteFile
+       で記録を読み書き。dist_high は 32bit デバイスにつき未使用。 */
     DWORD (*on_set_file_pointer)(LogicState *st, HANDLE h, long dist, long *dist_high, DWORD method, int *handled);
 
-    /* ---- game-function hooks（host が VA で hook。detour は安定 host 側、reload-safe に g_api 経由） ---- */
-    void (*on_jvs_tick)(LogicState *st);      /* jvs_update_main(0x67B150) PRE: node BSS を入力で書く（旧 input.js）*/
-    void (*on_sys_override)(LogicState *st);  /* dipsw read(0x45A0E0) 後 / sysinput(0x89B230) 前: DAT_0160194c TEST/SERVICE 上書き */
-    void (*on_keychip_hold)(LogicState *st);  /* keychip_errCode1_latcher(0x6F0A80) PRE: 真正present時に keychip_present_flag=1 保持（旧 setup.js）*/
-    /* amRtcGetServerTime(0x974040, __stdcall, longlong 戻り) POST: 実 RTC 失敗(orig==-1)時のみ PC ローカル時刻で
-       amRtcTime 構造体(year@0 WORD/month@2/day@3/hour@4/min@5/sec@6, converter 0x973F20 で確証)を埋め成功(≠-1)を返す。
-       戻り値が detour の返り値になる。実 RTC が応答すれば温存（旧 amrtc/rtc.js, only-on-failure）。 */
+    /* ---- game-function hooks（host が VA で hook。detour は host 側、reload-safe に g_api 経由） ---- */
+    void (*on_jvs_tick)(LogicState *st);      /* jvs_update_main(0x67B150) PRE: node BSS を入力で書く */
+    void (*on_sys_override)(LogicState *st);  /* input_process_to_gamestate(0x89B230) 前: DAT_0160194c TEST/SERVICE 上書き */
+    void (*on_keychip_hold)(LogicState *st);  /* keychip_errCode1_latcher(0x6F0A80) PRE: 真正present時に keychip_present_flag=1 保持 */
+    /* amRtcGetServerTime(0x974040, __stdcall) POST: 実 RTC 失敗(orig==-1)時のみ PC ローカル時刻で amRtcTime 構造体
+       (year@0 WORD/month@2/day@3/hour@4/min@5/sec@6)を埋め成功(≠-1)を返す。戻り値が detour の返り値。詳細 facts/amrtc.md。 */
     long long (*on_rtc_get)(LogicState *st, void *time_out, unsigned *flag_out, long long orig_ret);
-    /* amEepromInit(0x985160) を完全置換する detour 用。standalone では amEepromCreateDeviceFile(SetupDi PnP
-       列挙)失敗 → amEepromInit 失敗 → amlib_storage_init_all が amlib_eeprom_ok=0 で STATIC(area0) read を
-       skip → region_game_pcb=0 → Error 0903。この hook で EEPROM ctx を storage-init の最中に provisioning し、
-       host detour が 0(成功)を返すと genuine な amBackupRead(STATIC) が走り seed 済み region を読む。
-       per-frame の eeprom_force_ready は main loop（init 後）で遅すぎるための早期化。 */
+    /* amEepromInit(0x985160) 内で EEPROM ctx を早期 provisioning（standalone では SetupDi 列挙失敗→Error 0903 になる）。
+       成功後 genuine な amBackupRead(STATIC) が seed 済み region を読む。詳細 facts/mxdrivers.md。 */
     void (*on_eeprom_init)(LogicState *st);
-    /* dipsw read(0x45A0E0=amDipswRead) PRE: dipsw ctx を読取の直前に provisioning する。standalone では amDipswInit が
-       SetupDi(PnP 列挙)失敗で handle=-1 のため amDipswReadByte が即 return → board_index がゴミ(実測 5) → board-table
-       table[5]!=8 → amlib_master_errCode=0xa → errNo 910 "Wrong Resolution Setting"（解像度ではなく基板テーブル誤判定）。
-       per-frame の dipsw_force_ready(on_jvs_tick)は board check より後で遅すぎる。board check が使う board_index は
-       amDipswRead(本 hook)が書くので、読取前に ctx を H_MXSMBUS へ provisioning すれば IOCTL(cmd5,vcode0)→0x20 で
-       index=(0x20>>4)&7=2、table[2]=8 を満たし errCode 0xa が立たない（dipsw byte patch 復活不要のエミュ解）。 */
+    /* amDipswRead(0x45A0E0) PRE: 読取直前に dipsw ctx を H_MXSMBUS へ provisioning。standalone では board_index が
+       ゴミ→table 誤判定→errCode 0xa→errNo 910。provisioning で IOCTL(cmd5,vcode0)→0x20, index=2, table[2]=8。詳細 facts/devices.md。 */
     void (*on_dipsw_provision)(LogicState *st);
 
-    /* ---- system 層(PCP/TCP): フックは段階的に追加（P5） ---- */
-    /* TODO: on_socket / on_pcp_exchange 等 */
+    /* ---- system 層(PCP/TCP): host 側実装。TODO: on_socket / on_pcp_exchange ---- */
 } LogicApi;
 
 /* logic.dll の唯一の export */

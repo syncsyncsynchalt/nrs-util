@@ -35,7 +35,7 @@ static DWORD WINAPI host_init(LPVOID arg) {
     if (gamehooks_install() != 0)    { host_log("warn",  "{\"ev\":\"gamehooks.partial\"}"); }  /* g_api 設定後 */
     host_log("info", "{\"ev\":\"gamehooks.ok\"}");                                                  /* breadcrumb 3 */
     dbglog_install();                /* nrs.exe 本体の amiDebug ログを窓へ（gate は patches.c で開放）*/
-    keychip_server_start();          /* PCP keychip サーバ（旧 pcpa_server.py 移植）*/
+    keychip_server_start();          /* PCP keychip サーバ */
     if (g_host.cfg && g_host.cfg->windowed) windowed_install();   /* ウィンドウモード（config 連動）*/
     capture_install();   /* GL フレームキャプチャ（capture.req→capture.png）。テストの唯一の正式手段 */
     reload_start_watcher();

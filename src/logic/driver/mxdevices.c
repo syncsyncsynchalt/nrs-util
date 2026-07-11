@@ -1,12 +1,10 @@
-/* mxdrivers エミュ（旧 boot/mxdrivers/devices.js + micetools 準拠）。
- * columba(SEGA DMI 読取→RINGEDGE2 board type), mxsram, mxsuperio(HWMON W83791D), mxsmbus(AT24C64AN eeprom),
- * mxhwreset。CreateFile→擬似ハンドル、DeviceIoControl→各応答（未知は ゼロ埋め+成功）。
+/* mxdrivers エミュ（micetools 準拠）。columba(SEGA DMI→RINGEDGE2 board type), mxsram, mxsuperio(HWMON W83791D),
+ * mxsmbus(AT24C64AN eeprom), mxhwreset。CreateFile→擬似ハンドル、DeviceIoControl→各応答（未知は ゼロ埋め+成功）。
  *
- * amBackup 記録は実 RingEdge では二デバイスに分かれる（nrs.exe amBackup_getAreaDescriptor board type 3 で確認）:
- *   - area 0,1 = EEPROM(AT24C64AN, mxsmbus 経由 IOCTL 0x9c40200c cmd8/9, dev 0x57) → g_eeprom
- *   - area 2,3 = SRAM  (mxsram 経由 SetFilePointer + ReadFile/WriteFile)            → g_sram
- * mxsram.sys は \Device\memcard0 を ByteOffset で R/W する wrapper。本エミュは nvram.bin に memory-map して
- * 永続化（micetools mxsram.c の open_mapped_file 方式に相当）。eeprom も eeprom.bin に永続。 */
+ * amBackup 記録は二デバイスに分かれる（amBackup_getAreaDescriptor board type 3）:
+ *   - area 0,1 = EEPROM(AT24C64AN, mxsmbus IOCTL 0x9c40200c cmd8/9, dev 0x57) → g_eeprom → eeprom.bin
+ *   - area 2,3 = SRAM  (mxsram SetFilePointer + ReadFile/WriteFile)           → g_sram → nvram.bin
+ * どちらも memory-map で永続化。 */
 #include "driver/mxdevices.h"
 #include <string.h>
 #include <stdarg.h>
@@ -75,14 +73,10 @@ static void sram_ensure(void) {
     if (g_host && g_host->log)
         g_host->log("info", "{\"ev\":\"mxsram.backing\",\"file\":\"nvram.bin\",\"bytes\":2097152}");
 }
-/* ─── 純正供給経路の再現: AT24C64AN board EEPROM → amBackup STATIC → region_game_pcb ───
- * 実機 RingEdge の region は「基板 EEPROM(AT24C64AN) の AM_SYSDATAwH_STATIC.m_Region」が正本。
- * nrs.exe は amlib_storage_init_all で amBackupRead(area0=STATIC, &amSysdataStatic@0x016014b8) を呼び、
- * その +0x0C(=region_game_pcb 0x016014c4)を読み、amlib_master_init が
- * (region_game_pcb & region_dongle & 5)!=0 を要求する（両方 NOP/直書きではなく、これが正の経路）。
- * standalone では eeprom.bin が blank(0xFF)＝STATIC CRC 不正 → 既定(region=0)へ reset → Error 0903。
- * よって patches/直接書込みでなく、純正どおり EEPROM STATIC レコードを seed して
- * ゲーム自身の amBackup 経路に region を供給する。構造体/オフセット/CRC は nrs.exe 実体と micetools に一致。*/
+/* 純正供給経路: AT24C64AN board EEPROM → amBackup STATIC → region_game_pcb。
+ * amlib_storage_init_all が amBackupRead(area0=STATIC, &0x016014b8) → +0x0C(=region_game_pcb 0x016014c4)、
+ * amlib_master_init が (region_game_pcb & region_dongle & 5)!=0 を要求。blank eeprom は STATIC CRC 不正 →
+ * region=0 → Error 0903。よって直書きでなく EEPROM STATIC レコードを seed し amBackup 経路に region を供給する。*/
 
 /* AM_SYSDATAwH_STATIC: EEPROM area0 レコード(0x20B)。nrs.exe の &DAT_016014b8 展開先 ＝
  * micetools amBackupStructs.h と一致確認済。m_Region@+0x0C = region_game_pcb(0x016014c4)。*/
@@ -131,14 +125,11 @@ static void eeprom_seed_static(void) {
 
     AM_SYSDATAwH_STATIC st;
     memset(&st, 0, sizeof st);
-    st.m_Region = 0x01;                 /* JAPAN(BBS JP build) ← 純正どおり供給する region */
+    st.m_Region = 0x01;                 /* JAPAN(BBS JP build) */
     st.m_Rental = 0x00;
-    /* PCB シリアル: 実機は SEGA 工場割当の固定値（実行時導出はしない）。書式は
-     * [英数4]-[英数3][数字8] = 16文字, 文字集合 base-34 [0-9A-HJ-NP-Z](I/O 除外)。
-     * 例値は micetools KEY_ID "A72E-02D11261116" と同 family。alpbEx(ALL.Net billing)へ
-     * 筐体識別子として渡るだけで書式検証は無い。standalone は単一筐体ゆえ固定で実機相当。
-     * 純正フォールバックは "INVALID_SERIALNO"(region=0)＝未 provisioning マーカー。 */
-    memcpy(st.m_strSerialId, "ABLN-00100000001", 16);   /* PCB serial(固定, NUL 終端) */
+    /* PCB シリアル(16文字, 書式 [英数4]-[英数3][数字8])。alpbEx へ筐体識別子として渡るのみで書式検証は無く、
+     * standalone は単一筐体ゆえ固定値でよい（純正フォールバック "INVALID_SERIALNO" は region=0）。 */
+    memcpy(st.m_strSerialId, "ABLN-00100000001", 16);
     st.m_Crc = amiCrc32RCalc(sizeof st - 4, (uint8_t *)&st + 4, 0);
 
     memcpy(&g_eeprom[AM_SYSDATAwH_STATIC_REG], &st, sizeof st);
@@ -239,10 +230,8 @@ BOOL mxdev_ioctl(HANDLE h, DWORD code, void *in, DWORD inlen,
 
     if (h == H_MXSRAM) {
         if (code == 0x9c406000) { if (ob && outlen >= 4) *(uint32_t *)ob = 0x01000001; if (ret) *ret = 4; return TRUE; }
-        /* IOCTL_MXSRAM_GET_SECTOR_SIZE: RINGEDGE2=4（micetools `MICE_PLATFORM_RINGEDGE2 ? 4 : 512` の authoritative 値。
-           実 mxsram.sys はこの IOCTL を memcard0 へ転送＝ハード本来の粒度）。amSram(0x985DD0/0x985FF0)はこの値で
-           記録の address/length のアラインメント(剰余=0)を検査する。SRAM 系 4 record は実体では全て 512B/512境界
-           なので 512 でも通るが、authoritative かつ厳密に緩い 4 を返す。geometry の BytesPerSector=512(総容量計算用)とは別物。 */
+        /* IOCTL_MXSRAM_GET_SECTOR_SIZE: RINGEDGE2=4。amSram(0x985DD0/0x985FF0)がこの値で記録の address/length
+           アラインメント(剰余=0)を検査する。geometry の BytesPerSector=512(総容量計算用)とは別物。 */
         if (code == 0x9c406004) { if (ob && outlen >= 4) *(uint32_t *)ob = 4;          if (ret) *ret = 4; return TRUE; }
         if (code == 0x00070000) {                    /* IOCTL_DISK_GET_DRIVE_GEOMETRY */
             if (ob && outlen >= 24) {

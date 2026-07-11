@@ -1,5 +1,5 @@
-/* windowed.c — 旧 app/windowed.js 移植。フルスクリーン抑止 + ウィンドウスタイル強制。
- * 純 Win32 フック（logic 非依存）。ChangeDisplaySettings* を成功ブロック、CreateWindowEx* の WS_POPUP を除去。 */
+/* windowed.c — フルスクリーン抑止 + ウィンドウスタイル強制（純 Win32 フック・logic 非依存）。
+ * ChangeDisplaySettings* を成功ブロック、CreateWindowEx* の WS_POPUP を除去。 */
 #include "host.h"
 #include "MinHook.h"
 

@@ -1,5 +1,5 @@
-/* keychip_server.c — 旧 boot/mxkeychip/server/pcpa_server.py の native 移植（winsock サーバ部）。
- * 応答ロジックは keychip_proto.c（純粋・test 可）に分離。127.0.0.1 各ポートで listen。
+/* keychip_server.c — PCP keychip サーバの winsock 部。応答ロジックは keychip_proto.c（純粋・test 可）に分離。
+ * 127.0.0.1 各ポートで listen。
  * ワイヤ: S->C ">"、C->S "k=v&k=v\r\n"、S->C "resp\r\n>"。reload-safe のため安定 host 側に常駐。 */
 #include <winsock2.h>
 #include <ws2tcpip.h>

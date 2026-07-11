@@ -1,5 +1,5 @@
-/* keychip PCP 応答ロジック（旧 pcpa_server.py の handle_request 移植・純粋関数）。
- * 設定値は cabinet/default.toml 相当をハードコード。winsock/host 非依存＝単体テスト可。 */
+/* keychip PCP 応答ロジック（純粋関数・winsock/host 非依存＝単体テスト可）。
+ * 設定値は cabinet/default.toml 相当をハードコード。 */
 #include "keychip_proto.h"
 #include <stdio.h>
 #include <string.h>
@@ -8,10 +8,8 @@
 #define KC_GAMEID    "SBVA"
 #define KC_REGION    "01"          /* 01=JAPAN */
 #define KC_PLATID    "AAA"
-#define KC_SYSFLAG   "01"          /* bit0=1: amDongleSetupKeychip case5 が keychip_ctx+0xc=1 を設定 →
-                                      FUN_0096c5f0=1 → DAT_016014a3=1 → usbio escape（errNo 951 解消）。
-                                      実機 keychip も bit0 立て（standalone は USB I/O 基板不在で e4=0 のため
-                                      この keychip escape が唯一の経路）。DAT_016014a3 は usbio 2 関数のみが読み副作用なし。 */
+#define KC_SYSFLAG   "01"          /* bit0=1: amDongleSetupKeychip case5 → keychip_ctx+0xc=1 → FUN_0096c5f0=1 →
+                                      DAT_016014a3=1 → usbio escape（errNo 951 解消）。実機 keychip も bit0 立て。 */
 #define KC_KEYID     "0000000000000000"
 #define KC_MAINID    "00000000000"
 #define NET_IP       "192.168.1.209"
@@ -85,19 +83,13 @@ const char *kc_respond(const char *line, char *buf, int cap) {
     }
     if (starts(line, "request=")) {
         find_val(line, "request", v, sizeof v);
-        /* amInstall（port 40102, amDongle/amInstall SM）応答。FUN_00977d50 が "response" キーを req 名と
-           照合し、FUN_009765d0 が "result"=="success" を要求。旧 "status=0"/"code=0" は形式不一致で SM が
-           完走せず ctx[0xc] が busy のまま → amDongleBusy(0x975E00) RET0 patch が必要だった。正式形式で genuine
-           完走させ、ブロッキング init amDongle_top_level_init(do{outerSM/keychipSM}while != done)を抜ける（RET0 撤去）。
-           steer 先（実体確定。各 status→数値は FUN_009767f0/FUN_00976aa0/FUN_00977050 の strcmp 表）:
-           - query_slot_status   → complete : スロット既インストール(FUN_009767f0: complete→3)。install(req type 2)不発で 40103 不使用。
-           - query_application_status → inactive : アプリ未起動(FUN_00976aa0: inactive→0)。
-           - query_appdata_status/check_appdata → error : appdata status の唯一の整合解。3 consumer の交差:
-             (a) keychipSM case3 の query(ctx+8=0xe, FUN_00977d50)は status∈{0,1,2,3,-1}で gameid 不要に成功（4/5 は
-                 gameid フィールド必須＝無いと "Failed to get appdata status"）、(b) keychipSM case4 は -1 で format 回避し
-                 state7-done（3=needed と 4/5 は format/削除を誘発。-1 は gameid 一致非依存）、(c) appdata task(ctx+8=0xf,
-                 FUN_00977230)は param∉{0,1,2}で terminate（0/1/2 は execute=1 で check_appdata⇄query を無限ループ）。
-                 → error(-1, FUN_00977050: error→-1)のみが (a)∩(b)∩(c) を満たす。実証: errors=0・loop 無し・attract 到達。 */
+        /* amInstall（port 40102, amDongle SM）応答。FUN_009765d0 が result=="success" を要求（形式不一致だと SM が
+           完走せず ctx[0xc] busy のまま）。steer 先（status→数値は FUN_009767f0/76aa0/77050 の strcmp 表）:
+           - query_slot_status → complete : スロット既インストール(→3)。install(req type 2)不発で 40103 不使用。
+           - query_application_status → inactive : アプリ未起動(→0)。
+           - query_appdata_status/check_appdata → error(-1): 3 consumer の唯一の整合解:
+             (a) keychipSM case3 query は status∈{0..3,-1}で gameid 不要に成功、(b) case4 は -1 で format 回避し state7-done、
+             (c) appdata task は param∉{0,1,2}で terminate（0/1/2 は check_appdata⇄query 無限ループ）→ error のみ交差を満たす。 */
         if (!strcmp(v, "query_slot_status"))
             return "response=query_slot_status&result=success&status=complete";
         if (!strcmp(v, "query_application_status"))
@@ -113,19 +105,15 @@ const char *kc_respond(const char *line, char *buf, int cap) {
             return "response=query_nic_status&result=0&status=1&ip_address=" NET_IP
                    "&subnetmask=" NET_MASK "&gateway=" NET_GW
                    "&primary_dns=" NET_DNS1 "&secondary_dns=" NET_DNS2;
-        /* ★amGfetcher 応答は result_field_checker(0x975140) を必ず通り、result!="success" は -5
-           (fall-through)＝トランザクション失敗→get_status/set_auth_params 無限再接続ループ。
-           よって amGfetcher 系は全て result=success 必須（amInstall と同型。live capture kc.wire で確定 2026-07-01）。
-           get_status の status=uptodate は「配信データ最新＝取得不要」の standalone 正解。
-           status 9(uptodate) は parser(0x974B00) case7/9 で work_version/work_time/order_time/release_time の
-           存在を要求（欠くと -150）ため 4 フィールドを value=0 で同梱する。 */
+        /* amGfetcher 応答は result_field_checker(0x975140) を通り result!="success" は -5→無限再接続ループ。
+           よって全て result=success 必須。get_status の status=uptodate は「配信データ最新＝取得不要」の standalone 正解。
+           parser(0x974B00) case9 が work_version/work_time/order_time/release_time を要求（欠くと -150）ため 0 で同梱。 */
         if (!strcmp(v, "get_status"))
             return "response=get_status&result=success&status=uptodate"
                    "&work_version=0&work_time=0&order_time=0&release_time=0";
         if (!strcmp(v, "set_auth_params")) return "response=set_auth_params&result=success&bbflag=1";
         if (!strcmp(v, "isrelease"))       return "response=isrelease&result=success&release=1";
-        /* resume パーサ(0x9746c0)は firstreq を要求（無いと -150 loop）。値は "1"(first)/"0"(not-first) のみ有効
-           (nrs.exe 実バイト確定 2026-07-01)。resume=配信継続ゆえ firstreq=0。 */
+        /* resume パーサ(0x9746c0)は firstreq を要求（無いと -150 loop）。値は "1"/"0" のみ有効。resume=配信継続ゆえ 0。 */
         if (!strcmp(v, "resume"))          return "response=resume&result=success&firstreq=0";
         if (!strcmp(v, "pause"))           return "response=pause&result=success";
         if (!strcmp(v, "stopcatcher"))     return "response=stopcatcher&result=success";

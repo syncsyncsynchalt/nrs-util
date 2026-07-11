@@ -1,4 +1,4 @@
-/* 構造化ログ(JSONL)。観測チャネル（Frida 代替）。統合 GUI(loader.exe) が tail する。 */
+/* 構造化ログ(JSONL)。統合 GUI(loader.exe) が tail する主要な観測チャネル。 */
 #include "host.h"
 #include "status.h"
 #include <stdio.h>

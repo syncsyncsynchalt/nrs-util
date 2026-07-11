@@ -1,17 +1,15 @@
-/* touch — COM1 タッチパネルのワイヤプロトコル emulate（touch.h 参照）。
- * nrs.exe の native serial 経路にそのまま wire bytes を渡す＝OS 境界仮想化（CLAUDE.md 鉄則 #2）。
- * 内部 report バッファ(+0x2b8/+0x210)には触らず、game 自身のパーサ/state machine に解釈させる。 */
+/* touch — COM1 タッチパネルのワイヤプロトコル emulate（touch.h 参照）。wire bytes を native serial 経路へ渡し、
+ * game 自身のパーサ/SM に解釈させる（内部 report バッファ +0x2b8/+0x210 には触らない）。 */
 #include "driver/touch.h"
 #include <string.h>
 
-/* 校正スケール相殺ゲイン（中心アンカー）。ゲームは生レンジ(0..0xFFF)を画面より内側へ校正マッピング
- * する（touch_set_calib_window 0x8B3D60, 中心引き込み k<1）。送信前に中心基準で 1/k 倍に拡大して相殺する。
- * 1.0=無補正。実測で隅までカーソルと一致する値に調整（X/Y 個別。求め方は touch.h / 下記コメント）。 */
+/* 校正スケール相殺ゲイン（中心アンカー）。game は生レンジ(0..0xFFF)を画面より内側へ校正する
+ * (touch_set_calib_window 0x8B3D60, k<1)ので送信前に 1/k 倍に拡大して相殺。1.0=無補正。 */
 #ifndef TOUCH_GAIN_X
-#define TOUCH_GAIN_X 1.0   /* TODO: 実測値に置換（例 1/(1−2p), p=左端カーソル時のタッチ表示位置/画面幅）*/
+#define TOUCH_GAIN_X 1.0   /* TODO: 実測値に置換（1/(1−2p), p=左端カーソル時のタッチ表示位置/画面幅）*/
 #endif
 #ifndef TOUCH_GAIN_Y
-#define TOUCH_GAIN_Y 1.0   /* TODO: 同上（上端カーソル時の縦比から）*/
+#define TOUCH_GAIN_Y 1.0   /* TODO: 同上（縦比）*/
 #endif
 
 /* checksum = (Σ byte[0..8] − 0x56) & 0xff（touch_serial_rx_parse 0x8B2E40 / 送信側 FUN_008b38f0 と同式）*/
@@ -62,10 +60,8 @@ void touch_sample_mouse(TouchPanel *t, HWND win) {
 /* 現座標の 'T' 座標フレームを out[10] に構築。X/Y は LE12bit, Z=筆圧, byte2=status(押下フラグ)。*/
 static int build_T(const TouchPanel *t, uint8_t *out) {
     uint16_t z = t->pressed ? 0x00FFu : 0x0000u;
-    /* パネル native 座標系は screen に対し両軸反転（game の decode_T_coord 0x8B31E0 が
-       +0x21c=0xFFF−X / +0x220=0xFFF−Y で戻す。facts/devices.md「'T' 座標」/ touch.h 注記）。
-       t->x/t->y は cursor 由来の生値ゆえ、ここで反転し game の反転と相殺する＝鏡像バグの解消。
-       実機検証で片軸のみズレるなら該当軸の反転だけ外す（X=wx, Y=wy を個別に t->x/t->y へ戻す）。 */
+    /* パネル native 座標は両軸反転（game の decode_T_coord 0x8B31E0 が +0x21c=0xFFF−X / +0x220=0xFFF−Y で戻す）。
+       ここで反転し game の反転と相殺する。片軸のみズレるなら該当軸の反転だけ外す。 */
     uint16_t wx = (uint16_t)(TOUCH_MAX - t->x);
     uint16_t wy = (uint16_t)(TOUCH_MAX - t->y);
     out[0] = (uint8_t)TOUCH_SYNC;            /* 'U' */

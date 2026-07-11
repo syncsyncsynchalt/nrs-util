@@ -1,5 +1,5 @@
 /* mxdrivers: columba(DMI) / mxsram / mxsuperio / mxsmbus(eeprom) / mxhwreset を
- * CreateFile+DeviceIoControl 境界でエミュ（旧 boot/mxdrivers/devices.js の移植）。 */
+ * CreateFile+DeviceIoControl 境界でエミュ。 */
 #pragma once
 #include "abi.h"
 

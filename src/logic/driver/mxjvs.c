@@ -4,18 +4,14 @@
 #include "mxjvs.h"
 #include <string.h>
 
-/* READ_ID(0x10) 応答文字列。実機 RingEdge/RINGWIDE の JVS I/O ボードは FTDI USB の 837-15067 系
- * （ftdibus.inf: VID_0CA3 PID_0010..0015=837-15067(-00..-05), PID_000F=837-15121）。micetools は別世代の
- * 837-13551 を名乗るが本プロジェクトは実機型番に合わせる。Ver/日付サブフィールドは基板 ROM 内の値で未捕捉
- * （nrs.exe は ID 文字列を一切参照しない＝"837-"/"I/O BD" 文字列が binary に無く、spec-check も feature 数のみ）
- * ため SEGA 標準フォーマットでの最良推定。mxjvs.sys Build=Oct 2011 から日付帯のみ整合させた。 */
+/* READ_ID(0x10) 応答。実機 JVS I/O は FTDI 837-15067 系（ftdibus.inf VID_0CA3 PID_0010..0015）。
+ * nrs.exe は ID 文字列を参照しない（spec-check は feature 数のみ）ため SEGA 標準フォーマットの最良推定。 */
 static const char BOARD_ID[] =
     "SEGA ENTERPRISES,LTD.;I/O BD JVS;837-15067 ;Ver1.00;11/05";
-/* 版応答。nrs.exe spec-check(FUN_0067afa0)が gate するのは cmd_ver≥0x13 のみ（node_info +0x134）。
- * JVS_VER(0x12)/COMM_VER(0x13)は nrs では比較されない（実走でも 0x20/0x10 で init clean）。 */
-#define CMD_VER 0x13   /* GET_CMD_VERSION: nrs 要求 ≥0x13、最小値ちょうど（実機 837-145xx も 0x13）*/
-#define JVS_VER 0x20   /* GET_JVS_VERSION: nrs 非検査。JVS 規格 2.0 = 0x20（実機値は不問）*/
-#define COMM_VER 0x10  /* GET_COMM_VERSION: nrs 非検査 */
+/* 版応答。nrs spec-check(FUN_0067afa0)が gate するのは cmd_ver≥0x13 のみ。JVS/COMM_VER は非検査。 */
+#define CMD_VER 0x13   /* nrs 要求 ≥0x13 */
+#define JVS_VER 0x20   /* JVS 規格 2.0（nrs 非検査）*/
+#define COMM_VER 0x10  /* nrs 非検査 */
 
 void mxjvs_init(JvsBoard *b) {
     memset(b, 0, sizeof *b);

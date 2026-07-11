@@ -1,5 +1,4 @@
-/* dbglog.c — nrs.exe 内蔵の開発デバッグログ4系統を捕捉して host ログ(JSONL)へ転送。
- * 旧 boot/amdebug/diag.js の native 移植 + stdio(C) + SEH crash backtrace(D) を追加。詳細は facts/amdebug.md。
+/* dbglog.c — nrs.exe 内蔵の開発デバッグログ4系統を捕捉して host ログ(JSONL)へ転送。詳細は facts/amdebug.md。
  *
  * 系統A（amiDebug レベル付き, ゲート有）: amDebugOutLv→amDebugLog_format→amDebugLog_sink(0x55C800)。
  *   amDebugInit が既定 logLevel=4/mask=0xff（lv5..7 脱落）→ d_dbg_init が init 後に全開。
@@ -26,10 +25,9 @@ static int (__fastcall *o_dbg_sink)(unsigned level, const char *msg);
 /* 系統B: amDebugOut __cdecl(fmt, ...)。整形結果を破棄するため orig は呼ばない（観測のみ）。 */
 
 /* 系統A ゲート開放: amDebugInit(0x55C500) は memset(&logregion,0,0x2fc) 後に logLevel=4/mask=0xff を設定。
- * 注入は CREATE_SUSPENDED ＝ patches_apply は entry 前に走るため、その静的開放(0x1696F38/3C)は
- * resume 後の amDebugInit に**上書きされる**（既定 4/0xff = 重大度0..4 のみ通過、lv5..7 は脱落）。
- * → init 完了直後に再度全開にし、Frida 版が見ていた lv7（DNS 連鎖等）まで復活させる。
- * data セクションの可変グローバルゆえ VirtualProtect 不要（amDebugInit 自身が書込む＝RW）。 */
+ * 注入は CREATE_SUSPENDED ＝ patches_apply は entry 前に走るため、静的開放(0x1696F38/3C)は resume 後の
+ * amDebugInit に上書きされる（既定 4/0xff = 重大度0..4 のみ通過、lv5..7 脱落）。→ init 完了直後に再度全開。
+ * data セクションの可変グローバルゆえ VirtualProtect 不要。 */
 static void (*o_dbg_init)(void);
 static void __cdecl d_dbg_init(void) {
     o_dbg_init();   /* 本体: memset → logLevel=4 / logMask=0xff を先に確定させる */

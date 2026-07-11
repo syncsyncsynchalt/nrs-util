@@ -1,6 +1,6 @@
 /* game-function hooks: nrs.exe 内部関数を VA で hook。
- * reload-safe: detour は安定 host 側に置き、現行 logic を g_api 経由で呼ぶ（logic.dll swap で無効化しない）。
- * 対象（全て void/u32 (void)）: jvs_update_main(0x67B150) / sysinput(0x89B230) / dipsw read(0x45A0E0)。 */
+ * reload-safe: detour は host 側に置き、現行 logic を g_api 経由で呼ぶ（logic.dll swap で無効化しない）。
+ * hook 一覧は gamehooks_install() 末尾。 */
 #include "host.h"
 #include "MinHook.h"
 
@@ -17,7 +17,7 @@ static void (*o_board_check)(void);
 static unsigned (*o_ext_install_kick)(void);
 static int      (*o_extimg_gate_probe)(void);
 
-/* jvs_update_main PRE: 入力を node BSS へ書いてから本体へ（旧 input.js）。 */
+/* jvs_update_main PRE: 入力を node BSS へ書いてから本体へ。 */
 static void __cdecl d_jvs_update(void) {
     AcquireSRWLockShared(&g_logic_lock);
     if (g_api && g_api->on_jvs_tick) g_api->on_jvs_tick(g_state);
@@ -62,10 +62,8 @@ static long long __stdcall d_rtc_get(void *tm, unsigned *flag) {
     return r;
 }
 
-/* amEepromInit(0x985160) 完全置換 detour（__thiscall: protocol=ECX, size_ptr=stack1, RET 4 ＝
- * __fastcall(ECX,EDX,stack) で捕捉）。orig は呼ばず（SetupDi 失敗経路と後始末 FUN_00984bd0 を回避）、
- * logic に EEPROM ctx を provisioning させ 0(成功)を返す。これで amlib_storage_init_all が storage-init の
- * 最中に genuine な amBackupRead(STATIC area0) を走らせ、seed 済み region_game_pcb=01 を得る。 */
+/* amEepromInit(0x985160) 完全置換 detour（__thiscall, RET 4 → __fastcall で捕捉）。orig は呼ばず
+ * （SetupDi 失敗経路を回避）、logic に EEPROM ctx を provisioning させ 0(成功)を返す。 */
 static int __fastcall d_eeprom_init(unsigned ecx, unsigned edx, void *size_ptr) {
     (void)ecx; (void)edx; (void)size_ptr;
     AcquireSRWLockShared(&g_logic_lock);
@@ -74,11 +72,8 @@ static int __fastcall d_eeprom_init(unsigned ecx, unsigned edx, void *size_ptr) 
     return 0;   /* amEepromInit 成功（amlib_eeprom_ok=1）*/
 }
 
-/* amDipswInit(0x9842A0) POST: 標準筐体に mxsmbus PnP が無く orig は SetupDi 失敗で handle(0xccf490)=-1 を残す。
- * orig の直後（呼出元 FUN_0045a040 が amDipswInit→直後に amDipswRead する、その間）で dipsw ctx を H_MXSMBUS へ
- * provisioning すると、続く amDipswRead が IOCTL(cmd5,vcode0)→0x20 で board_index=2 を読む（errCode 0xa→errNo 910 解消）。
- * read hook(d_dipsw)の PRE provisioning は board_index を確定する最初の read に間に合わないため、init detour で前倒しする
- * （EEPROM の amEepromInit detour と同型の早期 provisioning）。 */
+/* amDipswInit(0x9842A0) POST: orig の SetupDi 失敗直後に dipsw ctx を H_MXSMBUS へ provisioning。続く amDipswRead が
+ * IOCTL(cmd5,vcode0)→0x20 で board_index=2 を読む。read hook の PRE では最初の read に間に合わないため init で前倒し。 */
 static int __cdecl d_dipsw_init(void) {
     int r = o_dipsw_init();   /* 実 amDipswInit（standalone は失敗・handle=-1・initFlag=1）*/
     AcquireSRWLockShared(&g_logic_lock);
@@ -87,12 +82,9 @@ static int __cdecl d_dipsw_init(void) {
     return r;
 }
 
-/* amlib_storage_board_check(0x679CB0) PRE: board-table 判定の消費直前に標準筐体の board index(=2, table[2]=8) と
- * dipsw flag(0x20=0) を供給する。dipsw シリアル read(amDipswRead→FUN_009836e0)は標準筐体に mxsmbus PnP が無いと
- * handle 無効で garbage byte3(=0x5x)→board_index 5/flag 0x20 set を残し、ctx provisioning では board_index を確定する
- * 最初の read に間に合わない（ライブ実証）。consumer 側で供給すれば dipsw read のタイミングに非依存で errCode
- * 0xa(→errNo 910 "Wrong Resolution Setting")/0xb を確実に断つ。旧 dipsw byte patch(0x45A0F5/F9)と同じ effect を
- * 静的メモリパッチ無しの gamehook で実現（host が境界で正データを供給）。 */
+/* amlib_storage_board_check(0x679CB0) PRE: board-table 判定の消費直前に board index(=2, table[2]=8) と
+ * dipsw flag(0x20=0) を供給する。ctx provisioning は board_index を確定する最初の read に間に合わないため、
+ * consumer 側で供給して dipsw read のタイミングに非依存で errCode 0xa(errNo 910)/0xb を断つ。 */
 static void __cdecl d_board_check(void) {
     uintptr_t b = (uintptr_t)GetModuleHandleW(NULL);
     *(unsigned char *)(b + (0x1601953u - IMAGE_BASE)) = 2;     /* board_index = 2（table[2]=8）*/
@@ -100,33 +92,19 @@ static void __cdecl d_board_check(void) {
     o_board_check();
 }
 
-/* keychip_appdata_delete_gate_probe(0x45A8F0, amlib_master_init から call＝SYSTEM STARTUP SM より前) POST:
- * この probe は extend-image/appdata ファイルの存在(__stat64i32)＋検証(FUN_00969a00)で DAT_01601b23(image-present gate)を
- * 1 にする本物の判定。standalone は extend-image ファイルが無く gate=0 のままで、state5 substate1 が
- * "CHECKING EXTEND IMAGE … NG" を出し install 試行に入る（install getter 経由は state 0xc=Install Error しか前進路が
- * 無く NG 表示）。実筐体「extend-image 導入済み」境界条件を供給＝gate=1 を force すると substate1 が skip 枝→"… OK"→
- * state6（INSTALLING 行を出さず install を完全 skip）＝TP の extend-image 提供と等価の純正 OK。
- * gate=1 は state1 case1 で extended リソース再ロード(FUN_007416e0 列)を誘発するが、これは image-present 時の genuine 挙動
- * （FUN_007416e0 は bounds-check 付きで idx 不正は graceful return 0）。下の install kicker POST は多層防御の fallback
- * （万一 gate 経路を通らず install 試行に入った場合に install_ctx を完了 provision＝最悪でも "NG"だが前進、旧 P_extimg 相当）。 */
+/* keychip_appdata_delete_gate_probe(0x45A8F0) POST: この probe は extend-image ファイル存在+検証で image-present gate
+ * DAT_01601b23=1 にする判定。standalone はファイルが無く gate=0 → state5 が "EXTEND IMAGE … NG"→install 試行。
+ * gate=1 を force すると substate1 が skip 枝→"… OK"→state6（install 完全 skip）。下の install kicker POST は fallback。 */
 static int __cdecl d_extimg_gate_probe(void) {
     int r = o_extimg_gate_probe();
     *(unsigned char *)((uintptr_t)GetModuleHandleW(NULL) + (0x1601B23u - IMAGE_BASE)) = 1; /* image-present gate=1 */
     return r;
 }
 
-/* extend-image install kicker (FUN_0072eaf0, boot SM SYSTEM_STARTUP state5 substate2) POST:
- * orig は devMgr+0x26d/0x26e=1 を立て ALL.Net 経由の extend-image install を開始させる。だが extend-image install は
- * 実体が ALL.Net 配信タスク(NetworkTask, install_ctx=devMgr+0x258=field[0x96])で、network 未エミュの standalone では
- * install SM が state を進められず詰まる（旧静的パッチ P_extimg 0x72B3A0 が getter を return 4 詐称していた所以）。
- * 実筐体で「イメージ導入済み」に当たる境界条件を供給＝install_ctx に state=0xc(完了)/error(+0x284)=0 を provisioning する。
- * state5 substate2 は同 tick で substate3 に fall-through し（disasm: 0x89a4c8 kicker→0x89a4eb 0x72b3a0 読取）、その
- * extend_image_install_status(0x72b3a0) が *param_2(devMgr+0x258)==0xc→return 4・*ESI(param_2[0xb]=devMgr+0x284)=0 を読む。
- * boot SM は (return>3 && error==0) を成功と解し state6 へ genuine 前進＝getter 無改変のまま P_extimg を撤去できる
- * （d_board_check / d_eeprom_init と同型の「詐称→純正供給」格上げ。host が境界で正データを供給）。
- * FUN_0072eaf0 の xref は boot SM 一箇所のみ＝SYSTEM TEST 等の他経路に副作用なし。devMgr は amlib_device_manager_ptr
- * (0x72b450, 副作用なしの getter)を呼んで取得（detour はゲームスレッド上で走る）。真の genuine 化（実 install SM 完走）は
- * ALL.Net 層エミュ＝Phase B2 が前提。回帰（state5 で EXTEND IMAGE NG / INSTALLING WAITING 固着）時は P_extimg を復活。 */
+/* extend-image install kicker (FUN_0072eaf0, boot SM state5 substate2) POST: orig は install を開始させるが実体が
+ * ALL.Net 配信タスクで standalone では詰まる。install_ctx(devMgr+0x258)に state=0xc(完了)/error(+0x284)=0 を provisioning
+ * すると、同 tick fall-through の substate3 が extend_image_install_status(0x72b3a0) を return 4・error 0 と読み state6 前進。
+ * xref は boot SM 一箇所のみ。真の install SM 完走化は ALL.Net 層エミュが前提。 */
 static unsigned __cdecl d_ext_install_kick(void) {
     unsigned r = o_ext_install_kick();   /* orig: devMgr+0x26d/0x26e=1（install 開始トリガ）*/
     unsigned (*devmgr_ptr)(void) = (unsigned (*)(void))
@@ -139,16 +117,9 @@ static unsigned __cdecl d_ext_install_kick(void) {
     return r;
 }
 
-/* dinput_create_device(0x67CBE0) PRE/POST: SysMouse(=USB I/O board proxy)取得を窓生成タイミングに非依存化する。
- * count++ は SetCooperativeLevel(DAT_01696e0c, FOREGROUND|NONEXCLUSIVE) 成功が条件だが、起動初期（board check 内
- * FUN_0067c510 経由）は WGL 窓未生成で hwnd=0 → SetCoopLevel が E_HANDLE 失敗 → usbio_board_count=0 のまま →
- * usbio_errCode_mapper(0x6F0AD0)が errCode 0xf(=errNo 951 "USB Device Not Found")を latch。
- * 対策: hwnd 未生成時のみ取得可能な窓(WGL があればそれ、無ければデスクトップ窓)を一時供給し、ゲーム自身の
- * dinput_create_device に **genuine に** SysMouse を CreateDevice/SetDataFormat/SetCooperativeLevel/Acquire させて
- * count を立てさせる（count を直接書かない＝OS 境界エミュ）。本来の WGL 窓が出来たら次回呼出で作り直される。 */
 /* ---- main per-frame 実時間計時（チラつき=30fps 二重 present の 33ms 在処を局在化） ----
- * amApp_main_loop はフレーム制限なしのスピンなので、FUN_00643de0(per-frame tick) の実時間 ≈ フレーム周期。
- * これが ~33ms なら 33ms は frame work 内（CPU or GPU 待ち）にある。120 frame 毎に集約 1 行。 */
+ * amApp_main_loop はフレーム制限なしのスピンなので FUN_00643de0(per-frame tick) の実時間 ≈ フレーム周期。
+ * 120 frame 毎に集約 1 行。 */
 static void (*o_frametick)(void);
 static void (*o_present_drive)(void);   /* FUN_006c3930: frame_present_main + render kick + post */
 static void (*o_scene_dispatch)(void);  /* scene_list_render_dispatch 0x89dac0: scene 走査+GL 発行 */
@@ -190,14 +161,9 @@ static void __cdecl d_frametick(void) {
     }
 }
 
-/* ALL.Net uri getter (FUN_006ff7e0) override: standalone は network_auth_force_ready(api.c) が alAbEx auth を
- * 「成功」詐称するため、実 PowerOn の応答パーサ FUN_006fe670 が走らず uri(DAT_0210b530) が空のまま
- * ＝ NUPL(ALL.Net セッションタスク)の POST 先 URL が空＝ card-auth の NetDataCardinfoRequest が飛ばず、
- * card-auth scene(0x5e6200) が「このカードは使用できません」を出す（応答が永遠に来ない）。
- * FUN_006ff7e0 は g_alabex_started && g_alabex_auth_ok のとき uri の c_str を返す（唯一の caller=FUN_00559270 が
- * upload/matching タスクの URL に代入）。detour で「orig が非null(=flags 成立)なら我々の loopback backend URL を返す」
- * ＝ boot の force を壊さず uri を供給し、card POST を allnet.c の HTTP サーバ(127.0.0.1:80→connect hook で :40080)へ導く。
- * orig が null(flags 未成立)なら null 維持で gating 温存。std::string 内部を触らない clean な関数戻り override。 */
+/* ALL.Net uri getter (FUN_006ff7e0) override: orig は auth flags(started && auth_ok)成立時に uri の c_str を返す
+ * （唯一の caller FUN_00559270 が upload/matching タスク URL に代入）。detour は orig 非null(=flags 成立)なら loopback
+ * backend URL を返し、card POST を allnet.c の HTTP サーバへ導く。null(未成立)なら null 維持で gating 温存。 */
 static void *(*o_allnet_url)(void);
 static const char g_allnet_url[] = "http://127.0.0.1/nrsedge";   /* 127.0.0.1:80 → connect hook が :40080 へ */
 static int g_allnet_url_logged;
@@ -209,6 +175,42 @@ static void *__cdecl d_allnet_url(void) {
         host_log("info", "{\"ev\":\"allnet.url.override\",\"uri\":\"http://127.0.0.1/nrsedge\"}");
     }
     return (void *)g_allnet_url;              /* uri を loopback backend へ override */
+}
+
+/* ALL.Net NUPL 応答パーサ (FUN_00712710, __thiscall→__fastcall) READ-ONLY 診断。DFI 復号済み body を受け取り
+ * id/status 照合で NUPL obj +0xd8(status: 0 ok,1 inflight,-1 err) を確定する。orig 前後で決定入力を丸ごとログ。 */
+static void (__fastcall *o_recv_parse)(void *self, void *edx, char *body, size_t len);
+static void __fastcall d_recv_parse(void *self, void *edx, char *body, size_t len) {
+    unsigned char *o = (unsigned char *)self;
+    int  d4_pre = o ? *(int *)(o + 0xd4)     : 0;
+    int  d8_pre = o ? *(int *)(o + 0xd8)     : 0;
+    int  cmp    = o ? *(int *)(o + 0x20130)  : 0;   /* パーサが id 一致に使う照合先 */
+    int  f20120 = o ? *(int *)(o + 0x20120)  : 0;   /* id-callback キャッシュ */
+    int  f20128 = o ? *(int *)(o + 0x20128)  : 0;
+    int  f20134 = o ? *(int *)(o + 0x20134)  : 0;   /* 送信カウンタ(=req_id) */
+    /* body（DFI 復号済み平文）先頭を JSON エスケープして記録＝我々の応答が正しく届いたかの確証 */
+    char snip[260]; size_t j = 0; snip[j++] = '"';
+    for (size_t i = 0; body && i < len && i < 200 && j + 2 < sizeof snip; i++) {
+        unsigned char c = (unsigned char)body[i];
+        if (c == '"' || c == '\\') { snip[j++] = '\\'; snip[j++] = c; }
+        else if (c >= 0x20 && c < 0x7f) snip[j++] = c;
+        else snip[j++] = '.';
+    }
+    snip[j++] = '"'; snip[j] = 0;
+    char m[520];
+    wsprintfA(m, "{\"ev\":\"recv.parse.pre\",\"len\":%u,\"d4\":%d,\"d8\":%d,\"cmp\":%d,"
+                 "\"f20120\":%d,\"f20128\":%d,\"f20134\":%d,\"body\":%s}",
+              (unsigned)len, d4_pre, d8_pre, cmp, f20120, f20128, f20134, snip);
+    host_log("info", m);
+
+    o_recv_parse(self, edx, body, len);
+
+    int d4_post = o ? *(int *)(o + 0xd4) : 0;
+    int d8_post = o ? *(int *)(o + 0xd8) : 0;
+    char m2[160];
+    wsprintfA(m2, "{\"ev\":\"recv.parse.post\",\"d4\":%d,\"d8\":%d,\"changed\":%d}",
+              d4_post, d8_post, (d4_post != d4_pre || d8_post != d8_pre));
+    host_log("info", m2);
 }
 
 static int gh(unsigned va, void *det, void **orig) {
@@ -227,10 +229,11 @@ int gamehooks_install(void) {   /* MH_Initialize は hooks_install で実施済 
     e |= gh(0x9842A0, (void *)d_dipsw_init, (void **)&o_dipsw_init);   /* amDipswInit POST: dipsw ctx 早期 provisioning */
     e |= gh(0x679CB0, (void *)d_board_check,(void **)&o_board_check);  /* board check PRE: board index=2/flag 供給（errCode 0xa→errNo 910 解消）*/
     e |= gh(0x45A8F0, (void *)d_extimg_gate_probe,(void **)&o_extimg_gate_probe); /* image-present gate POST: DAT_01601b23=1（EXTEND IMAGE→OK skip）*/
-    e |= gh(0x72EAF0, (void *)d_ext_install_kick,(void **)&o_ext_install_kick); /* extend-image install kicker POST: install_ctx 完了 provision（fallback／P_extimg 0x72B3A0 格上げ）*/
+    e |= gh(0x72EAF0, (void *)d_ext_install_kick,(void **)&o_ext_install_kick); /* extend-image install kicker POST: install_ctx 完了 provision */
     e |= gh(0x6FF7E0, (void *)d_allnet_url,      (void **)&o_allnet_url);        /* ALL.Net uri getter override: 空 uri を loopback backend URL に（card-auth の NetDataCardinfoRequest を allnet.c へ導く）*/
     e |= gh(0x643DE0, (void *)d_frametick,     (void **)&o_frametick);      /* main per-frame 実時間計時（pace.main）*/
     e |= gh(0x6C3930, (void *)d_present_drive,  (void **)&o_present_drive);  /* present 駆動部の実時間（内訳）*/
     e |= gh(0x89DAC0, (void *)d_scene_dispatch, (void **)&o_scene_dispatch); /* scene dispatch の実時間（内訳）*/
+    e |= gh(0x712710, (void *)d_recv_parse,     (void **)&o_recv_parse);     /* ALL.Net NUPL 応答パーサ診断（init 応答拒否 d8→-1 の切り分け・READ ONLY）*/
     return e;
 }

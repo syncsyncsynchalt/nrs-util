@@ -1,15 +1,6 @@
-/* card — COM2 IC Card R/W（class 0x21, SEGA 独自・**Aime 非該当**）。
- *
- * 素性（facts/devices.md §カードリーダー, 2026-06-30 Ghidra 実体 sweep で確定）:
- *   bare-byte command/ACK シリアル, **checksum 無し**, 8E1 / 9600。nrs.exe 自称 "IC Card R/W"。
- *   opcode→期待ACK は card_cmd_ack_expected(0x8850c0)、応答 status(* : J Z)は card_rx_status_decode(0x66f8a0)、
- *   カード種別バイト(0x36/0xc9/0xff)→容量(1984/960/4032B)は card_type_to_datalen(0x66f690)。
- *
- * 実装方針（touch.c と同型・CLAUDE.md 鉄則 #2 = OS 境界で仮想 COM 化, game 自身のパーサに解釈させる）:
- *   bring-up 第1段は **仮想化＋生バイトログ**。COM2 open/comm-control を成功させ、game が書く TX バイト列を
- *   観測してフレーミング（可変長・終端）を実トラフィックで裏取りしてから protocol logic を確定する
- *   （static RE のコマンド長は現状すべて推定。二度解かないため観測で確証する）。
- *
+/* card — COM2 IC Card R/W（class 0x21, SEGA 独自・Aime 非該当）。詳細 facts/devices.md §カードリーダー。
+ *   bare-byte command/ACK シリアル, checksum 無し, 8E1 / 9600。opcode→期待ACK は card_cmd_ack_expected(0x8850c0)、
+ *   応答 status は card_rx_status_decode(0x66f8a0)、種別→容量は card_type_to_datalen(0x66f690)。
  * pure protocol（host 非依存・global 無し・reload 安全）。状態は host arena 上の CardReader。 */
 #pragma once
 #include "abi.h"
@@ -74,12 +65,12 @@ typedef struct {
     int      rx_len;            /* 組立中バイト数 */
     uint8_t  tx[CARD_TX_CAP];   /* reader→game 応答（[ACK b0][status b1][payload]）*/
     int      tx_len, tx_off;    /* 応答の書込/読出位置 */
-    /* --- カード状態（Phase B: 仮想カード永続 R/W）--- */
-    uint8_t  present;           /* カード挿入中（simulated）。Phase A 初期=0 */
+    /* --- カード状態（仮想カード永続 R/W）--- */
+    uint8_t  present;           /* カード挿入中（simulated）。初期=0 */
     uint32_t uid;               /* カード UID（ヘッダ +0x04 BE。whitelist 照合値）*/
     uint8_t  card_type;         /* 種別バイト 0x36/0xC9/0xFF → 容量 1984/960/4032 */
     uint8_t  image[CARD_IMAGE_BYTES];  /* 永続カードデータ（card.bin の中身）*/
-    /* --- Phase B R/W カーソル（0x2D select → 0x0D read / 0xAD write）--- */
+    /* --- R/W カーソル（0x2D select → 0x0D read / 0xAD write）--- */
     int      read_cursor;       /* 0x0D 連続 read の image オフセット（0x2D の addr で設定, +128/回）*/
     int      read_len;          /* 0x2D が指定した残り read 長（BE 4B。診断/境界）*/
     uint32_t write_addr;        /* 0xAD が指定した次 write の image オフセット（BE 4B）*/

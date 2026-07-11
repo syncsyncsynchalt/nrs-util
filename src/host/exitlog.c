@@ -1,5 +1,5 @@
-/* exitlog.c — 旧 app/exit.js 相当。ExitProcess / TerminateProcess / NtTerminateProcess を
- * フックして終了 code と呼出元(nrs+offset)をログ。nrs が「なぜ落ちる/終わるか」を特定する診断。 */
+/* exitlog.c — ExitProcess / TerminateProcess / NtTerminateProcess をフックして終了 code と呼出元(nrs+offset)を
+ * ログ。nrs が「なぜ落ちる/終わるか」を特定する診断。 */
 #include "host.h"
 #include "MinHook.h"
 

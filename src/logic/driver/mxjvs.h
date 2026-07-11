@@ -16,19 +16,14 @@ enum {
     JVS_FEAT_PLAYERS = 0x01, JVS_FEAT_COINS = 0x02, JVS_FEAT_ANALOG = 0x03,
     JVS_FEAT_GPIO = 0x12, JVS_FEAT_EOF = 0x00,
     JVS_PLAYERS = 2, JVS_BTNS = 13, JVS_COINS = 2, JVS_SWBYTES = 2, JVS_ANALOG_CH = 8,
-    /* GET_FEATURES 申告値。nrs.exe spec-check FUN_0067afa0(node_count==1 経路)を逆コンパイルして確定した
-       受理条件は次の 4 つの ≥ のみ（node_info フィールド直読み番地つき）:
-         buttons/player >= 0x0e (DAT_016b7e69 / node+0x101)
-         analog ch      >= 0x02 (DAT_016b7e70 / node+0x108)  ← JVS_ANALOG_CH=8 で充足
-         gpio 出力数    >= 0x0d (DAT_016b7e8c / node+0x124)
-         cmd_ver        >= 0x13 (DAT_016b7e9c / node+0x134)  ← CMD_VER で充足
-       満たさないと jvs_error_state=-102。board ID 文字列・JVS_VER・players 数は nrs では非検査。
-       下記 BTNS/GPO は閾値ちょうどの最小値。
-       注: sw ビット詰めは JVS_BTNS(=13, shift=16-13) を使い続ける — START→byte0 bit7 を保つため packing とは分離。 */
+    /* GET_FEATURES 申告値。nrs spec-check FUN_0067afa0 の受理条件は次の 4 つの ≥ のみ（満たさないと jvs_error_state=-102）:
+         buttons/player >= 0x0e (node+0x101) / analog ch >= 0x02 (node+0x108) /
+         gpio 出力数 >= 0x0d (node+0x124) / cmd_ver >= 0x13 (node+0x134)。BTNS/GPO は閾値ちょうどの最小値。
+       sw ビット詰めは JVS_BTNS(=13) を使う（START→byte0 bit7 を保つため FEAT とは分離）。 */
     JVS_FEAT_BTNS = 14, JVS_FEAT_GPO = 13
 };
 
-/* JVS ボード状態。host arena に置く（型変更=restart）。入力は P3 で mxjvs_set_* から供給。 */
+/* JVS ボード状態。host arena に置く（型変更=restart）。 */
 typedef struct {
     uint8_t  address;                 /* ASSIGN_ADDR で設定 */
     uint8_t  sense;                   /* sense out（1=未割当）*/
