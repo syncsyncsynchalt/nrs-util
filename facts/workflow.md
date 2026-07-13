@@ -43,6 +43,19 @@ loader.exe restart --wait      # stop→start
 - **status.json は明示停止(`stop`/`taskkill`)で削除、自滅は `ExitProcess` フックで phase=exited。** だから「こちらが止めた(file 無=`none`)」と「ゲームが落ちた(`exited`+last_error)」を区別できる。`status` の running 判定はプロセス存在(Toolhelp)が正、JSON の phase は補助。
 - **PowerShell 5.1 の `Get-Content` は既定 ANSI で UTF-8 を cp932 誤読し文字化け＋`ConvertFrom-Json` 失敗する。** UTF-8 ファイル(tasks.json 等)を読む時は `-Encoding UTF8` 必須。loader CLI の JSON 出力は WriteFile 直書きなので問題ないが、ファイルを読み直す検証で踏む。
 
+## 静的解析と動的デバッグは両輪（片方で止めない）
+
+**RE は Ghidra 静的解析だけで完結させず、動的デバッグを標準で併用する。**
+静的像（コードが何をしうるか）と実行時像（実際に何が起きたか）は CrackProof の自己書換え・unpack 後再初期化・
+実行時 FS/デバイス状態依存でズレる（例：`PcbRegion` 0x16014C4 は writer 無しなのに unpack で 1→0 に戻る）。
+どちらか片方の像だけで挙動・撤去可否・修正を確定しない。
+
+- **一次の動的観測 = logic の JSONL ログ + 集約 `nrsedge.status.json`**（`loader.exe start/status/wait/logs`）。
+  自前コードを自由に計装できるので、まず計装＋実走で連鎖の切断点を切り分ける（「静的推測フィックスを外した」轍＝この直下の節を参照）。
+- **ネイティブデバッガ = cdb**（ゲーム内部の実行時状態＝レジスタ/メモリ/実際の分岐先/例外を、ログ計装で届かない所で見る）。
+  静的に確定できない分岐・値・クラッシュ点は cdb でブレーク/ウォッチして実体を取る。CLAUDE.md の「稀に cdb」は下限であって上限ではない。
+- 静的で解いた仮説は実走で裏取りし、実走で見えた事実は Ghidra に書き戻す（DB 永続）。往復させて複利化する。
+
 ## 「できない・効かない」系は実体で再導出する
 
 docs/コメントの「できない・クラッシュ・効かない」系は Ghidra＋実走ログで再導出してから信じる。推測で機構を当てない。

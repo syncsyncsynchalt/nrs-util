@@ -213,6 +213,24 @@ static void __fastcall d_recv_parse(void *self, void *edx, char *body, size_t le
     host_log("info", m2);
 }
 
+/* NetDataCardinfoRequest 送信ビルダ (FUN_007203e0, __fastcall(int* ctx)) の READ-ONLY 診断。
+ * これが呼ばれる = card-auth scene(0x5e6200) が case2 に到達し UID を cardinfo として送信しようとしている証跡。
+ * 呼ばれなければ scene が card-auth 送信点まで進んでいない（card-select→card-auth 遷移が起きていない）。 */
+static void (__fastcall *o_cardinfo_send)(int *ctx, int edx);
+static void __fastcall d_cardinfo_send(int *ctx, int edx) {
+    unsigned uid = 0, slot = 0;
+    if (ctx) { slot = (unsigned)ctx[2]; if (ctx[0]) uid = *(unsigned *)(ctx[0] + 0x3c); }
+    char m[128];
+    wsprintfA(m, "{\"ev\":\"cardinfo.send\",\"slot\":%u,\"uid_field\":%u}", slot, uid);
+    host_log("info", m);
+    o_cardinfo_send(ctx, edx);
+}
+
+/* [撤去 2026-07-12] card_read_sm(0x671470) への hook（whitelist bypass 目的）は CrackProof が起動~13s の
+ * 整合性 scan で MinHook detour jump を復元し無効化（res:1→-97 に戻る）。同関数への code patch も同時復元＝
+ * card_read_sm は CrackProof 保護領域。card 受理は hook/patch 不可。whitelist DATA 供給 or card UID 一致で
+ * 対処すべき（facts/devices.md 参照）。 */
+
 static int gh(unsigned va, void *det, void **orig) {
     void *a = (void *)((uintptr_t)GetModuleHandleW(NULL) + (va - IMAGE_BASE));
     return (MH_CreateHook(a, det, orig) == MH_OK && MH_EnableHook(a) == MH_OK) ? 0 : -1;
@@ -235,5 +253,6 @@ int gamehooks_install(void) {   /* MH_Initialize は hooks_install で実施済 
     e |= gh(0x6C3930, (void *)d_present_drive,  (void **)&o_present_drive);  /* present 駆動部の実時間（内訳）*/
     e |= gh(0x89DAC0, (void *)d_scene_dispatch, (void **)&o_scene_dispatch); /* scene dispatch の実時間（内訳）*/
     e |= gh(0x712710, (void *)d_recv_parse,     (void **)&o_recv_parse);     /* ALL.Net NUPL 応答パーサ診断（init 応答拒否 d8→-1 の切り分け・READ ONLY）*/
+    e |= gh(0x7203E0, (void *)d_cardinfo_send,  (void **)&o_cardinfo_send);  /* cardinfo 送信ビルダ診断（card-auth 到達＝cardinfo 発火の切り分け・READ ONLY）*/
     return e;
 }

@@ -9,36 +9,30 @@
 
 typedef struct { uint32_t va; const uint8_t *b; int n; const char *note; } CodePatch;
 
-/* --- byte patches（静的VA, 上書きバイト） --- */
+/* --- byte patches（静的VA, 上書きバイト）--- */
 static const uint8_t P_billing[]   = {0xB8,0x08,0x00,0x00,0x00,0xC3};        /* mov eax,8;ret */
 static const uint8_t RET0[]        = {0x31,0xC0,0xC3};                       /* xor eax,eax;ret */
 static const uint8_t RET8_0[]      = {0x31,0xC0,0xC2,0x08,0x00};             /* xor eax,eax;ret 8（__thiscall callee-clean）*/
-static const uint8_t RET1[]        = {0xB8,0x01,0x00,0x00,0x00,0xC3};        /* mov eax,1;ret */
-static const uint8_t P_one1[]      = {0x01};                                 /* imm 1 */
 static const uint8_t P_ret2[]      = {0xB8,0x02,0x00,0x00,0x00,0xC3};        /* mov eax,2;ret */
 static const uint8_t NOP6[]        = {0x90,0x90,0x90,0x90,0x90,0x90};
-static const uint8_t NOP10[]       = {0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90};
 
 static const CodePatch CODE[] = {
+    /* --- A: 必須（維持）。撤去済パッチの履歴は git log / facts/。--- */
     /* status 8 は alpbEx_billing_poll(0x7000C0) case8 で billing_ready=1 を立てる（accounting 無し）→ boot SM
        state7 の pras_billing_ready_check(0x701280) が自然に通る。実 credit 計上を配線する際は status 8↔5 を再評価。 */
     {0xA065C0, P_billing, 6, "alpbExGetExecStatus->8"},
     /* __thiscall(this,arg1,arg2)=callee-clean ゆえ ret 8 必須（call site に add esp 無し、bare ret はスタック破壊→クラッシュ）。
        keychipSM_FSM case4 の appdata 不一致時 recursive dir delete をブロック。DO NOT REMOVE（facts/bugs.md, amdongle.md）。 */
     {0x457AF0, RET8_0, 5, "delete_directory_recursive nop"},
-    {0x6FF1B3, P_one1, 1, "LAN flag b50c 0->1 (Error 8005)"},
-    {0x72DCE0, P_ret2, 6, "amlib_device_status_getter->2 (Error 8001)"},
-    {0x4FDA50, RET0, 3, "is-DVD-boot->0 (Error 913)"},
-    {0x986A66, NOP6, 6, "region jne->nop (Error 0x381)"},
-    {0x986A74, NOP6, 6, "region jne->nop (Error 0x387 wrong region)"},
-    {0x986A92, NOP6, 6, "region jne->nop (Error 0x38D)"},
-    /* 第3オペランド=alAbEx/ALL.Net network region(FUN_006ff900)が未供給ゆえ維持。撤去には network region 層が要る。 */
-    {0x45A846, NOP10, 10, "errCode=4 store nop (FUN_0045a7f0)"},
-    /* HLSM(0x457fe0) の region ゲート（keychip region NOP 0x986A.. とは別経路）。 */
-    {0x6FF980, RET1, 6, "hlsm_region_check->1"},
+    {0x4FDA50, RET0, 3, "is-DVD-boot->0 (Error 913)"},                       /* DVD boot 判定（ALL.Net 無関係）*/
+    /* --- B: genuine ALL.Net 化で冗長の可能性・撤去検証中（撤去して boot 完走を実測。破綻時は復帰）。--- */
+    /* {0x72DCE0, P_ret2, 6, "amlib_device_status_getter->2 (Error 8001)"}, */
+    /* {0x986A66, NOP6, 6, "region jne->nop (Error 0x381)"}, */
+    /* {0x986A74, NOP6, 6, "region jne->nop (Error 0x387 wrong region)"}, */
+    /* {0x986A92, NOP6, 6, "region jne->nop (Error 0x38D)"}, */
 };
 
-/* jl(0x7C disp8) -> jmp(0xEB disp8): byte0 のみ書換 */
+/* jl(0x7C disp8) -> jmp(0xEB disp8): byte0 のみ書換。amGfetcher(0x975830) download 分岐。B と同様に撤去検証中。 */
 static const uint32_t JL2JMP[] = { 0x97588A, 0x97595F, 0x975A1F };
 
 static void wr(uintptr_t addr, const void *src, int n) {

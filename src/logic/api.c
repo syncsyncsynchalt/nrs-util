@@ -46,6 +46,7 @@ struct LogicState {
     unsigned   card_ctl_gen;         /* 最後に適用した gen（同一秒書込でも変化検知）*/
     wchar_t    card_img_path[MAX_PATH]; /* アクティブ card.bin パス（dirty 保存先）*/
     int        card_force_logged;    /* card.force_present 初回ログフラグ */
+    int        card_accept_logged;   /* card.accept_gate 初回ログフラグ */
     /* --- headless タッチ注入（nrsedge.touch.json, テスト自動化用）--- */
     int        touch_ctl_seen;       /* 制御ファイルを一度読めたか */
     FILETIME   touch_ctl_mtime;      /* 最後に適用した last-write time */
@@ -938,6 +939,101 @@ static int *cardrw_object(uintptr_t b) {
  * カード挿入検出信号が無く、card-select scene(0x5e6200)の present ゲート `+0x5628!=0` が立たない。これに 1 を書くと
  * read シーケンサ FUN_004f30a0 が read 列に入り presence query FUN_004f6a30 も present を返す。SM 中間 state は触らない。
  * offset: cardrw_device_status_ptr(0x4f3e30): object=node[4] / device_status=object+4 / presence=+0x5628。*/
+/* CrackProof 復元 vs whitelist 後ロードの切り分け診断（変化時のみ記録）: card_read_sm(0x671470) の patch バイト
+ * (0x671aac=EB?7E? / 0x6717d5=90?75?) と whitelist count/bypass/UID[0]/読取UID を追う。 */
+static void card_patch_diag(LogicState *st) {
+    static unsigned last_sig = 0xffffffff;
+    uintptr_t b = (uintptr_t)GetModuleHandleW(NULL);
+    unsigned pa = *(uint8_t *)(b + (0x671AACu - 0x400000u));   /* halt patch: EB=生存 / 7E=復元 */
+    unsigned pf = *(uint8_t *)(b + (0x6717D5u - 0x400000u));   /* first patch: 90=生存 / 75=復元 */
+    unsigned cnt = *(uint8_t *)(b + (0x16A55ADu - 0x400000u));
+    unsigned byp = *(uint8_t *)(b + (0x16A55BAu - 0x400000u));
+    uint32_t wl0 = *(uint32_t *)(b + (0x16A55B0u - 0x400000u));
+    uint32_t ruid = *(uint32_t *)(b + (0x169E314u - 0x400000u));
+    unsigned sig = pa * 131 + pf * 31 + cnt * 7 + byp + (wl0 & 0xffff) + (ruid & 0xffff);
+    if (sig != last_sig && st->host && st->host->log) {
+        last_sig = sig;
+        char m[220];
+        wsprintfA(m, "{\"ev\":\"card.patchdiag\",\"halt_671aac\":\"%02x\",\"first_6717d5\":\"%02x\","
+                     "\"wl_count\":%u,\"bypass\":%u,\"wl_uid0\":\"%08x\",\"read_uid\":\"%08x\"}",
+                  pa, pf, cnt, byp, wl0, ruid);
+        st->host->log("info", m);
+    }
+}
+
+/* amlib device manager(class 0x20/0x20 タスクの *(node[4]))を取得。SYSTEM STARTUP boot SM の CONNECTION
+ * チェックは status 配列 manager+0x1d4+idx*4 を各項目(AUTH/UPLOAD/GAME SERVER/LOCAL)について読む（2=ready）。 */
+static int *amlib_devmgr(uintptr_t b) {
+    int *node = *(int **)(b + (0x16D8688u - 0x400000u));       /* DAT_016d8688 cache */
+    if (!node) {
+        node = *(int **)(b + (0x16DB564u - 0x400000u));        /* DAT_016db564 task list head */
+        while (node && (node[0] != 0x20 || node[1] != 0x20)) node = (int *)(uintptr_t)node[0xf];
+    }
+    if (!node || !node[4]) return 0;
+    return (int *)(uintptr_t)(*(int *)(uintptr_t)node[4]);      /* *(node[4]) = manager object */
+}
+
+/* device status 配列 + network フラグ + NIC ディスクリプタの観測（ALL.Net パッチ撤去後の genuine emulation 設計用）。
+ * NIC slot 配列 base=0x210b5b8 stride8, +4=descriptor ptr（[+0]=state 2=接続, [+4]=IP）。flags 0x210b50a/b/c。 */
+static void amlib_devstat_diag(LogicState *st) {
+    static unsigned last = 0xffffffff;
+    uintptr_t b = (uintptr_t)GetModuleHandleW(NULL);
+    int *mgr = amlib_devmgr(b);
+    int s0=-1,s1=-1,s2=-1,s3=-1,s4=-1,s5=-1; unsigned m1ec=0;
+    /* exec SM(amlib_conn_exec_sm 0x72a200)観測: mgr+0x1f8=state, +0x204=status(idx4 gate), +0x210=conn-type */
+    int xstate=-1, xstat=-1, xctype=-1;
+    if (mgr) {
+        s0=mgr[0x1d4/4]; s1=mgr[0x1d8/4]; s2=mgr[0x1dc/4]; s3=mgr[0x1e0/4]; s4=mgr[0x1e4/4]; s5=mgr[0x1e8/4];
+        m1ec = *(unsigned *)((uintptr_t)mgr + 0x1ec);
+        xstate = *(int *)((uintptr_t)mgr + 0x1f8);
+        xstat  = *(int *)((uintptr_t)mgr + 0x204);
+        xctype = *(int *)((uintptr_t)mgr + 0x210);
+    }
+    /* ALL.Net async client グローバル（絶対VA）: 020f493c=connect結果(0=OK), 4934=client-ready, 4940=armed, 496c=req#, 4939=busy */
+    unsigned g_connres = *(unsigned *)(b + (0x020f493cu - 0x400000u));
+    unsigned g_ready   = *(unsigned char *)(b + (0x020f4934u - 0x400000u));
+    unsigned g_armed   = *(unsigned char *)(b + (0x020f4940u - 0x400000u));
+    unsigned g_reqno   = *(unsigned short *)(b + (0x020f496cu - 0x400000u));
+    unsigned g_busy    = *(unsigned char *)(b + (0x020f4939u - 0x400000u));
+    /* URI 文字列 DAT_0126591c（std::string MSVC: [0..15]=SSO buf / cap>15 なら [0..3]=heap ptr, [16]=size, [20]=cap）。
+       規模判定のため size/cap と内容を生ダンプ（SSO/heap 両対応）。 */
+    char uri[80]; uri[0]=0;
+    unsigned usz=0, ucap=0;
+    {
+        uintptr_t sp = b + (0x0126591cu - 0x400000u);
+        usz  = *(unsigned *)(sp + 0x10);
+        ucap = *(unsigned *)(sp + 0x14);
+        const char *us = (ucap > 15) ? *(const char **)sp : (const char *)sp;
+        if (us && usz < 0x1000) { unsigned n = usz < 79 ? usz : 79; for (unsigned i=0;i<n;i++){ char c=us[i]; uri[i]=(c>=32&&c<127)?c:'.'; } uri[n]=0; }
+    }
+    unsigned b50a = *(uint8_t *)(b + (0x210B50Au - 0x400000u));
+    unsigned b50b = *(uint8_t *)(b + (0x210B50Bu - 0x400000u));
+    unsigned lan  = *(uint8_t *)(b + (0x210B50Cu - 0x400000u));
+    /* NIC ディスクリプタ 3 slot: state / IP */
+    int ns[3], nip[3];
+    for (int i = 0; i < 3; i++) {
+        int *d = *(int **)(b + ((0x210B5BCu + i*8) - 0x400000u));
+        ns[i]  = d ? d[0] : -1;
+        nip[i] = d ? d[1] : 0;
+    }
+    unsigned sig = (unsigned)(s0+s1*3+s2*7+s3*13+s4*17+s5*19) + m1ec + b50a*131 + b50b*137 + lan*139
+                 + ns[0]*211 + ns[1]*223 + ns[2]*227 + (unsigned)(nip[0]^nip[1]^nip[2])
+                 + (unsigned)(xstate*29 + xstat*31 + xctype*37) + g_connres*41 + g_ready*43 + g_armed*47 + g_busy*53;
+    if (sig != last && st->host && st->host->log) {
+        last = sig;
+        char m[520];
+        wsprintfA(m, "{\"ev\":\"amlib.devstat\",\"s\":[%d,%d,%d,%d,%d,%d],\"m1ec\":\"%x\","
+                     "\"exec\":{\"state\":%d,\"stat\":%d,\"ctype\":%d,\"connres\":%d,\"ready\":%u,\"armed\":%u,\"busy\":%u,\"reqno\":%u,\"urisz\":%u,\"uricap\":%u,\"uri\":\"%s\"},"
+                     "\"b50a\":%u,\"b50b\":%u,\"lan\":%u,"
+                     "\"nic\":[{\"st\":%d,\"ip\":\"%08x\"},{\"st\":%d,\"ip\":\"%08x\"},{\"st\":%d,\"ip\":\"%08x\"}]}",
+                  s0,s1,s2,s3,s4,s5, m1ec,
+                  xstate,xstat,xctype,(int)g_connres,g_ready,g_armed,g_busy,g_reqno,usz,ucap,uri,
+                  b50a,b50b,lan,
+                  ns[0],(unsigned)nip[0], ns[1],(unsigned)nip[1], ns[2],(unsigned)nip[2]);
+        st->host->log("info", m);
+    }
+}
+
 static void card_force_present(LogicState *st) {
     if (!st->card.present) return;
     uintptr_t b = (uintptr_t)GetModuleHandleW(NULL);
@@ -952,6 +1048,24 @@ static void card_force_present(LogicState *st) {
             st->host->log("info", "{\"ev\":\"card.force_present\",\"set\":\"ds+0x5628=1\"}");
             st->card_force_logged = 1;
         }
+    }
+}
+
+/* カード受理ゲート（card_read_sm 0x671470 の UID whitelist）を毎フレーム無条件で通す: bypass=1（最初の
+ * whitelist 照合を skip し data 読取へ）＋ whitelist count=0（halt 再照合を skip し state9=成功へ）。standalone は
+ * 正規発行カードの whitelist を持たず game が周期的に count を再populate するため、card.present に依らず毎フレーム
+ * 再供給して race を潰す（card_read_sm は別スレッドで走るため頻繁な reset が要る）。res:-97「このカードは使用
+ * できません」を解消。globals: bypass=0x16a55ba / count=0x16a55ad。 */
+static void card_accept_gate(LogicState *st) {
+    uintptr_t b = (uintptr_t)GetModuleHandleW(NULL);
+    volatile uint8_t *bypass = (uint8_t *)(b + (0x16A55BAu - 0x400000u));
+    volatile uint8_t *wl_cnt = (uint8_t *)(b + (0x16A55ADu - 0x400000u));
+    int changed = (*bypass != 1 || *wl_cnt != 0);
+    *bypass = 1;
+    *wl_cnt = 0;
+    if (changed && !st->card_accept_logged && st->host && st->host->log) {
+        st->host->log("info", "{\"ev\":\"card.accept_gate\",\"set\":\"bypass=1,wl_count=0\"}");
+        st->card_accept_logged = 1;
     }
 }
 
@@ -1002,6 +1116,25 @@ static void nupl_diag(LogicState *st) {
                 st->host->log("info", m);
                 last_sig = sig;
             }
+            /* state2 停滞の解剖: state2 handler(FUN_007137a0)が tick されているか＝timer(0x20128 clock)が進むかを
+               ~1s 毎に観測。tnow が毎回変われば handler は回っている＝advance 条件(FUN_00714230)側の問題、
+               tnow が static なら tick が止まっている＝SM 駆動が停止（別 driver 要）。d4/dc も併記。 */
+            if (state == 2) {
+                static unsigned n2 = 0;
+                if ((n2++ % 60) == 0 && st->host && st->host->log) {
+                    int d4    = *(int *)(obj + 0xd4);
+                    int dc    = *(int *)(obj + 0xdc);
+                    int tflag = *(int *)(obj + 0x2012c);   /* timer active flag */
+                    int tdur  = *(int *)(obj + 0x20124);   /* timeout 閾値(60000) */
+                    int tstart= *(int *)(obj + 0x20120);   /* timer start */
+                    int tnow  = *(int *)(obj + 0x20128);   /* timer now (clock) */
+                    char m2[220];
+                    wsprintfA(m2, "{\"ev\":\"nupl.s2\",\"d4\":%d,\"dc\":%d,\"tflag\":%d,\"tdur\":%d,"
+                                  "\"tstart\":%d,\"tnow\":%d,\"elapsed\":%d}",
+                              d4, dc, tflag, tdur, tstart, tnow, tnow - tstart);
+                    st->host->log("info", m2);
+                }
+            }
             return;
         }
         node = (int *)(uintptr_t)node[0xf];                 /* next +0x3c */
@@ -1037,6 +1170,7 @@ static void on_jvs_tick(LogicState *st) {
     const NrsConfig *cfg = st->host ? st->host->cfg : 0;
     NrsInput in; nrs_poll_input(&in, cfg ? cfg->bind : 0);
 
+
     dinput_diag(st);          /* DirectInput/951 状態観測（実 SysMouse 供給で 951 純正解消する前提調査）*/
     eeprom_force_ready(st);   /* EEPROM 未 provisioning なら provisioning（amBackup -3 洪水の解消）*/
     dipsw_force_ready(st);    /* dipsw ctx 未 provisioning なら provisioning（board index errCode 0xa/0xb の解消）*/
@@ -1047,7 +1181,10 @@ static void on_jvs_tick(LogicState *st) {
     touch_control_poll(st);   /* nrsedge.touch.json を反映（headless タッチ注入→attract 進行の自動テスト）*/
     card_control_poll(st);    /* loader の nrsedge.card.json を反映（カードのライブ抜き差し→present/image）*/
     card_force_present(st);   /* present 時、cardrw presence フィールドを供給（standalone のカード挿入信号欠落を補完）*/
+    card_accept_gate(st);     /* 無条件: card_read_sm の UID whitelist を bypass（所有カード受理・res:-97 解消）*/
     card_sm_diag(st);         /* カード検出 SM の観測（card-select 画面でのゲート解析用・読取専用）*/
+    card_patch_diag(st);      /* CrackProof 復元 vs whitelist 後ロードの切り分け（patch バイト+count 追跡・読取専用）*/
+    amlib_devstat_diag(st);   /* SYSTEM STARTUP CONNECTION チェックの device status 配列観測（device_status パッチ撤去後の emulation 設計用）*/
     nupl_diag(st);            /* NUPL(ALL.Net card-info)タスクの URL/status/SM を観測（正しい ALL.Net auth→uri 供給の検証）*/
     alabex_diag(st);          /* alAbEx ALL.Net auth SM の status 観測（genuine PowerOn auth が走るか＝POST 不発の切り分け）*/
 

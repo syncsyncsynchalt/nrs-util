@@ -117,6 +117,12 @@ const char *kc_respond(const char *line, char *buf, int cap) {
         if (!strcmp(v, "resume"))          return "response=resume&result=success&firstreq=0";
         if (!strcmp(v, "pause"))           return "response=pause&result=success";
         if (!strcmp(v, "stopcatcher"))     return "response=stopcatcher&result=success";
+        /* amStorage(port 40114, FUN_0097b300) query。応答から check/format フィールドを読み storage SM を進める。
+           check/format=0＝チェック/フォーマット不要（storage 正常）。result=success 必須（amNet 系は非 success で再接続 loop）。 */
+        if (!strcmp(v, "query_storage_status"))
+            return "response=query_storage_status&result=success&check=0&format=0";
+        if (!strcmp(v, "query_storage_count"))
+            return "response=query_storage_count&result=success&count=0";
         return "code=0";
     }
     return "code=0";

@@ -10,12 +10,17 @@
 
 #pragma comment(lib, "ws2_32.lib")
 
-static const int PORTS[] = { 40100, 40102, 40104, 40106, 40110, 40111, 40113 };
+/* amNet/keychip/billing 各 mx サービスの loopback ポート。40114/30000 等 未 listen だと GAME SERVER 等が
+ * 接続拒否で status error(3) になるため網羅的に listen（実プロトコルは kc.exchange ログで判定）。 */
+static const int PORTS[] = { 40100, 40102, 40103, 40104, 40106, 40108, 40110, 40111, 40112, 40113, 40114, 40115, 30000 };
 
 static DWORD WINAPI client_thread(LPVOID arg) {
     SOCKET c = (SOCKET)(uintptr_t)arg;
     char in[1024], rbuf[512], pkt[600];
     int inlen = 0;
+    int lport = 0;                                          /* local(listen) ポート = どの mx サービスか */
+    { struct sockaddr_in la; int ll = sizeof la;
+      if (getsockname(c, (struct sockaddr *)&la, &ll) == 0) lport = ntohs(la.sin_port); }
     send(c, ">", 1, 0);
     for (;;) {
         char chunk[512];
@@ -34,6 +39,8 @@ static DWORD WINAPI client_thread(LPVOID arg) {
             memmove(in, nl + 1, rest > 0 ? rest : 0); inlen = rest > 0 ? rest : 0; in[inlen] = 0;
             if (line[0]) {
                 const char *body = kc_respond(line, rbuf, sizeof rbuf);
+                { char m[900]; snprintf(m, sizeof m, "{\"ev\":\"kc.exchange\",\"port\":%d,\"q\":\"%.300s\",\"r\":\"%.300s\"}", lport, line, body);
+                  host_log("info", m); }
                 int pn = snprintf(pkt, sizeof pkt, "%s\r\n>", body);
                 if (pn > 0) send(c, pkt, pn, 0);
             }
