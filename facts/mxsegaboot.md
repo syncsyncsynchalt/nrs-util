@@ -30,6 +30,16 @@ ATTRACT 起動する**。
   state5(EXTEND IMAGE)install 失敗時の終端表示。keychip 問題ではない。
 - ⚠️ **検証鉄則**: errNo=0 等のログだけでクリーン判断しない。必ず実写（統合 GUI のスクリーンショット等）で確認。
 
+- **各チェックの JSONL 観測 `boot.check`/`boot.state`（host gamehook `d_boot_sm`, `gamehook.c`）**: SM `0x89a010`(__cdecl, 末尾 RET)を
+  POST フックし state(mgr+4)/sub-index(mgr+0x14) 遷移を read-only 観測。前進=OK / →state9=NG(+errCode)。
+  `boot.state{from,to,state}` は**全遷移の生トレース**で画面にチェック行が出ない state（0=init/8=COMPLETE/10=done, エラー時9）も残す。
+  **state1(appdata-reload) は case0 からの fall-through** で 0→1→2 が同一呼出内に起き休止 state にならない＝観測不能（trace は `0→2`）。
+  ラベルは実文字列定数（state=`0xC811A0..`、CONNECTION sub=char* 配列 `0xCF5464[idx]`）を実行時読取。
+  結果 OK/NG は state 遷移方向、EXTEND IMAGE は gate `0x1601b23`、CONNECTION sub は getter 値(`deviceMgr+0x1d4+idx*4`, 2=OK/3=NG/0=NA/1=待機)。
+  実写と byte 一致で検証済（IC CARD/TOUCH/NETWORK/EXTEND=OK, AUTH=OK/UPLOAD=NG/GAMESERVER=NG/LOCAL=OK, P-ras=OK, boot.complete）。
+- **CONNECTION(state6) の sub-index は 1 始まり**（substate0 が `[mgr+0x14]=ESI=1` で初期化）: 配列 `0xCF5464[0]`="INITIALIZING"(P-ras 用・CONNECTION 未使用)、
+  `[1]`=ALL.NET AUTH / `[2]`=ALL.NET UPLOAD / `[3]`=ALL.NET GAME SERVER / `[4]`=LOCAL GAME SERVER。idx0 を解決扱いすると偽の "INITIALIZING" 行が出る（要 `idx>=1` ガード）。
+
 ---
 
 ## ★EXTEND IMAGE (state5) = ALL.Net 配信 install タスク → host gamehook で「導入済み」境界供給 [S]

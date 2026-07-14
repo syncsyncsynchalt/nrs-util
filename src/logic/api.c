@@ -1235,8 +1235,9 @@ static void on_sys_override(LogicState *st) {
     *p = (*p & ~3u) | (in.test ? 1u : 0u) | (in.service ? 2u : 0u);
     st->sys_tick++;
 
-    /* テストメニュー入口: 入口は TEST スイッチではなく scene 要求。scene_request_consume(0x6F0750)が要求 scene id
-       DAT_016B8B54 を読み ≠-1 なら生成→id を -1（ワンショット）。id=13 = テストモード容器 scene。standalone は
+    /* テストメニュー入口: 入口は TEST スイッチではなく scene 要求。要求 scene id グローバル DAT_016B8B54 の
+       consumer（read @0x6f0750。関数境界は Ghidra 未解析）が id≠-1 なら scene を生成し id を -1 に戻す（ワンショット）。
+       id=13 = テストモード容器 scene。standalone は
        通常の要求フラグ(DAT_016F5A9C)が立たないため、boot 完了後に id=13 を一度だけ書いて入場させる。
        TEST は保持しない（メニュー内ナビはエッジ駆動、保持すると即退出）。 */
     if (cfg && cfg->test_mode && !st->test_entered && st->sys_tick > 20) {

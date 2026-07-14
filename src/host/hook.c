@@ -148,12 +148,12 @@ int hooks_install(void) {
     if (MH_Initialize() != MH_OK) return -1;
     int e = 0;
     e |= hook(L"kernel32", "CreateFileW",     h_CreateFileW,     (void **)&o_CreateFileW);
-    e |= hook(L"kernel32", "CreateFileA",     h_CreateFileA,     (void **)&o_CreateFileA);  /* nrs は A 版で COM4 */
+    e |= hook(L"kernel32", "CreateFileA",     h_CreateFileA,     (void **)&o_CreateFileA);
     e |= hook(L"kernel32", "ReadFile",        h_ReadFile,        (void **)&o_ReadFile);
     e |= hook(L"kernel32", "WriteFile",       h_WriteFile,       (void **)&o_WriteFile);
     e |= hook(L"kernel32", "DeviceIoControl", h_DeviceIoControl, (void **)&o_DeviceIoControl);
     e |= hook(L"kernel32", "CloseHandle",     h_CloseHandle,     (void **)&o_CloseHandle);
-    e |= hook(L"kernel32", "SetFilePointer",  h_SetFilePointer,  (void **)&o_SetFilePointer);  /* mxsram 位置決め */
+    e |= hook(L"kernel32", "SetFilePointer",  h_SetFilePointer,  (void **)&o_SetFilePointer);
     /* COM 制御（native JVS 経路 amJvstThreadInit が要求。仮想 COM ハンドルへ TRUE 化） */
     e |= hook(L"kernel32", "GetCommState",      h_GetCommState,      (void **)&o_GetCommState);
     e |= hook(L"kernel32", "SetCommState",      h_SetCommState,      (void **)&o_SetCommState);

@@ -10,6 +10,9 @@ COM1 touch handshake 未完(touch.read=0 / touch.write=0 で state 0x32 固着 m
 2. TX フラッシュ `serial_tx_flush`(0x67C070, thread `serial_tx_thread` 0x67C1A0) は TX リングを **1B ずつ WriteFile**。`on_write_file` を 10B 一括前提で書くと n=1 で ack ゼロ。**バイト蓄積→同期ヘッダ始まりの固定長フレーム組立**(`TouchPanel.rx[]`/`rx_len`)必須。
 教訓: serial transport は RX=cbInQue ゲート / TX=バイトストリーム。JVS(master 駆動 1write=1frame)を流用不可。効かない時はまず touch.read/write の hex を見る。
 
+## [OPEN] attract ~235秒でシーン遷移中に nvoglv32(GPU)クラッシュ
+SERVER ロールで boot 完走→attract「画面をタッチしてください」到達後、**約235秒（~4分）で決定的にクラッシュ**（2 run 実測 uptime 235219ms / 236922ms で一致・capture 無関係）。attract は複数 demo シーンを巡回(sig fbf00530/12e78fc0/129c8e0/75c8710/d5312da0/ec69f6b0…)し、ある遷移で `nvoglv32.dll` が near-null(va=0x2D0)参照アクセス違反→NtTerminateProcess。crash bt 全フレーム nvoglv32(0x6d〜0x6e帯)＝GPU ドライバ内。`host.dll+D8BF/DAF2` は VEH ハンドラ(exitlog.c)で原因でない。次: どの scene 遷移(demo→gameplay プレビュー等)が落とすか sig で切り分け、その scene が要求する GL 資源/状態のエミュ欠落を特定。attract 巡回自体は 2分+ errors 0 で安定なので特定 scene 固有。
+
 ## [ANTI-PATTERN] loader dual-mode 化後の「クラッシュ」誤診
 `loader.exe <path>` は unknown verb で何も起動しない(2026-06-29 dual-mode 化: 引数なし=GUI / 引数=CLI verb)。正=`loader.exe start --wait=N --freeplay 0 --game-dir DIR`。nrs:0 を即 inject crash と帰属せず `nrsedge.log` 有無・loader stdout を先に見る。host.dll は loader cwd(nrs-util) と nrs cwd(bbs) 両方に配置。
 

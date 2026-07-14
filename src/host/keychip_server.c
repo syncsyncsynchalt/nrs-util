@@ -74,5 +74,5 @@ void keychip_server_start(void) {
     if (WSAStartup(MAKEWORD(2, 2), &w) != 0) { host_log("error", "{\"ev\":\"kc.wsa.fail\"}"); return; }
     for (size_t i = 0; i < sizeof PORTS / sizeof PORTS[0]; i++)
         CreateThread(0, 0, listen_thread, (LPVOID)(intptr_t)PORTS[i], 0, 0);
-    host_log("info", "{\"ev\":\"keychip.server.up\",\"ports\":\"40100..40113\"}");
+    host_log("info", "{\"ev\":\"keychip.server.up\",\"ports\":\"40100..40115,30000\"}");
 }

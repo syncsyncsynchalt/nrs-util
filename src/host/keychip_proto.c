@@ -117,6 +117,23 @@ const char *kc_respond(const char *line, char *buf, int cap) {
         if (!strcmp(v, "resume"))          return "response=resume&result=success&firstreq=0";
         if (!strcmp(v, "pause"))           return "response=pause&result=success";
         if (!strcmp(v, "stopcatcher"))     return "response=stopcatcher&result=success";
+        /* amGcatcher(配信 catcher, port 40110) SM: dispatcher amGcatcher_sm_dispatch(0x979200) が
+           verb で分岐（case1=startcatcher/2=stopcatcher/3=isupdate/4=reloadinfo）。startcatcher/
+           stopcatcher/reloadinfo は共通検証 amGcatcher_verb_result_check(0x978fe0) が response==verb
+           かつ result==success のとき 0（成功）を返す（追加フィールド無し）。汎用 code=0 応答は response 不一致で
+           負値→上位 SM が毎フレーム再送する無限 loop になる。 */
+        if (!strcmp(v, "reloadinfo"))      return "response=reloadinfo&result=success";
+        if (!strcmp(v, "startcatcher"))    return "response=startcatcher&result=success";
+        /* isupdate(case3, amGcatcher_isupdate_parse 0x979110): 共通検証後に incompatible(int)/
+           server(inet_addr)/4 スロット(originalf/originalb/patchf/patchb) を必須。incompatible/server
+           欠落は isupdate_parse 自身が -0x96。各スロットは amGcatcher_slot_status_parse(0x978e10) が
+           notavailable/available/needed/instant/erasable を 0..4 へ写像し、欠落/未知値で -0x96→loop。
+           standalone は全 notavailable(更新無し)＝game は download SM(setthread/readsegment 等)へ入らず
+           boot 継続。server は未使用だが inet_addr が INADDR_NONE を返さぬよう有効 IP を置く。 */
+        if (!strcmp(v, "isupdate"))
+            return "response=isupdate&result=success&incompatible=0&server=127.0.0.1"
+                   "&originalf=notavailable&originalb=notavailable"
+                   "&patchf=notavailable&patchb=notavailable";
         /* amStorage(port 40114, FUN_0097b300) query。応答から check/format フィールドを読み storage SM を進める。
            check/format=0＝チェック/フォーマット不要（storage 正常）。result=success 必須（amNet 系は非 success で再接続 loop）。 */
         if (!strcmp(v, "query_storage_status"))

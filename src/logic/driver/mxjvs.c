@@ -5,13 +5,14 @@
 #include <string.h>
 
 /* READ_ID(0x10) 応答。実機 JVS I/O は FTDI 837-15067 系（ftdibus.inf VID_0CA3 PID_0010..0015）。
- * nrs.exe は ID 文字列を参照しない（spec-check は feature 数のみ）ため SEGA 標準フォーマットの最良推定。 */
+ * spec-check は READ_ID 文字列を参照しない（非検査ゆえ内容は任意・SEGA 標準フォーマットに倣う。`facts/amjvs.md`）。 */
 static const char BOARD_ID[] =
     "SEGA ENTERPRISES,LTD.;I/O BD JVS;837-15067 ;Ver1.00;11/05";
-/* 版応答。nrs spec-check(FUN_0067afa0)が gate するのは cmd_ver≥0x13 のみ。JVS/COMM_VER は非検査。 */
-#define CMD_VER 0x13   /* nrs 要求 ≥0x13 */
-#define JVS_VER 0x20   /* JVS 規格 2.0（nrs 非検査）*/
-#define COMM_VER 0x10  /* nrs 非検査 */
+/* 版応答。spec-check(FUN_0067afa0, node_count==1)の受理ゲートは buttons≥14/analog≥2/gpio≥13/cmd_ver≥0x13 の
+ * 4 つ（GET_FEATURES 申告数＋CMD_VER）。JVS_VER/COMM_VER と READ_ID 文字列は非検査（`facts/amjvs.md`）。 */
+#define CMD_VER 0x13   /* spec-check 要求 ≥0x13 */
+#define JVS_VER 0x20   /* JVS 規格 2.0（spec-check 非検査）*/
+#define COMM_VER 0x10  /* spec-check 非検査 */
 
 void mxjvs_init(JvsBoard *b) {
     memset(b, 0, sizeof *b);

@@ -1,3 +1,3 @@
-/* CrackProof(Htsysm) ユーザーランド無力化。残存バイナリパッチの唯一領域（他は device emulation で無改変）。
- * TODO: Border Break で Htsysm の干渉範囲を確認し最小の残存パッチを置く。 */
-void crackproof_init(void) { /* TODO */ }
+/* CrackProof(Htsysm) は方針どおり残置（無改変）。実際の残存パッチ（self-shutdown/delete-dir 等）は patches.c。
+ * ここは Htsysm を最小無力化する必要が出た場合の予約枠で、現状は未使用の no-op。 */
+void crackproof_init(void) { /* no-op（予約） */ }

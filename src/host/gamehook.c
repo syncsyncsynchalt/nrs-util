@@ -231,6 +231,134 @@ static void __fastcall d_cardinfo_send(int *ctx, int edx) {
  * card_read_sm は CrackProof 保護領域。card 受理は hook/patch 不可。whitelist DATA 供給 or card UID 一致で
  * 対処すべき（facts/devices.md 参照）。 */
 
+/* ---- SYSTEM STARTUP 各チェックの JSONL 観測（READ-ONLY） --------------------------------
+ * amlib_init_sm_SYSTEM_STARTUP(FUN_0089a010, __cdecl(mgr)) を POST フックし、boot SM の
+ * state(mgr+4)/CONNECTION sub-index(mgr+0x14) の遷移を観測して各チェック結果をログ化する。
+ * SM 自身の判定をそのまま読むだけ（再導出しない）＝画面表示(FUN_004fe900/920)と同結果:
+ *   - check-state → 次 state = 合格(OK) / → state9 = 失敗(errCode ラッチ)。
+ *   - EXTEND IMAGE(5) は前進しても OK/NG が image-present gate(DAT_01601b23) 依存 → gate を読む。
+ *   - CONNECTION(6) の各 sub は getter が読む deviceMgr+0x1d4+idx*4（2=OK/3=NG/0=NA、1=待機は idx 不進で不出現）。
+ * ラベルはゲーム自身の文字列定数（state=0xC811A0.. / sub=char* 配列 0xCF5464[idx]）を実行時に読む。 */
+static void (__cdecl *o_boot_sm)(int mgr);
+static int g_bt_state = -1;     /* 直近観測の boot state（host shadow, 遷移検出用）*/
+static int g_bt_subidx = -1;    /* 直近観測の CONNECTION sub-index */
+
+static const char *bt_at(unsigned va) {   /* nrs.exe 内の VA を実行時ポインタへ */
+    return (const char *)((uintptr_t)GetModuleHandleW(NULL) + (va - IMAGE_BASE));
+}
+static const char *bt_state_label(int st) {   /* state → チェックラベル文字列定数（実写 "  CHECKING X ... "）*/
+    unsigned va;
+    switch (st) {
+    case 2: va = 0xC811A0; break;  /* CHECKING IC CARD R/W */
+    case 3: va = 0xC811BC; break;  /* CHECKING TOUCH PANEL */
+    case 4: va = 0xC811D8; break;  /* CHECKING NETWORK */
+    case 5: va = 0xC811F0; break;  /* CHECKING EXTEND IMAGE */
+    case 6: va = 0xC81258; break;  /* CHECKING CONNECTION */
+    case 7: va = 0xC81280; break;  /* INITIALIZING P-ras */
+    default: return 0;
+    }
+    return bt_at(va);
+}
+/* 全 state の記述名（boot.state トレース用）。2-8 は実写ラベル由来、0/1/9/10 は RE 由来の記述子。
+ * これで画面にチェック行が出ない state（0=init/1=appdata-reload/8=COMPLETE/10=done）も可視化する。 */
+static const char *bt_state_name(int st) {
+    switch (st) {
+    case 0:  return "init";            /* 入口（timer<=0 で即 state1 へ）*/
+    case 1:  return "appdata-reload";  /* image-present gate 時 extended リソース再ロード（case1）*/
+    case 2:  return "IC CARD R/W";
+    case 3:  return "TOUCH PANEL";
+    case 4:  return "NETWORK";
+    case 5:  return "EXTEND IMAGE";
+    case 6:  return "CONNECTION";
+    case 7:  return "P-ras";
+    case 8:  return "COMPLETE";        /* "COMPLETE." 表示 → state10 へ */
+    case 9:  return "ERROR";           /* errCode ラッチ → error scene */
+    case 10: return "done";            /* SYSTEM STARTUP 完了 → ATTRACT */
+    default: return "?";
+    }
+}
+/* ラベルの前後空白と末尾 " ... " を落として dst へ（JSON 値用・非 ASCII は '.'）。*/
+static void bt_clean_label(const char *src, char *dst, size_t cap) {
+    size_t len = 0, n = 0;
+    if (!src) { dst[0] = 0; return; }
+    while (*src == ' ') src++;
+    while (src[len]) len++;
+    while (len && (src[len-1] == ' ' || src[len-1] == '.')) len--;
+    for (size_t i = 0; i < len && n + 1 < cap; i++) {
+        char c = src[i];
+        dst[n++] = (c >= 0x20 && c < 0x7f) ? c : '.';
+    }
+    dst[n] = 0;
+}
+static void bt_emit(int state, int idx, const char *label, const char *result) {
+    char name[64]; bt_clean_label(label, name, sizeof name);
+    char m[192];
+    if (idx >= 0)
+        wsprintfA(m, "{\"ev\":\"boot.check\",\"state\":%d,\"idx\":%d,\"check\":\"%s\",\"result\":\"%s\"}",
+                  state, idx, name, result);
+    else
+        wsprintfA(m, "{\"ev\":\"boot.check\",\"state\":%d,\"check\":\"%s\",\"result\":\"%s\"}",
+                  state, name, result);
+    host_log("info", m);
+}
+
+static void __cdecl d_boot_sm(int mgr) {
+    o_boot_sm(mgr);                 /* orig 実行後に読む＝遷移が state に焼かれた状態を観測 */
+    if (!mgr) return;
+    int st  = *(int *)(mgr + 4);
+    int sub = *(int *)(mgr + 0x14);
+
+    /* CONNECTION(6) sub-check の解決: state6 のまま idx が進んだ = 直前 idx が確定 → getter 値で結果。
+     * sub-index は state6 substate0 が ESI=1 で初期化＝1 始まり（配列 0xCF5464[0]="INITIALIZING" は
+     * CONNECTION 未使用、[1]=AUTH/[2]=UPLOAD/[3]=GAMESERVER/[4]=LOCAL）。∴初期化 bump(0→1) は解決でない。 */
+    if (g_bt_state == 6 && st == 6 && g_bt_subidx >= 1 && sub != g_bt_subidx) {
+        int idx = g_bt_subidx;
+        unsigned (*devmgr_ptr)(void) = (unsigned (*)(void))bt_at(0x72B450); /* amlib_device_manager_ptr */
+        uintptr_t dm = (uintptr_t)devmgr_ptr();
+        const char *lbl = *(const char **)(bt_at(0xCF5464) + idx * 4);
+        if (dm && lbl && *lbl) {   /* 空ラベルの余剰スロット(idx4 等)は画面同様スキップ */
+            int status = *(int *)(dm + 0x1d4 + idx * 4);
+            const char *res = status == 2 ? "OK" : status == 3 ? "NG" : status == 0 ? "NA" : "?";
+            bt_emit(6, idx, lbl, res);
+        }
+    }
+
+    /* メイン state 遷移: 直前 check-state を解決してログ（前進=合格 / state9=失敗）。*/
+    if (st != g_bt_state) {
+        int prev = g_bt_state;
+        /* 全遷移の生トレース: 画面にチェック行が出ない state（0/1/8/10・エラー時9）も漏れなく残す。
+         * from=-1 は host 注入後の初回観測点（それ以前の遷移は観測不能）。*/
+        char m0[128];
+        wsprintfA(m0, "{\"ev\":\"boot.state\",\"from\":%d,\"to\":%d,\"state\":\"%s\"}",
+                  prev, st, bt_state_name(st));
+        host_log("info", m0);
+        if (prev >= 2 && prev <= 7) {
+            const char *lbl = bt_state_label(prev);
+            if (st == 9) {                       /* → ERROR: 直前チェック失敗（errCode ラッチ）*/
+                int ec = *(int *)bt_at(0x16F5AF0);   /* amlib_master_errCode */
+                char m[192], name[64]; bt_clean_label(lbl, name, sizeof name);
+                wsprintfA(m, "{\"ev\":\"boot.check\",\"state\":%d,\"check\":\"%s\",\"result\":\"NG\",\"errCode\":%d}",
+                          prev, name, ec);
+                host_log("warn", m);
+            } else if (prev == 5) {              /* EXTEND IMAGE: image-present gate で OK/NG */
+                bt_emit(5, -1, lbl, *(unsigned char *)bt_at(0x1601B23) ? "OK" : "NG");
+            } else if (prev != 6) {              /* IC CARD/TOUCH/NETWORK/P-ras: 前進=OK（CONNECTION は sub で既出）*/
+                bt_emit(prev, -1, lbl, "OK");
+            }
+        }
+        if (st == 6 && prev != 6) {              /* CONNECTION 見出し */
+            char name[64]; bt_clean_label(bt_state_label(6), name, sizeof name);
+            char m[128];
+            wsprintfA(m, "{\"ev\":\"boot.check\",\"state\":6,\"check\":\"%s\"}", name);
+            host_log("info", m);
+        }
+        if (st == 10)                            /* 全チェック完了 → ATTRACT へ */
+            host_log("info", "{\"ev\":\"boot.complete\"}");
+        g_bt_state = st;
+    }
+    g_bt_subidx = sub;
+}
+
 static int gh(unsigned va, void *det, void **orig) {
     void *a = (void *)((uintptr_t)GetModuleHandleW(NULL) + (va - IMAGE_BASE));
     return (MH_CreateHook(a, det, orig) == MH_OK && MH_EnableHook(a) == MH_OK) ? 0 : -1;
@@ -254,5 +382,6 @@ int gamehooks_install(void) {   /* MH_Initialize は hooks_install で実施済 
     e |= gh(0x89DAC0, (void *)d_scene_dispatch, (void **)&o_scene_dispatch); /* scene dispatch の実時間（内訳）*/
     e |= gh(0x712710, (void *)d_recv_parse,     (void **)&o_recv_parse);     /* ALL.Net NUPL 応答パーサ診断（init 応答拒否 d8→-1 の切り分け・READ ONLY）*/
     e |= gh(0x7203E0, (void *)d_cardinfo_send,  (void **)&o_cardinfo_send);  /* cardinfo 送信ビルダ診断（card-auth 到達＝cardinfo 発火の切り分け・READ ONLY）*/
+    e |= gh(0x89A010, (void *)d_boot_sm,        (void **)&o_boot_sm);        /* SYSTEM STARTUP SM 観測: 各チェック結果を boot.check として JSONL 化（READ ONLY）*/
     return e;
 }
