@@ -24,9 +24,13 @@ loader.exe stop                # nrs.exe を taskkill
 loader.exe restart --wait      # stop→start
 ```
 
+- **観測窓(ログ GUI)は help/stop 以外の全動詞で必ず出す**（不在なら spawn・既存は再利用/前面化）。ヘッドレスモードは無い。polling(status/wait/logs)中に窓が閉じても次の動詞で復活。
+- **単一インスタンス／ライフサイクル保証**（名前付き mutex + Job）: GUI は 1 つだけ（`nrs_edge_gui_singleton`）／`nrs.exe` も 1 つだけ（launch を `nrs_edge_launch_lock` で直列化・start 連射は `already_running`）／**GUI を閉じる/落ちると nrs も終了**（GUI 保有の `KILL_ON_JOB_CLOSE` Job に nrs を登録。WM_DESTROY で即 kill、Job が backstop）。CLI 動詞プロセスは並行実行可（status polling を妨げない）。
 - 対象 exe の既定は `C:\src\bbs\nrs.exe`（env `NRS_GAME_DIR` か `--game-dir DIR` で上書き）。
-- `start` は host.dll/logic.dll をゲーム dir へ自動コピー → `nrsedge.log`/`nrsedge.status.json` を初期化 →
+- `start` は host.dll/logic.dll をゲーム dir へ自動コピー → **起動ごとの専用ログ** `C:\src\bbs\logs\nrsedge-<時刻>.log` を作り
+  host へ env `NRS_LOG_FILE` で渡す＋直近パスを `nrsedge.logpath` に記録 → `nrsedge.status.json` を初期化 →
   SUSPENDED 起動 → 注入 → resume（GUI ▶起動と同一の `core_launch`）。既に nrs.exe が走っていれば二重起動を避け `already_running` を返す。
+  `logs`/`wait` は `nrsedge.logpath` 経由で最新起動のログを対象にする（別プロセスでも一貫）。GUI ログ窓は ▶起動ごとに自動クリア＝前回起動分を混ぜない。
 - **集約状態 `C:\src\bbs\nrsedge.status.json`** を 1 ショット読めば boot phase / errors / patches / 各 subsys ready が判る
   （ログ全行パース不要）。host が `host_log` の全イベントを観測し原子的に更新する（`src/host/status.c`）。
   `start --wait` / `status` はこのファイルを polling/読取して判定する。

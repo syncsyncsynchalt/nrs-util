@@ -41,6 +41,7 @@ static COLORREF level_color(Level l){
 static wchar_t G_GAME_DIR[MAX_PATH], G_GAME_EXE[MAX_PATH];
 static wchar_t G_HOST_DLL[MAX_PATH], G_LOGIC_DLL[MAX_PATH], G_CFG[MAX_PATH], G_LOG[MAX_PATH];
 static wchar_t G_STATUS[MAX_PATH];   /* nrsedge.status.json（host が集約状態を書く。CLI が 1 ショット読取） */
+static wchar_t G_LOGPTR[MAX_PATH];   /* nrsedge.logpath（直近 ▶起動のログ絶対パス。別プロセス CLI が logs/wait で読む）*/
 static wchar_t G_CARDCTL[MAX_PATH];  /* nrsedge.card.json（カードの抜き差し指示。loader が書き logic が毎フレーム読む）*/
 static wchar_t G_CARDS_DIR[MAX_PATH];/* カード .bin の既定保存ディレクトリ（<game>\cards）*/
 
@@ -89,6 +90,7 @@ enum {
 #define WM_APP_STATUS  (WM_APP+2)   /* wParam = COLORREF, lParam = UTF-8 char* (要 free) */
 #define WM_APP_RUNSTATE (WM_APP+3)  /* wParam = 0/1 → 起動ボタンの running 状態を同期 */
 #define WM_APP_SYNCSCROLL (WM_APP+4) /* g_log スクロール後に追従ON/OFFを再判定（遅延実行） */
+#define WM_APP_LOGCLEAR (WM_APP+5)  /* 新セッション（▶起動）でログ窓をクリア（前回起動分を消す）*/
 
 /* ---- グローバル UI ハンドル ---- */
 static HWND g_main, g_tab, g_status, g_log, g_logstatus, g_resume;
@@ -105,6 +107,16 @@ static int  g_running = 0;         /* ▶起動ボタンの状態（0=待機/起
 static int  g_capture_act = -1;   /* キャプチャ中アクション index (-1=非捕捉) */
 static int  g_prev_down[256];     /* キャプチャ用: 直前フレームの VK 押下状態 */
 static COLORREF g_status_color;
+static volatile LONG g_log_gen = 0;   /* ▶起動ごとに +1。tail が検知して表示クリア＋pos リセット */
+
+/* 単一インスタンス／ライフサイクル用の名前付きオブジェクト（同一セッション内で共有＝Local\）。
+ * NRS_MUTEX_GUI : GUI は 1 つだけ（wWinMain が保持）。CLI 動詞プロセスは対象外。
+ * NRS_MUTEX_RUN : nrs 起動の直列化（存在チェック＋launch を atomic 化＝二重起動防止）。
+ * NRS_JOB_NAME  : GUI が保有する KILL_ON_JOB_CLOSE ジョブ。nrs をここへ入れ、GUI 消滅で nrs も道連れに。 */
+#define NRS_MUTEX_GUI  L"Local\\nrs_edge_gui_singleton"
+#define NRS_MUTEX_RUN  L"Local\\nrs_edge_launch_lock"
+#define NRS_JOB_NAME   L"Local\\nrs_edge_job"
+static HANDLE g_job = NULL;    /* GUI プロセスが保有（core_launch が nrs を assign）。CLI では NULL。 */
 
 /* ---- ログエントリ蓄積（フィルタ再描画のため保持） ---- */
 typedef struct { char ts[16]; char src[64]; Level lvl; char *msg; } Entry;
@@ -145,7 +157,12 @@ static void resolve_paths(void){
     wcscpy(G_GAME_DIR, gdir);
     _snwprintf(G_GAME_EXE,  MAX_PATH, L"%s\\nrs.exe", gdir);
     _snwprintf(G_CFG,      MAX_PATH, L"%s\\nrsedge.cfg", gdir);
-    _snwprintf(G_LOG,      MAX_PATH, L"%s\\nrsedge.log", gdir);
+    _snwprintf(G_LOG,      MAX_PATH, L"%s\\nrsedge.log", gdir);   /* 既定（起動前・pointer 無時）*/
+    _snwprintf(G_LOGPTR,   MAX_PATH, L"%s\\nrsedge.logpath", gdir);
+    /* 直近 ▶起動が記録した per-launch ログを指す。別プロセス CLI(logs/wait) がこれ経由で最新を読む。
+     * GUI は起動後 core_launch が G_LOG を上書きするので初期値がやや古くても実害なし。 */
+    FILE *pf=_wfopen(G_LOGPTR, L"r");
+    if(pf){ wchar_t ln[MAX_PATH]; if(fgetws(ln,MAX_PATH,pf)){ ln[wcscspn(ln,L"\r\n")]=0; if(ln[0]) wcscpy(G_LOG,ln); } fclose(pf); }
     _snwprintf(G_STATUS,   MAX_PATH, L"%s\\nrsedge.status.json", gdir);
     _snwprintf(G_CARDCTL,  MAX_PATH, L"%s\\nrsedge.card.json", gdir);
     _snwprintf(G_CARDS_DIR,MAX_PATH, L"%s\\cards", gdir);
@@ -487,16 +504,38 @@ static void emit(const char *ev, const char *msg, const char *lvl){
 static DWORD WINAPI tail_thread(LPVOID arg){
     (void)arg;
     LONGLONG pos=0; int first=1;
+    /* CLI start が spawn した GUI: per-launch ログを頭から表示（初回 EOF スキップだとブート冒頭が消える） */
+    { wchar_t fh[8]; if(GetEnvironmentVariableW(L"NRS_TAIL_FROM_HEAD",fh,8)>0 && fh[0]==L'1') first=0; }
+    LONG seen_gen=g_log_gen;
+    wchar_t cur[MAX_PATH]; wcscpy(cur, G_LOG);   /* 追尾中のファイルを snapshot（G_LOG の torn read 回避）*/
     char carry[2048]; int carry_n=0;
     for(;;){
-        HANDLE h=CreateFileW(G_LOG, GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
+        /* ▶起動で per-launch ログへ切替。gen bump は G_LOG 書込み後（Interlocked のバリア）なので
+         * この時点で G_LOG は完全。表示をクリアし新ファイルを頭から読む（前回起動分を窓から消す）。 */
+        LONG gen=g_log_gen;
+        if(gen!=seen_gen){
+            seen_gen=gen; wcscpy(cur, G_LOG);
+            pos=0; carry_n=0; first=0;
+            PostMessageW(g_main, WM_APP_LOGCLEAR, 0, 0);
+        }
+        /* 別プロセス（CLI start）の新規起動へ追従: pointer file が現追尾先と違う実在ファイルを
+         * 指したら切替（クリア＋頭から）。自 GUI の ▶起動は上の gen 経路が先に処理し pointer==cur になる。 */
+        { FILE *pf=_wfopen(G_LOGPTR, L"r");
+          if(pf){ wchar_t pl[MAX_PATH];
+              if(fgetws(pl,MAX_PATH,pf)){ pl[wcscspn(pl,L"\r\n")]=0;
+                  if(pl[0] && _wcsicmp(pl,cur)!=0 && GetFileAttributesW(pl)!=INVALID_FILE_ATTRIBUTES){
+                      wcscpy(cur,pl); pos=0; carry_n=0; first=0;
+                      PostMessageW(g_main, WM_APP_LOGCLEAR, 0, 0);
+                  } }
+              fclose(pf); } }
+        HANDLE h=CreateFileW(cur, GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
                              NULL, OPEN_EXISTING, 0, NULL);
         if(h!=INVALID_HANDLE_VALUE){
             LARGE_INTEGER sz; GetFileSizeEx(h,&sz);
-            /* 初回は既存分を読み飛ばし即起動（前回ログを画面へ流し込まない＝高速・非破壊）。
-             * 以後 ▶起動の truncate で sz<pos になれば pos=0 にリセットし新セッションを頭から表示。 */
+            /* 初回(GUI 起動直後・pointer 由来の旧ログ)は既存分を読み飛ばし即起動＝前回ログを流し込まない。
+             * 新セッションでは gen 検知側で first=0/pos=0 済みなので頭から表示。 */
             if(first){ pos=sz.QuadPart; first=0; }
-            if(sz.QuadPart < pos){ pos=0; carry_n=0; }   /* ローテーション/truncate */
+            if(sz.QuadPart < pos){ pos=0; carry_n=0; }   /* truncate 保険 */
             LARGE_INTEGER mv; mv.QuadPart=pos; SetFilePointerEx(h,mv,NULL,FILE_BEGIN);
             char buf[8192]; DWORD rd;
             while(ReadFile(h,buf,sizeof buf,&rd,NULL) && rd>0){
@@ -556,10 +595,22 @@ static void core_launch(LaunchResult *r){
     wchar_t hostdll[MAX_PATH], logicdll[MAX_PATH];
     _snwprintf(hostdll, MAX_PATH, L"%s\\host.dll",  G_GAME_DIR); CopyFileW(G_HOST_DLL, hostdll, FALSE);
     _snwprintf(logicdll,MAX_PATH, L"%s\\logic.dll", G_GAME_DIR); CopyFileW(G_LOGIC_DLL,logicdll,FALSE);
-    /* nrsedge.log を truncate（新規セッション）。status.json も消し前回状態の誤読を防ぐ。 */
+
+    /* 起動ごとに専用ログファイルを作る（前回起動分と混ざらない）。<game>\logs\ に時刻名で置く。
+     * ミリ秒まで含め restart 連打でも衝突しない。 */
+    wchar_t ldir[MAX_PATH]; _snwprintf(ldir,MAX_PATH,L"%s\\logs",G_GAME_DIR); CreateDirectoryW(ldir,NULL);
+    SYSTEMTIME t; GetLocalTime(&t);
+    _snwprintf(G_LOG,MAX_PATH,L"%s\\nrsedge-%04d%02d%02d-%02d%02d%02d-%03d.log",
+               ldir,t.wYear,t.wMonth,t.wDay,t.wHour,t.wMinute,t.wSecond,t.wMilliseconds);
+    /* host(注入先の子プロセス)へ同じパスを env で渡す＝子は loader の環境を継承。log.c が NRS_LOG_FILE を読む。 */
+    SetEnvironmentVariableW(L"NRS_LOG_FILE", G_LOG);
+    /* 別プロセスの CLI(logs/wait) が直近ログを見つけられるよう pointer file に絶対パスを記録。 */
+    FILE *pf=_wfopen(G_LOGPTR,L"w"); if(pf){ fputws(G_LOG,pf); fclose(pf); }
+    /* 空ファイルを用意（tail が OPEN_EXISTING で即開ける）。status.json も消し前回状態の誤読を防ぐ。 */
     HANDLE h=CreateFileW(G_LOG,GENERIC_WRITE,FILE_SHARE_READ|FILE_SHARE_WRITE,NULL,CREATE_ALWAYS,0,NULL);
     if(h!=INVALID_HANDLE_VALUE) CloseHandle(h);
     DeleteFileW(G_STATUS);
+    InterlockedIncrement(&g_log_gen);   /* GUI tail に新セッションを通知（表示クリア＋pos リセット）*/
 
     STARTUPINFOW si; ZeroMemory(&si,sizeof si); si.cb=sizeof si;
     PROCESS_INFORMATION pi; ZeroMemory(&pi,sizeof pi);
@@ -576,6 +627,12 @@ static void core_launch(LaunchResult *r){
         CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
         return;
     }
+    /* nrs を GUI 保有の KILL_ON_JOB_CLOSE ジョブへ登録（GUI 消滅で nrs も終了）。resume 前に実施。
+     * GUI モード(▶)なら自プロセス保有の g_job、CLI なら名前で開く。失敗しても致命ではない（未管理で走るだけ）。 */
+    { HANDLE jb=g_job; int owned=0;
+      if(!jb){ jb=OpenJobObjectW(JOB_OBJECT_ALL_ACCESS, FALSE, NRS_JOB_NAME); owned=1; }
+      if(jb){ AssignProcessToJobObject(jb, pi.hProcess); if(owned) CloseHandle(jb); } }
+
     ResumeThread(pi.hThread);              /* フック設置済 → ゲーム本体を走らせる */
     r->pid = pi.dwProcessId; r->ok = 1;
     CloseHandle(pi.hThread); CloseHandle(pi.hProcess);  /* プロセスは走り続ける */
@@ -1151,6 +1208,9 @@ static LRESULT CALLBACK WndProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp){
     case WM_APP_SYNCSCROLL:
         sync_autoscroll_to_view();   /* g_log スクロール後の追従ON/OFF再判定（スクロール情報更新後） */
         return 0;
+    case WM_APP_LOGCLEAR:
+        log_clear();   /* 新セッション: 蓄積エントリ(g_ent)と richedit を空にし前回起動分を消す */
+        return 0;
     case WM_APP_STATUS: {
         g_status_color=(COLORREF)wp; char *t=(char*)lp;
         if(t){ wchar_t *w=u8tow(t); SetWindowTextW(g_status,w); free(w); free(t); }
@@ -1162,7 +1222,9 @@ static LRESULT CALLBACK WndProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp){
         if(wp==1){ poll_keys(); }
         return 0;
 
-    case WM_DESTROY: PostQuitMessage(0); return 0;
+    case WM_DESTROY:
+        core_stop();               /* loader(GUI) 終了 → nrs も終了（clean close の即時 kill。Job が backstop）*/
+        PostQuitMessage(0); return 0;
     }
     return DefWindowProcW(hw,msg,wp,lp);
 }
@@ -1273,6 +1335,45 @@ static const char* subsys_of(const char *ev){
 
 /* ---- verbs ---- */
 
+/* 観測窓（ログ GUI）の存在を保証する。ヘッドレス（GUI 無し）モードは無い＝help/stop 以外の全 CLI 動詞で呼ぶ。
+ * これで start だけでなく status/wait/logs の polling 中に窓が閉じても即復活する（「たまに出ない」の主因を封じる）。
+ * 既存 GUI があれば再利用（最小化なら復帰、raise 時のみ前面へ＝polling で毎回 yank しない）、無ければ自 exe を
+ * 無引数（=GUI モード）で spawn。spawn は DETACHED_PROCESS|CREATE_BREAKAWAY_FROM_JOB で親コマンドの
+ * Job/コンソールから切り離し、loader CLI が即 return しても GUI が道連れで死なないようにする
+ * （Job が breakaway 非許可なら flag を外して再試行）。既存 GUI は tail_thread の pointer 監視が
+ * 新 per-launch ログへ自動追従するので二重起動しない。NRS_TAIL_FROM_HEAD=1 を子へ継承させ頭から表示。 */
+static void cli_ensure_gui(int raise){
+    HWND hw = FindWindowW(L"nrsEdgePanel", NULL);
+    if(hw){                                          /* 既存窓を再利用（存在保証） */
+        if(IsIconic(hw)) ShowWindow(hw, SW_RESTORE);
+        if(raise){                                   /* start/restart のみ前面へ。status/logs polling では上げない */
+            SetWindowPos(hw, HWND_TOPMOST,   0,0,0,0, SWP_NOMOVE|SWP_NOSIZE);
+            SetWindowPos(hw, HWND_NOTOPMOST, 0,0,0,0, SWP_NOMOVE|SWP_NOSIZE);
+        }
+        return;
+    }
+    wchar_t exe[MAX_PATH]; GetModuleFileNameW(NULL, exe, MAX_PATH);
+    SetEnvironmentVariableW(L"NRS_TAIL_FROM_HEAD", L"1");
+    STARTUPINFOW si; ZeroMemory(&si,sizeof si); si.cb=sizeof si;
+    PROCESS_INFORMATION pi; ZeroMemory(&pi,sizeof pi);
+    DWORD flags = DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB;
+    BOOL ok = CreateProcessW(exe, NULL, NULL, NULL, FALSE, flags, NULL, NULL, &si, &pi);
+    if(!ok) ok = CreateProcessW(exe, NULL, NULL, NULL, FALSE, DETACHED_PROCESS, NULL, NULL, &si, &pi);
+    if(ok){ CloseHandle(pi.hThread); CloseHandle(pi.hProcess); }
+    SetEnvironmentVariableW(L"NRS_TAIL_FROM_HEAD", NULL);
+}
+
+/* GUI（＝Job owner）が起きて NRS_JOB_NAME を作るまで待つ。既存 GUI 再利用なら即 return。 */
+static int wait_for_job(DWORD ms){
+    DWORD t0=GetTickCount();
+    for(;;){
+        HANDLE j=OpenJobObjectW(JOB_OBJECT_QUERY, FALSE, NRS_JOB_NAME);
+        if(j){ CloseHandle(j); return 1; }
+        if(GetTickCount()-t0 > ms) return 0;
+        Sleep(50);
+    }
+}
+
 static int cmd_start(int argc, char **argv){
     const char *gd=arg_val(argc,argv,"--game-dir");
     if(gd && gd[0]){ wchar_t *w=u8tow(gd); SetEnvironmentVariableW(L"NRS_GAME_DIR",w); free(w); resolve_paths(); }
@@ -1280,9 +1381,21 @@ static int cmd_start(int argc, char **argv){
     const char *tm=arg_val(argc,argv,"--test");     if(tm&&tm[0]) g_test=atoi(tm);
     write_cfg();                                     /* host が attach 時に読む */
 
-    if(proc_running(L"nrs.exe")){ outf("{\"result\":\"already_running\"}\n"); return 0; }
+    /* nrs 二重起動防止: 存在チェック＋launch を launch mutex で直列化（start 連射の競合を封じる）。 */
+    HANDLE runlock = CreateMutexW(NULL, FALSE, NRS_MUTEX_RUN);
+    if(runlock) WaitForSingleObject(runlock, 10000);
+
+    if(proc_running(L"nrs.exe")){
+        if(runlock){ ReleaseMutex(runlock); CloseHandle(runlock); }
+        cli_ensure_gui(1); outf("{\"result\":\"already_running\"}\n"); return 0;
+    }
+
+    /* 観測窓（Job owner）を先に用意 → Job 生成を待つ → nrs 起動時に Job へ登録できるようにする。 */
+    cli_ensure_gui(1);
+    wait_for_job(3000);
 
     LaunchResult r; core_launch(&r);
+    if(runlock){ ReleaseMutex(runlock); CloseHandle(runlock); }   /* nrs 登録済＝以後の start は proc_running で弾かれる */
     if(!r.ok){ outf("{\"result\":\"launch_failed\",\"error\":\"%s\"}\n", r.err); return 3; }
 
     const char *wv=arg_val(argc,argv,"--wait");
@@ -1371,7 +1484,8 @@ static void print_help(void){
     out(
       "nrs-edge loader — headless control (dual-mode; 引数無し=GUI)\n"
       "  loader.exe start [--wait[=SEC]] [--freeplay 0|1] [--test 0|1] [--game-dir DIR]\n"
-      "      起動+注入。--wait で status.json を ready/exited まで待つ。\n"
+      "      起動+注入。ログ窓(GUI)を必ず表示（不在なら spawn・既存は前面へ復帰し自動追従）。\n"
+      "      --wait で status.json を ready/exited まで待つ。\n"
       "      exit: 0=ready 2=timeout 3=launch失敗 4=早期exit\n"
       "  loader.exe stop                       nrs.exe を taskkill\n"
       "  loader.exe restart [--wait[=SEC]]     stop→start\n"
@@ -1392,13 +1506,18 @@ static int cli_main(void){
 
     const char *verb=argv[1];
     int rc=0;
+    /* ヘッドレス廃止: help/stop 以外の全動詞で観測窓の存在を保証（不在なら spawn）。
+     * これで start だけでなく status/wait/logs を polling する間に窓が閉じても即復活する
+     * （＝「たまに出ない」の主因を封じる）。start/restart は cmd_start 内で raise=1 で前面化。 */
+    int is_help = !strcmp(verb,"help")||!strcmp(verb,"--help")||!strcmp(verb,"-h");
+    if(!is_help && strcmp(verb,"stop")!=0) cli_ensure_gui(0);
     if      (!strcmp(verb,"start"))   rc=cmd_start(argc,argv);
     else if (!strcmp(verb,"stop"))    rc=cmd_stop(argc,argv);
     else if (!strcmp(verb,"restart")){ core_stop(); Sleep(600); rc=cmd_start(argc,argv); }
     else if (!strcmp(verb,"status"))  rc=cmd_status(argc,argv);
     else if (!strcmp(verb,"wait"))    rc=cmd_wait(argc,argv);
     else if (!strcmp(verb,"logs"))    rc=cmd_logs(argc,argv);
-    else if (!strcmp(verb,"help")||!strcmp(verb,"--help")||!strcmp(verb,"-h")){ print_help(); }
+    else if (is_help){ print_help(); }
     else { outf("unknown verb: %s\n", verb); print_help(); rc=64; }
 
     for(int i=0;i<argc;i++) free(argv[i]);
@@ -1411,6 +1530,26 @@ static int cli_main(void){
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmd, int show){
     (void)hPrev;(void)cmd;(void)show;
     if(__argc>1) return cli_main();                /* 引数あり=ヘッドレス CLI（GUI を作らない） */
+
+    /* GUI 二重起動禁止: 名前付き mutex。既に GUI が居れば前面化して即終了（窓は 1 つに保つ）。
+     * CLI 動詞プロセスはこの経路を通らないので status polling 等の並行実行は妨げない。 */
+    HANDLE gui_mtx = CreateMutexW(NULL, TRUE, NRS_MUTEX_GUI);
+    if(gui_mtx && GetLastError()==ERROR_ALREADY_EXISTS){
+        HWND hw=FindWindowW(L"nrsEdgePanel", NULL);
+        if(hw){ if(IsIconic(hw)) ShowWindow(hw, SW_RESTORE); SetForegroundWindow(hw); }
+        CloseHandle(gui_mtx);
+        return 0;
+    }
+    /* nrs ライフサイクル用 Job: この GUI が保有し KILL_ON_JOB_CLOSE。core_launch が nrs を assign し、
+     * GUI が終了/クラッシュすると OS が Job を閉じて nrs も終了させる（loader 終了→nrs 終了）。
+     * ハンドルはプロセス寿命まで保持（明示 close しない＝プロセス終了時に OS が閉じる）。 */
+    g_job = CreateJobObjectW(NULL, NRS_JOB_NAME);
+    if(g_job){
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION jel; ZeroMemory(&jel,sizeof jel);
+        jel.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        SetInformationJobObject(g_job, JobObjectExtendedLimitInformation, &jel, sizeof jel);
+    }
+
     resolve_paths();
     load_cfg();
     LoadLibraryW(L"Msftedit.dll");                 /* RICHEDIT50W を提供 */
