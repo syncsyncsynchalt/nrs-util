@@ -532,12 +532,20 @@ static int build_response_body(const char *path, const char *body, int blen, cha
     *want_pragma = 0;
     /* --- PowerOn: alAbEx auth を genuine 成立（stat=1 + uri=。平文・非エンコード）。uri=ゲームバックエンド URL。 --- */
     if (ci_find(path, "PowerOn")) {
+        /* year..second = 実機 ALL.Net サーバが返す「現在時刻」。ゲームはこれを NUPL セッション時計の基準にする。
+         * これが db_start_time(00:00) より後でないと NUPL の time-window gate(nupl_session_time_window_gate 0x76de00)が
+         * (db_start - current)分 >= 0 で session を待機させ、attend が最大 60s 遅延する（init→attend gap の真因）。
+         * 実時刻を返せば current > db_start(00:00) で gate は即 proceed → attend 即送信 → phase3 到達で UPLOAD ready。 */
+        SYSTEMTIME st; GetLocalTime(&st);
+        /* time-window gate は分単位で (db_start{00:00} - current) を見る。current==00:00 ちょうど（真夜中の
+         * 最初の1分）だと差=0 で待機に落ちるため、その 1 分だけ 00:01 に丸める（他時刻は実時刻のまま）。 */
+        if (st.wHour == 0 && st.wMinute == 0) st.wMinute = 1;
         int n = _snprintf(out, cap,
             "stat=1&uri=http://%s/sys/servlet/&host=%s&"
             "region0=1&region_name0=JAPAN&region_name1=&region_name2=&region_name3=&"
             "place_id=1234&name=NRSEDGE&nickname=NRSEDGE&country=JPN&"
-            "year=2026&month=7&day=2&hour=0&minute=0&second=0&setting=&res_class=PowerOnResponseVer2&",
-            g_lan_ip, g_lan_ip);
+            "year=%d&month=%d&day=%d&hour=%d&minute=%d&second=%d&setting=&res_class=PowerOnResponseVer2&",
+            g_lan_ip, g_lan_ip, st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
         return n > 0 ? n : 0;
     }
     /* --- DownloadOrder: stat=1 + uri=（平文・非エンコード）。 --- */
