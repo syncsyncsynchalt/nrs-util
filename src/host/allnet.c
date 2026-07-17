@@ -11,6 +11,8 @@
 
 #define ALLNET_PORT 40080
 #define LFS_TCP_PORT 40130
+#define MS_PING_PORT 30010
+#define MS_PORT_STR  "30010"
 #define FAKE_LAN_IP "192.168.11.1"
 
 static char          g_lan_ip[16] = FAKE_LAN_IP;
@@ -362,8 +364,10 @@ static int build_session_config(const char *cmd_response, const char *cc, char *
     p = put_str(p, end, "command="); p = put_str(p, end, cmd_response);
     p = put_str(p, end, "&protocol_version=92b2d258&command_common="); p = put_str(p, end, cc);
     #define DT "2000-01-01 00:00:00.0"
-    p = put_str(p, end, "&response_header=0del&"
-        "ms_url=0&ms_port=0&ms_ping=0&ms_close=" DT "&ms_open=" DT "&ms_maintenance_time=" DT "&ms_maintenance_week=0&ms_match_flag=0&"
+    p = put_str(p, end, "&response_header=0del&ms_url=");
+    p = put_str(p, end, g_lan_ip);
+    p = put_str(p, end,
+        "&ms_port=" MS_PORT_STR "&ms_ping=0&ms_close=" DT "&ms_open=" DT "&ms_maintenance_time=" DT "&ms_maintenance_week=0&ms_match_flag=0&"
         "ul_start=0&dl_start=0&ul_interval=0&dl_interval=0&ul_max_size=0&dl_count=0&map_id=");
     p = put_zarr(p, end, 40);
     p = put_str(p, end, "&rules=");
@@ -612,6 +616,34 @@ static DWORD WINAPI lfs_listen(LPVOID arg) {
     return 0;
 }
 
+/* GAME SERVER(idx3) readiness = sphingo spPing の UDP 8B エコー。
+ * ゲームは :23456 bind の UDP から ms_url(=g_lan_ip):ms_port(=30010) へ 8B
+ * [id 4B BE][timestamp 4B BE] を送り同 socket で応答を待つ。受信 8B を送信元へ
+ * そのまま返すと sp_ping_get_result=ALIVE → NetCli+0x11b8=1 → check SM case7 突破。
+ * 宛先が自ホスト IP ゆえ INADDR_ANY で待受け（h_sendto 振替不要）。詳細 facts/devices.md。 */
+static DWORD WINAPI ms_ping_listen(LPVOID arg) {
+    (void)arg;
+    SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (s == INVALID_SOCKET) { host_log("warn", "{\"ev\":\"msping.socket.fail\"}"); return 1; }
+    int yes = 1; setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (char *)&yes, sizeof yes);
+    struct sockaddr_in a; memset(&a, 0, sizeof a);
+    a.sin_family = AF_INET; a.sin_port = htons(MS_PING_PORT);
+    a.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (bind(s, (struct sockaddr *)&a, sizeof a) != 0) { closesocket(s); host_log("warn", "{\"ev\":\"msping.bind.fail\"}"); return 1; }
+    host_log("info", "{\"ev\":\"msping.server.up\",\"port\":" MS_PORT_STR "}");
+    for (;;) {
+        char buf[64]; struct sockaddr_in from; int flen = sizeof from;
+        int n = recvfrom(s, buf, sizeof buf, 0, (struct sockaddr *)&from, &flen);
+        if (n <= 0) continue;
+        const unsigned char *fip = (const unsigned char *)&from.sin_addr;
+        char m[176];
+        _snprintf(m, sizeof m, "{\"ev\":\"msping.echo\",\"from\":\"%u.%u.%u.%u:%u\",\"len\":%d}",
+                  fip[0], fip[1], fip[2], fip[3], ntohs(from.sin_port), n);
+        m[sizeof m-1]=0; host_log("info", m);
+        sendto(s, buf, n, 0, (struct sockaddr *)&from, flen);
+    }
+}
+
 static int nhook(LPCSTR fn, void *det, void **orig) {
     void *tgt = (void *)GetProcAddress(GetModuleHandleW(L"ws2_32"), fn);
     return tgt && MH_CreateHook(tgt, det, orig) == MH_OK && MH_EnableHook(tgt) == MH_OK ? 0 : -1;
@@ -632,4 +664,5 @@ void allnet_install(void) {
     host_log(e ? "warn" : "info", e ? "{\"ev\":\"allnet.hooks.partial\"}" : "{\"ev\":\"allnet.hooks.ok\"}");
     CreateThread(0, 0, allnet_listen, 0, 0, 0);
     CreateThread(0, 0, lfs_listen, 0, 0, 0);
+    CreateThread(0, 0, ms_ping_listen, 0, 0, 0);
 }
