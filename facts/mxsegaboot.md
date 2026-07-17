@@ -5,7 +5,7 @@ confidence: [S]=静的解析 [L]=ライブ実走 [I]=推論 [F]=旧 Frida 計装
 
 ---
 
-## ★Boot = amlib SYSTEM STARTUP シーケンス `FUN_0089a010` (RVA 0x49a010) [S+F]
+## ★Boot = amlib SYSTEM STARTUP シーケンス `FUN_0089a010` (RVA 0x49a010) [S]
 
 ブートは画面に "SYSTEM STARTUP" を出し、`FUN_0089a010`(`param_1+4`=state, `+8`=substate)が各段階を順に
 チェックする。実写で各 state の結果("CHECKING X ... OK/NG/NA")が見える。**これを全て満たすとゲームが
@@ -28,7 +28,7 @@ ATTRACT 起動する**。
   "0903 Wrong Region" シーンが表面化する。`08` で `DAT_01601989=0x01` を**早期から**強制して回避（※現行 genuine 化では data-write force は撤去済＝keychip PCP `appboot.region` 供給に置換。`mxkeychip.md` region 節/line 88）。
 - **"Error 0949 Keychip Not Found" の正体**: keychip presence(`FUN_0096c5d0`=ctx+4&&ctx+8)は安定 1。0949 は
   state5(EXTEND IMAGE)install 失敗時の終端表示。keychip 問題ではない。
-- ⚠️ **検証鉄則**: errNo=0 等のログだけでクリーン判断しない。必ず実写（統合 GUI のスクリーンショット等）で確認。
+- ⚠️ **検証鉄則**: ログだけでクリーン判断せず実写確認（合格基準は `workflow.md`）。
 
 - **各チェックの JSONL 観測 `boot.check`/`boot.state`（host gamehook `d_boot_sm`, `gamehook.c`）**: SM `0x89a010`(__cdecl, 末尾 RET)を
   POST フックし state(mgr+4)/sub-index(mgr+0x14) 遷移を read-only 観測。前進=OK / →state9=NG(+errCode)。

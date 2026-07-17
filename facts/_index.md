@@ -23,7 +23,7 @@ confidence 凡例: [S]=静的解析(Ghidra) [L]=ライブ実走確認 [I]=推論
 | mx ドライバ層 / amBackup（columba/mxsram/mxsmbus eeprom） | [mxdrivers.md](mxdrivers.md) | `src/logic/driver/mxdevices.c` ＋ host `on_set_file_pointer` |
 | keychip / PCP | [mxkeychip.md](mxkeychip.md) | `src/host/keychip_server.c` ＋ `patches.c`（region） |
 | amNet（DHCP/NIC/ALL.Net 接続段） | [mxnetwork.md](mxnetwork.md) | `src/logic/patches.c` ＋ host `allnet.c`/`netobs.c` |
-| amlib SYSTEM STARTUP | [mxsegaboot.md](mxsegaboot.md) | `src/logic/patches.c` |
+| amlib SYSTEM STARTUP | [mxsegaboot.md](mxsegaboot.md) | host `src/host/gamehook.c`（d_boot_sm/d_extimg 主役）＋ `src/logic/patches.c` |
 | amPlatform（platform id / os version） | [amplatform.md](amplatform.md) | `api.c`（columba DMI / 仮想 SystemVersion.txt） |
 | amGfetcher（get_status） | [mxgfetcher.md](mxgfetcher.md) | `keychip_server.c`（40113 serve-it） |
 | ALL.Net Plus Billing（alpbEx） | [ambilling.md](ambilling.md) | `src/logic/patches.c`（stub→5） |

@@ -6,14 +6,8 @@
 
 nrs.exe を自分で起動・注入し `nrsedge.log`(JSONL) を読んで挙動を検証する統合テストを自律実行できる。
 
-**鉄則：自律テストの起動/終了/状態把握は必ず `loader.exe <verb>` CLI を使う。** GUI への PostMessage ハック・
-`Start-Process`/`Stop-Process` の直叩き・ログの手読みは使わない（脆く、phase/errors/subsys を取りこぼす）。
-VSCode タスクなら 🤖 系（`🤖 nrs: 起動→ready待ち` / `状態` / `終了`、`🤖 テスト: build(host+logic)→restart→ready`）。
-ログ照会は `loader.exe logs --cat|--subsys|--grep|--tail` を端末で直接（人間は GUI のログタブ）。
-
-**正しい起動方法（headless CLI）**：`loader.exe` は dual-mode。引数なし=従来 GUI、
-**引数あり=ヘッドレス CLI**（GUI を作らず stdout に JSON、機械可読な exit code を返す）。旧 PostMessage ハックは不要。
-1 コマンド = 1 呼出で完結する：
+**鉄則：自律テストの起動/終了/状態把握は必ず `loader.exe <verb>` CLI を使う**（`Start-Process`/`Stop-Process` 直叩き・ログ手読みは phase/errors/subsys を取りこぼす）。
+`loader.exe` は dual-mode（引数なし=GUI / 引数=ヘッドレス CLI＝stdout に JSON＋機械可読 exit code）。1 コマンド=1 呼出で完結する（詳細な反復ループは `../CLAUDE.md`「ビルド・反復」）：
 
 ```
 loader.exe start --wait        # 起動+注入し host.ready まで block。exit 0=ready / 2=timeout / 3=注入失敗 / 4=早期exit
@@ -49,16 +43,7 @@ loader.exe restart --wait      # stop→start
 
 ## 静的解析と動的デバッグは両輪（片方で止めない）
 
-**RE は Ghidra 静的解析だけで完結させず、動的デバッグを標準で併用する。**
-静的像（コードが何をしうるか）と実行時像（実際に何が起きたか）は CrackProof の自己書換え・unpack 後再初期化・
-実行時 FS/デバイス状態依存でズレる（例：`PcbRegion` 0x16014C4 は writer 無しなのに unpack で 1→0 に戻る）。
-どちらか片方の像だけで挙動・撤去可否・修正を確定しない。
-
-- **一次の動的観測 = logic の JSONL ログ + 集約 `nrsedge.status.json`**（`loader.exe start/status/wait/logs`）。
-  自前コードを自由に計装できるので、まず計装＋実走で連鎖の切断点を切り分ける（「静的推測フィックスを外した」轍＝この直下の節を参照）。
-- **ネイティブデバッガ = cdb**（ゲーム内部の実行時状態＝レジスタ/メモリ/実際の分岐先/例外を、ログ計装で届かない所で見る）。
-  静的に確定できない分岐・値・クラッシュ点は cdb でブレーク/ウォッチして実体を取る。CLAUDE.md の「稀に cdb」は下限であって上限ではない。
-- 静的で解いた仮説は実走で裏取りし、実走で見えた事実は Ghidra に書き戻す（DB 永続）。往復させて複利化する。
+Ghidra 静的解析だけで完結させず動的デバッグを標準併用する。静的像と実行時像は CrackProof の自己書換え・unpack 後再初期化・実行時 FS/デバイス状態依存でズレる（例：`PcbRegion` 0x16014C4 は writer 無しなのに unpack で 1→0 に戻る）ため、片方の像だけで挙動・撤去可否・修正を確定しない。一次観測=logic の JSONL ログ＋`nrsedge.status.json`、静的に取れない分岐/値/クラッシュ点は cdb で実体を取る（**CLAUDE.md の「稀に cdb」は下限であって上限ではない**）。実走で見えた事実は Ghidra に書き戻して複利化する。
 
 ## 「できない・効かない」系は実体で再導出する
 

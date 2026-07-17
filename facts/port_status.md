@@ -5,7 +5,7 @@
 ## mxgfetcher get_status: fake-it → serve-it
 
 - 旧 Frida = fake-it: パーサ(0x9746C0/974760/9747A0/975140)を `33 C0 C3`、0x9744F0 hang-safe スタブ、0x98ADC0+recv で完了強制し SM を騙す。
-- native = serve-it: HLSM(hlsm_boot_network_sm 0x457FE0) state5/6/9 と FUN_009744f0/975830/975a70/975700 は全て `DAT_01286ff0`(PCP stream ptr)依存。唯一の WRITE=FUN_009743f0(amGfetcherInit) が 127.0.0.1:40113(0x9cb1) 接続成功時 `=1`。`keychip_server.c` が 40113 bind 済 → 本物 get_status 交換で SM 自然前進。`patches.c` は hlsm_region_check(0x6FF980)→ret1(state0 gate)+JL2JMP×3 のみ。
+- native = serve-it: HLSM(hlsm_boot_network_sm 0x457FE0) state5/6/9 と FUN_009744f0/975830/975a70/975700 は全て `DAT_01286ff0`(PCP stream ptr)依存。唯一の WRITE=FUN_009743f0(amGfetcherInit) が 127.0.0.1:40113(0x9cb1) 接続成功時 `=1`。`keychip_server.c` が 40113 bind 済 → 本物 get_status 交換で SM 自然前進。現行 `patches.c` に hlsm_region_check(0x6FF980)→ret1 の CODE エントリは無い（撤去済）。region 関連の残置は JL2JMP×3 等のみ。
 - **fallback**: 実機で 40113 接続失敗し state5 が get_status 無限リトライ("Error 1000" watchdog)する場合のみ、旧 fake-it 群（4 パーサ→`33 C0 C3`, 0x9744F0 hang-safe, 0x975857→`EB 06`）を patches.c へ移植。
 
 ## region watchdog / keychip client → root-cause 静的化で代替

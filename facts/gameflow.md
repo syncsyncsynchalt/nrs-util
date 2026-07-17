@@ -86,11 +86,8 @@ factory = **`FUN_005ec6e0`**(RE-label entrymode_scene_factory)`(mgr,sel)`:
 - **呼出元が decompile に不出現=間接呼(mgr vtable slot 経由)**(`get_xrefs_to`/`search_decompiled` 共 0)。⇒ sel を進める条件が真の gate。
 - 次の一手: entry-mode mgr obj の生成元と vtable 特定(factory ptr 格納先)。間接 dispatch ゆえ **cdb で 0x5ec6e0 bp→戻り先 stack が最短**、ただし headless boot ~50% フレーク(下記)ゆえ GUI/実機トレース向き。
 
-## headless 自動テストの限界 [L]
-- **boot フレーク ~50%**: attract 到達 run と tick ループ未入 stall run が混在(scene.diag=0, device read 0)。ゾンビ/ポート競合無し。CREATE_NO_WINDOW で入力/レンダーループが GUI 等価に回らない疑い。
-- **touch 未 poll**: COM1 read 0〜2 回止まりで handshake が mode1 未達 run 多い(touch.diag present_18=0)。
-- ⇒ **完全自動の attract→card-select 到達は現状不可**。card 反映機構(presence/read/whitelist)は headless 検証済だがシーン到達は GUI(実窓・実タッチ)が確実。
-- touch 注入ツール `nrsedge.touch.json`(api.c touch_control_poll): `{"press":0|1,"xm":0..1000,"ym":0..1000}` → logic が COM1 'T' 注入(窓/カーソル非依存)。touch poll される run のみ動作、単体では自動到達を保証しない。
+## touch 注入ツール [L]
+`nrsedge.touch.json`(api.c touch_control_poll): `{"press":0|1,"xm":0..1000,"ym":0..1000}` → logic が COM1 'T' 注入(窓/カーソル非依存)。touch poll される run のみ動作、単体では自動到達を保証しない（headless 自動テストの限界は `bugs.md`/`workflow.md`）。
 
 ## 次の一手 = entry-mode mgr の sel 進行 gate
 credit(0x5eaae0,vtbl 0xbb358c)/card-auth(0x5e6200,vtbl 0xbb34c4) を生成・active 化する所有者(=`FUN_005ec6e0` を vtbl slot に持つ mgr)を特定: vtbl への DATA xref、ctor、scene 切替条件。network/service 状態にゲートされるかは未確認[I]。
