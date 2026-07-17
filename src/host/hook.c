@@ -1,9 +1,6 @@
-/* Win32 API フック（MinHook）。フックは一度だけ設置し、現行 logic テーブルへ振り分ける。
- * 依存: third_party/minhook（CMake で vendor 後に有効化）。 */
 #include "host.h"
-#include "MinHook.h"   /* third_party/minhook */
+#include "MinHook.h"
 
-/* 原関数ポインタ（logic は host_orig(id) で取得して呼び戻す） */
 static HANDLE (WINAPI *o_CreateFileW)(LPCWSTR,DWORD,DWORD,LPSECURITY_ATTRIBUTES,DWORD,DWORD,HANDLE);
 static HANDLE (WINAPI *o_CreateFileA)(LPCSTR,DWORD,DWORD,LPSECURITY_ATTRIBUTES,DWORD,DWORD,HANDLE);
 static BOOL   (WINAPI *o_ReadFile)(HANDLE,LPVOID,DWORD,LPDWORD,LPOVERLAPPED);
@@ -11,7 +8,6 @@ static BOOL   (WINAPI *o_WriteFile)(HANDLE,LPCVOID,DWORD,LPDWORD,LPOVERLAPPED);
 static BOOL   (WINAPI *o_DeviceIoControl)(HANDLE,DWORD,LPVOID,DWORD,LPVOID,DWORD,LPDWORD,LPOVERLAPPED);
 static BOOL   (WINAPI *o_CloseHandle)(HANDLE);
 static DWORD  (WINAPI *o_SetFilePointer)(HANDLE,LONG,PLONG,DWORD);
-/* COM 制御（仮想 COM = native JVS 経路用。orig は実ハンドル時のみ呼ぶ） */
 static BOOL   (WINAPI *o_GetCommState)(HANDLE,LPDCB);
 static BOOL   (WINAPI *o_SetCommState)(HANDLE,LPDCB);
 static BOOL   (WINAPI *o_GetCommTimeouts)(HANDLE,LPCOMMTIMEOUTS);
@@ -47,7 +43,6 @@ static HANDLE WINAPI h_CreateFileW(LPCWSTR name, DWORD a, DWORD s, LPSECURITY_AT
 }
 static HANDLE WINAPI h_CreateFileA(LPCSTR name, DWORD a, DWORD s, LPSECURITY_ATTRIBUTES sa,
                                    DWORD d, DWORD f, HANDLE t) {
-    /* nrs は COM4 を CreateFileA で開く。ANSI→wide に変換し on_create_file へ。 */
     wchar_t w[260]; w[0] = 0;
     if (name) MultiByteToWideChar(CP_ACP, 0, name, -1, w, 260);
     int handled = 0; HANDLE r = INVALID_HANDLE_VALUE;
@@ -56,8 +51,6 @@ static HANDLE WINAPI h_CreateFileA(LPCSTR name, DWORD a, DWORD s, LPSECURITY_ATT
     LEAVE();
     return handled ? r : o_CreateFileA(name, a, s, sa, d, f, t);
 }
-/* overlapped 完了を host で確定: logic は同期的に処理済みなので、ov があればイベントを発火し
-   InternalHigh=転送バイト数を立てる（GetOverlappedResult がこれを読む）。native JVS は overlapped で開く。 */
 static BOOL WINAPI h_ReadFile(HANDLE h, LPVOID b, DWORD n, LPDWORD got, LPOVERLAPPED ov) {
     int handled = 0; BOOL r = FALSE; DWORD local = 0;
     ENTER();
@@ -91,7 +84,6 @@ static BOOL WINAPI h_CloseHandle(HANDLE h) {
     LEAVE();
     return handled ? r : o_CloseHandle(h);
 }
-/* SetFilePointer: 仮想ブロックデバイス(mxsram)のファイルポインタを logic 側で更新。amSram の記録位置決め。 */
 static DWORD WINAPI h_SetFilePointer(HANDLE h, LONG dist, PLONG distHigh, DWORD method) {
     int handled = 0; DWORD r = INVALID_SET_FILE_POINTER;
     ENTER();
@@ -101,7 +93,6 @@ static DWORD WINAPI h_SetFilePointer(HANDLE h, LONG dist, PLONG distHigh, DWORD 
     return handled ? r : o_SetFilePointer(h, dist, distHigh, method);
 }
 
-/* COM 制御 API 群: 仮想 COM ハンドルなら on_comm_control に委譲、それ以外は原関数。 */
 #define COMCTL(call) \
     int hd = 0; BOOL r = FALSE; \
     ENTER(); if (g_api && g_api->on_comm_control) r = (call); LEAVE();
@@ -154,7 +145,6 @@ int hooks_install(void) {
     e |= hook(L"kernel32", "DeviceIoControl", h_DeviceIoControl, (void **)&o_DeviceIoControl);
     e |= hook(L"kernel32", "CloseHandle",     h_CloseHandle,     (void **)&o_CloseHandle);
     e |= hook(L"kernel32", "SetFilePointer",  h_SetFilePointer,  (void **)&o_SetFilePointer);
-    /* COM 制御（native JVS 経路 amJvstThreadInit が要求。仮想 COM ハンドルへ TRUE 化） */
     e |= hook(L"kernel32", "GetCommState",      h_GetCommState,      (void **)&o_GetCommState);
     e |= hook(L"kernel32", "SetCommState",      h_SetCommState,      (void **)&o_SetCommState);
     e |= hook(L"kernel32", "GetCommTimeouts",   h_GetCommTimeouts,   (void **)&o_GetCommTimeouts);

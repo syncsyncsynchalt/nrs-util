@@ -1,5 +1,3 @@
-/* windowed.c — フルスクリーン抑止 + ウィンドウスタイル強制（純 Win32 フック・logic 非依存）。
- * ChangeDisplaySettings* を成功ブロック、CreateWindowEx* の WS_POPUP を除去。 */
 #include "host.h"
 #include "MinHook.h"
 
@@ -15,17 +13,13 @@ static HWND (WINAPI *o_CWExW)(DWORD, const wchar_t *, const wchar_t *, DWORD, in
 #define WS_OVERLAPPEDWINDOW_ 0x00CF0000u
 #define WS_EX_TOPMOST_       0x00000008u
 
-/* WS_POPUP を枠つき窓へ変換すべきか。ゲームのフルスクリーン窓だけが対象で、
- * OS 内部窓（TSF の CicMarshalWnd 等: WS_DISABLED かつ 0×0）は除外する。
- * 除外しないと不可視ヘルパ窓がキャプション付きの小さな黒窓として可視化される。 */
 static int should_convert(DWORD st, int w, int h) {
     if (!(st & WS_POPUP_))   return 0;
-    if (st & WS_DISABLED_)   return 0;   /* 無効窓＝ユーザー操作対象でない（CicMarshalWnd 等） */
-    if (w == 0 && h == 0)    return 0;   /* 0×0＝メッセージ/マーシャル用ヘルパ窓 */
+    if (st & WS_DISABLED_)   return 0;
+    if (w == 0 && h == 0)    return 0;
     return 1;
 }
 
-/* ChangeDisplaySettings* → DISP_CHANGE_SUCCESSFUL(0)、原関数は呼ばない（モード切替阻止）。 */
 static LONG WINAPI d_CDSA(void *dm, DWORD f) { (void)dm; (void)f; return 0; }
 static LONG WINAPI d_CDSW(void *dm, DWORD f) { (void)dm; (void)f; return 0; }
 static LONG WINAPI d_CDSExA(const char *n, void *dm, HWND h, DWORD f, void *p) { (void)n;(void)dm;(void)h;(void)f;(void)p; return 0; }
@@ -47,7 +41,7 @@ static void wh(HMODULE u, const char *fn, void *det, void **orig) {
     if (t && MH_CreateHook(t, det, orig) == MH_OK) MH_EnableHook(t);
 }
 
-void windowed_install(void) {   /* MH_Initialize は hooks_install で実施済 */
+void windowed_install(void) {
     HMODULE u = LoadLibraryW(L"user32.dll");
     if (!u) return;
     wh(u, "ChangeDisplaySettingsA",   (void *)d_CDSA,   (void **)&o_CDSA);

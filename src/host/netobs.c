@@ -1,18 +1,13 @@
-/* netobs.c — winsock connect/resolve の passive 観測（log→原関数、挙動は変えない）。詳細 facts/ambilling.md。
- *   billing(alpbEx)は "ib.naominet.jp" DNS 失敗で :8443 connect に至らず、実トラフィックは keychip_server の
- *   localhost PCPA 群 40100–40113。接続先を可視化する診断用。
- * 前提: MinHook は hooks_install()→MH_Initialize() 済み。host.c は hooks.ok の後で netobs_install を呼ぶ。 */
 #include "host.h"
-#include <winsock2.h>   /* WIN32_LEAN_AND_MEAN(abi.h)で winsock.h は排除済み→衝突なし */
+#include <winsock2.h>
 #include <ws2tcpip.h>
-#include <stdio.h>      /* _snprintf */
+#include <stdio.h>
 #include "MinHook.h"
 
 static int             (WINAPI *o_connect)(SOCKET, const struct sockaddr *, int);
 static int             (WINAPI *o_getaddrinfo)(PCSTR, PCSTR, const ADDRINFOA *, PADDRINFOA *);
 static struct hostent *(WINAPI *o_gethostbyname)(const char *);
 
-/* JSON 文字列値を最小エスケープ（"..."付き）。 */
 static void json_str(char *dst, size_t cap, const char *s) {
     size_t j = 0;
     if (cap < 3) { if (cap) dst[0] = 0; return; }

@@ -1,5 +1,3 @@
-/* 入力ソース: キーボード(GetAsyncKeyState)。バインドは config(NrsConfig.bind[])。
- * TODO: XInput パッド0、フォーカス判定（背景ノイズ排除）。 */
 #include "input.h"
 #include <windows.h>
 #include <string.h>

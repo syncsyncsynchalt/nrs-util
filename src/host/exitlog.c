@@ -1,5 +1,3 @@
-/* exitlog.c — ExitProcess / TerminateProcess / NtTerminateProcess をフックして終了 code と呼出元(nrs+offset)を
- * ログ。nrs が「なぜ落ちる/終わるか」を特定する診断。 */
 #include "host.h"
 #include "MinHook.h"
 
@@ -9,7 +7,6 @@ static void (WINAPI *o_ExitProcess)(UINT);
 static BOOL (WINAPI *o_TerminateProcess)(HANDLE, UINT);
 static LONG (NTAPI  *o_NtTerminateProcess)(HANDLE, LONG);
 
-/* アドレス → "module+offset"（プロセス内解決＝32bit/WOW64 でも正しい）。解決不可なら %p。 */
 static int resolve_mod(uintptr_t a, char *buf) {
     HMODULE mod = NULL;
     if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
@@ -40,8 +37,6 @@ static void log_exit(const char *who, unsigned code) {
     host_log("warn", m);
 }
 
-/* VEH: 真の fault site を捕捉（first-chance）。致命的になりうる例外のみ module+offset で記録し、
- * EXCEPTION_CONTINUE_SEARCH で飲み込まずゲームの SEH をそのまま通す。benign 連発を避け上限付き。 */
 static LONG NTAPI veh_handler(EXCEPTION_POINTERS *ep) {
     static volatile LONG count = 0;
     if (!ep || !ep->ExceptionRecord) return EXCEPTION_CONTINUE_SEARCH;
@@ -53,12 +48,9 @@ static LONG NTAPI veh_handler(EXCEPTION_POINTERS *ep) {
             char at[96]; resolve_mod((uintptr_t)ep->ExceptionRecord->ExceptionAddress, at);
             unsigned acc = 0, va = 0;
             if (code == EXCEPTION_ACCESS_VIOLATION && ep->ExceptionRecord->NumberParameters >= 2) {
-                acc = (unsigned)ep->ExceptionRecord->ExceptionInformation[0];  /* 0=read 1=write 8=exec */
-                va  = (unsigned)ep->ExceptionRecord->ExceptionInformation[1];  /* fault VA */
+                acc = (unsigned)ep->ExceptionRecord->ExceptionInformation[0];
+                va  = (unsigned)ep->ExceptionRecord->ExceptionInformation[1];
             }
-            /* スタックを走査して nrs.exe 内の戻り先（=ゲーム側の呼出鎖）を拾う。
-               driver(nvoglv32)内 fault では amSehLog が driver frame しか出さないため、
-               GL を呼んだゲーム関数を特定する唯一の手段。code 検証は Ghidra で行う。 */
             char chain[200]; int co = 0; chain[0] = 0;
             if (ep->ContextRecord) {
                 HMODULE mainmod = GetModuleHandleW(NULL);
@@ -94,8 +86,8 @@ static void eh(LPCWSTR mod, LPCSTR fn, void *det, void **orig) {
     if (t && MH_CreateHook(t, det, orig) == MH_OK) MH_EnableHook(t);
 }
 
-void exitlog_install(void) {   /* MH_Initialize 済 */
-    AddVectoredExceptionHandler(1, veh_handler);   /* 真の fault site 捕捉（最優先で first-chance）*/
+void exitlog_install(void) {
+    AddVectoredExceptionHandler(1, veh_handler);
     eh(L"kernel32", "ExitProcess",       (void *)h_ExitProcess,       (void **)&o_ExitProcess);
     eh(L"kernel32", "TerminateProcess",  (void *)h_TerminateProcess,  (void **)&o_TerminateProcess);
     eh(L"ntdll",    "NtTerminateProcess",(void *)h_NtTerminateProcess,(void **)&o_NtTerminateProcess);

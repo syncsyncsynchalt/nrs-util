@@ -1,5 +1,3 @@
-/* logic.dll のロードと hot-reload。fn-ptr 差し替えで swap（フックは張り直さない）。
- * 状態は host arena に置くので reload を跨いで生存。 */
 #include "host.h"
 
 typedef const LogicApi *(*get_api_fn)(void);
@@ -13,14 +11,10 @@ static int file_mtime(const char *path, FILETIME *out) {
     *out = fa.ftLastWriteTime; return 0;
 }
 
-/* logic.dll を live コピー経由でロード（ビルドが logic.dll を上書きできるように）。
- * 重要: bind() は g_logic_lock を保持せずに呼ぶ。bind 内の host_log→fopen→CreateFile フックが
- * 同一スレッドで shared ロックを取り、exclusive 自己保持と self-deadlock するのを防ぐ。
- * ロックはポインタ swap の一瞬だけ（in-flight な hook dispatch の完了を待ち、安全に差し替え）。 */
 static int g_gen = 0;
 static int do_load(void) {
     char tmp[64];
-    wsprintfA(tmp, "logic_live_%d.dll", ++g_gen);   /* 一意名: 旧 logic_live がロード中でも CopyFile 衝突しない */
+    wsprintfA(tmp, "logic_live_%d.dll", ++g_gen);
     CopyFileA("logic.dll", tmp, FALSE);
     HMODULE m = LoadLibraryA(tmp);
     if (!m) return -1;
@@ -29,9 +23,9 @@ static int do_load(void) {
     const LogicApi *api = g();
     if (!api || api->abi_version != NRSEDGE_ABI_VERSION) { FreeLibrary(m); return -1; }
 
-    if (api->bind) api->bind(&g_host, &g_state);   /* ロック外で state 初期化/再バインド */
+    if (api->bind) api->bind(&g_host, &g_state);
 
-    AcquireSRWLockExclusive(&g_logic_lock);        /* swap のみ短時間ロック */
+    AcquireSRWLockExclusive(&g_logic_lock);
     HMODULE old = g_logic_mod;
     g_logic_mod = m;
     g_api = api;
@@ -52,8 +46,8 @@ static DWORD WINAPI watcher(LPVOID a) {
         FILETIME ft;
         if (file_mtime("logic.dll", &ft) == 0 && CompareFileTime(&ft, &g_last_write) != 0) {
             g_last_write = ft;
-            Sleep(150);  /* ビルド完了待ち */
-            int r = do_load();   /* swap ロックは do_load 内 */
+            Sleep(150);
+            int r = do_load();
             host_log(r ? "error" : "info",
                      r ? "{\"ev\":\"reload.fail\"}" : "{\"ev\":\"reload.ok\"}");
         }

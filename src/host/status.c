@@ -1,40 +1,31 @@
-/* status.c — boot フェーズ / エラー数 / サブシステム ready を集約し nrsedge.status.json へ書く。
- *
- * 設計: host_log(log.c) が host・logic 双方の全イベントの単一通過点。そこから status_observe を呼べば
- *   ABI を変えず（HostServices.log は既に host_log を指す）logic を一切触らず集約状態が得られる。
- * status.c は host.dll の一部＝nrs.exe プロセス内で走るので GetCurrentProcessId() = nrs.exe の pid。
- * 書込は tmp→MoveFileEx で原子的に置換。80k 行/セッションなので phase 変化時＋N 行毎にスロットル。 */
 #include "host.h"
 #include "status.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 
-/* ---- 集約状態（observe が更新、flush が書出） ---- */
 static CRITICAL_SECTION s_cs;
 static int   s_init = 0;
 static DWORD s_start_tick = 0;
-static int   s_since_flush = 0;     /* 前回 flush 以降の観測数（スロットル用） */
+static int   s_since_flush = 0;
 
 static struct {
-    char  phase[16];                /* attaching|hooks|logic|gamehooks|ready|exited|error */
+    char  phase[16];
     int   ready;
     int   errors;
     int   patches;
     char  last_ev[64];
     char  last_ev_ts[16];
-    char  last_err_m[400];          /* 直近エラー/終了イベントの m ペイロード(生 JSON)。空=未発生 */
+    char  last_err_m[400];
     char  last_err_ts[16];
 } S;
 
-/* 関心のあるサブシステムと現在の状態（"" = 未観測）。ev からの推論で更新。 */
 static struct { const char *name; char state[12]; } SUB[] = {
     { "jvs",      "" }, { "keychip",  "" }, { "touch",    "" }, { "eeprom",   "" },
     { "dipsw",    "" }, { "network",  "" }, { "platform", "" }, { "card",     "" },
 };
 #define NSUB ((int)(sizeof SUB / sizeof SUB[0]))
 
-/* ---- 軽量 JSON 抽出（m ペイロード前提の最小実装） ---- */
 static int jget_str(const char *j, const char *key, char *out, int cap){
     char needle[64]; _snprintf(needle, sizeof needle, "\"%s\":\"", key);
     const char *p = strstr(j, needle); if(!p) return 0;
@@ -59,13 +50,12 @@ static int phase_rank(const char *p){
     if(!strcmp(p,"logic"))     return 3;
     if(!strcmp(p,"gamehooks")) return 4;
     if(!strcmp(p,"ready"))     return 5;
-    if(!strcmp(p,"exited"))    return 9;   /* 終端 */
-    if(!strcmp(p,"error"))     return 8;   /* ready 未到達の致命 */
+    if(!strcmp(p,"exited"))    return 9;
+    if(!strcmp(p,"error"))     return 8;
     return 0;
 }
-/* breadcrumb は時系列で単調。exited/error/ready からの巻き戻しは禁止。 */
 static void set_phase(const char *p){
-    if(phase_rank(S.phase) >= 9) return;                 /* exited は終端 */
+    if(phase_rank(S.phase) >= 9) return;
     if(!strcmp(S.phase,"ready") && strcmp(p,"exited") && strcmp(p,"error")) return;
     strncpy(S.phase, p, sizeof S.phase -1); S.phase[sizeof S.phase -1]=0;
 }
@@ -76,7 +66,6 @@ static void set_sub(const char *name, const char *state){
     }
 }
 
-/* ---- 原子的書出 ---- */
 static void status_flush(void){
     char buf[1600]; int o=0;
     char ts[16]; ts_now(ts, sizeof ts);
@@ -109,9 +98,8 @@ static void status_flush(void){
         first=0;
     }
     o += _snprintf(buf+o, sizeof buf-o, "}}\n");
-    if(o<0 || o>=(int)sizeof buf) return;   /* 切詰時は破損 JSON を書かない */
+    if(o<0 || o>=(int)sizeof buf) return;
 
-    /* tmp に書いて MoveFileEx で原子置換（同一 dir = ゲーム cwd）。log.c と同じ相対パス。 */
     FILE *f = fopen("nrsedge.status.json.tmp", "wb");
     if(!f) return;
     fwrite(buf, 1, (size_t)o, f);
@@ -119,7 +107,6 @@ static void status_flush(void){
     MoveFileExA("nrsedge.status.json.tmp", "nrsedge.status.json", MOVEFILE_REPLACE_EXISTING);
 }
 
-/* ---- 観測（host_log から全行） ---- */
 void status_observe(const char *level, const char *json_line){
     if(!s_init){ InitializeCriticalSection(&s_cs); s_start_tick=GetTickCount(); s_init=1; }
     if(!json_line) return;
@@ -129,13 +116,9 @@ void status_observe(const char *level, const char *json_line){
     int phase_changed = 0;
     char prev_phase[16]; strncpy(prev_phase, S.phase, sizeof prev_phase); prev_phase[15]=0;
 
-    /* last_event */
     if(ev[0]){ strncpy(S.last_ev, ev, sizeof S.last_ev -1); S.last_ev[sizeof S.last_ev -1]=0;
                ts_now(S.last_ev_ts, sizeof S.last_ev_ts); }
 
-    /* boot フェーズ breadcrumb。phase は「boot がどこまで進んだか」と終端のみを表す。
-     * error は host_init が確実に失敗するイベント（host.c が早期 return = host.ready が永遠に来ない）に限る。
-     * ゲーム側 error 行や attract の良性エラーは errors カウンタには出すが phase は動かさない（誤った終端判定を防ぐ）。 */
     if      (!strcmp(ev,"host.attach"))   set_phase("attaching");
     else if (!strcmp(ev,"hooks.ok"))      set_phase("hooks");
     else if (!strcmp(ev,"logic.ok"))      set_phase("logic");
@@ -143,12 +126,9 @@ void status_observe(const char *level, const char *json_line){
     else if (!strcmp(ev,"host.ready"))  { S.ready=1; set_phase("ready"); }
     else if (!strcmp(ev,"hooks.fail") || !strcmp(ev,"logic.load.fail")) set_phase("error");
 
-    /* 終了イベント（exitlog.c 由来。warn レベルだが errors として数える） */
     int is_exit = (!strcmp(ev,"ExitProcess") || !strcmp(ev,"TerminateProcess")
                 || !strcmp(ev,"NtTerminateProcess"));
 
-    /* エラー集計（loader level_of と一致: lvl=error または exit イベント）。phase は動かさない
-     * （良性のゲーム error が host.ready 前に来ても boot 失敗と誤判定しない。真の失敗は上の breadcrumb で扱う）。 */
     if((level && !strcmp(level,"error")) || is_exit){
         S.errors++;
         strncpy(S.last_err_m, json_line, sizeof S.last_err_m -1);
@@ -157,10 +137,8 @@ void status_observe(const char *level, const char *json_line){
     }
     if(is_exit) set_phase("exited");
 
-    /* patches.applied の count */
     if(!strcmp(ev,"patches.applied")) jget_int(json_line, "count", &S.patches);
 
-    /* サブシステム readiness 推論（ev 接頭辞）。詳細状態より「どこまで動いたか」を表す。 */
     if(!strcmp(ev,"jvs.open"))                       set_sub("jvs","open");
     else if(!strcmp(ev,"jvs.io"))                    set_sub("jvs","ok");
     if(!strcmp(ev,"keychip.server.up"))              set_sub("keychip","up");
@@ -175,7 +153,6 @@ void status_observe(const char *level, const char *json_line){
     phase_changed = strcmp(prev_phase, S.phase)!=0;
     s_since_flush++;
 
-    /* スロットル: phase 変化・エラー/終了・32 行毎に書出。常時毎行は避ける。 */
     if(phase_changed || is_exit || (level && !strcmp(level,"error")) || s_since_flush>=32){
         status_flush();
         s_since_flush = 0;

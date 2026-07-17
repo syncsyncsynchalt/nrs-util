@@ -1,29 +1,19 @@
-/* mxjvs — COM4 JVS ボード（115200 8N1）。micetools jvs_base.c + jvs_837_14572.c を lift。
- * フレーム: [E0][dst][len][payload...][sum]。len=payload+1(sum込)。0xE0/0xD0 は 0xD0,(b-1) でエスケープ。
- * 1 フレームに複数コマンド可（host は payload を順に消費）。応答: [E0][00][len][STATUS][report+data...][sum]。 */
 #include "mxjvs.h"
 #include <string.h>
 
-/* READ_ID(0x10) 応答。実機 JVS I/O は FTDI 837-15067 系（ftdibus.inf VID_0CA3 PID_0010..0015）。
- * spec-check は READ_ID 文字列を参照しない（非検査ゆえ内容は任意・SEGA 標準フォーマットに倣う。`facts/amjvs.md`）。 */
 static const char BOARD_ID[] =
     "SEGA ENTERPRISES,LTD.;I/O BD JVS;837-15067 ;Ver1.00;11/05";
-/* 版応答。spec-check(FUN_0067afa0, node_count==1)の受理ゲートは buttons≥14/analog≥2/gpio≥13/cmd_ver≥0x13 の
- * 4 つ（GET_FEATURES 申告数＋CMD_VER）。JVS_VER/COMM_VER と READ_ID 文字列は非検査（`facts/amjvs.md`）。 */
-#define CMD_VER 0x13   /* spec-check 要求 ≥0x13 */
-#define JVS_VER 0x20   /* JVS 規格 2.0（spec-check 非検査）*/
-#define COMM_VER 0x10  /* spec-check 非検査 */
+#define CMD_VER 0x13
+#define JVS_VER 0x20
+#define COMM_VER 0x10
 
 void mxjvs_init(JvsBoard *b) {
     memset(b, 0, sizeof *b);
     b->address = 0xFF;
     b->sense = 1;
-    for (int i = 0; i < JVS_ANALOG_CH; i++) b->analog[i] = 0x8000;  /* 中心 */
+    for (int i = 0; i < JVS_ANALOG_CH; i++) b->analog[i] = 0x8000;
 }
 
-/* 論理入力 → JVS ボード。sw[0] 13bit 配置(facts/devices.md): bit12=START bit11=SERVICE bit10=UP
- * bit9=DOWN bit8=LEFT bit7=RIGHT bit6=PUSH1(jump) bit5=PUSH2(dash) bit4=PUSH3(action)。
- * READ_SW で v=sw<<3 され byte0 bit7=START… になる。analog: ch1=X ch0=Y（実機計測）。 */
 void mxjvs_set_input(JvsBoard *b, const NrsInput *in) {
     uint16_t v = 0;
     if (in->start)  v |= 1u << 12;
@@ -37,13 +27,12 @@ void mxjvs_set_input(JvsBoard *b, const NrsInput *in) {
     if (in->action) v |= 1u << 4;
     b->sw[0] = v;
     b->test = in->test ? 1 : 0;
-    b->analog[1] = in->analog_x;   /* MOVE X */
-    b->analog[0] = in->analog_y;   /* MOVE Y */
-    if (in->coin && !b->coin_prev) b->coin[0]++;   /* 立ち上がりで加算 */
+    b->analog[1] = in->analog_x;
+    b->analog[0] = in->analog_y;
+    if (in->coin && !b->coin_prev) b->coin[0]++;
     b->coin_prev = in->coin ? 1 : 0;
 }
 
-/* masked → raw（SYNC は literal、以降の 0xD0 は次バイト+1）。戻り=raw 長, -1=異常。 */
 static int unmask(const uint8_t *in, int n, uint8_t *raw, int cap) {
     if (n < 1 || cap < 1) return -1;
     raw[0] = in[0];
@@ -56,7 +45,6 @@ static int unmask(const uint8_t *in, int n, uint8_t *raw, int cap) {
     return j;
 }
 
-/* raw 応答(out[1..]) を masked 配線形式へ。raw[0]=SYNC は literal。戻り=wire 長。 */
 static int mask(const uint8_t *raw, int n, uint8_t *wire, int cap) {
     if (cap < 1) return -1;
     wire[0] = raw[0];
@@ -81,14 +69,14 @@ static uint8_t sum8(const uint8_t *p, int n) {
 int mxjvs_handle_frame(JvsBoard *b, const uint8_t *in, int in_len, uint8_t *out, int out_cap) {
     uint8_t raw[512], resp[512];
     int rn = unmask(in, in_len, raw, sizeof raw);
-    if (rn < 5 || raw[0] != JVS_SYNC) return 0;             /* 非 JVS / 短すぎ */
+    if (rn < 5 || raw[0] != JVS_SYNC) return 0;
     uint8_t len = raw[2];
-    if (3 + len > rn) return 0;                             /* 長さ不整合 */
-    if (sum8(raw + 1, 1 + len) != raw[2 + len]) return 0;   /* checksum: dst..payload */
+    if (3 + len > rn) return 0;
+    if (sum8(raw + 1, 1 + len) != raw[2 + len]) return 0;
 
-    int ri = 3;                  /* payload 先頭 */
-    int end = 2 + len;           /* checksum の index（手前まで処理） */
-    int wp = 0;                  /* resp の payload 書込み位置（STATUS の次から）*/
+    int ri = 3;
+    int end = 2 + len;
+    int wp = 0;
     uint8_t status = JVS_STATUS_OK;
     int silence = 0;
 
@@ -99,9 +87,9 @@ int mxjvs_handle_frame(JvsBoard *b, const uint8_t *in, int in_len, uint8_t *out,
         uint8_t cmd = raw[ri++];
         switch (cmd) {
         case JVS_CMD_RESET:
-            RD();                       /* arg = 0xD9 */
+            RD();
             b->address = 0xFF; b->sense = 1;
-            silence = 1;                /* RESET は無応答 */
+            silence = 1;
             break;
         case JVS_CMD_CHANGE_COMMS:
             silence = 1; break;
@@ -126,17 +114,17 @@ int mxjvs_handle_frame(JvsBoard *b, const uint8_t *in, int in_len, uint8_t *out,
             WR(JVS_FEAT_EOF);
             break;
         case JVS_CMD_RECEIVE_MAIN_ID:
-            while (ri < end && raw[ri] != 0) ri++;  /* 文字列を読み飛ばす */
-            if (ri < end) ri++;                     /* 終端 null */
+            while (ri < end && raw[ri] != 0) ri++;
+            if (ri < end) ri++;
             WR(JVS_REPORT_OK);
             break;
         case JVS_CMD_READ_SW: {
             uint8_t players = RD(), swbytes = RD();
             if (players > JVS_PLAYERS || swbytes != JVS_SWBYTES) { WR(JVS_REPORT_PARAM_INVALID); break; }
             WR(JVS_REPORT_OK);
-            WR(b->test ? 0x80 : 0x00);              /* system byte: bit7=TEST */
+            WR(b->test ? 0x80 : 0x00);
             for (int p = 0; p < players; p++) {
-                uint16_t v = (uint16_t)(b->sw[p] << (16 - JVS_BTNS));  /* 13bit を左詰め */
+                uint16_t v = (uint16_t)(b->sw[p] << (16 - JVS_BTNS));
                 for (int i = swbytes - 1; i >= 0; i--) WR((v >> (i * 8)) & 0xFF);
             }
             break;
@@ -145,7 +133,7 @@ int mxjvs_handle_frame(JvsBoard *b, const uint8_t *in, int in_len, uint8_t *out,
             uint8_t slots = RD();
             WR(JVS_REPORT_OK);
             for (int s = 0; s < slots && s < JVS_COINS; s++) {
-                WR((b->coin[s] >> 8) & 0x3F);       /* 上位2bit=coin condition(0=normal) */
+                WR((b->coin[s] >> 8) & 0x3F);
                 WR(b->coin[s] & 0xFF);
             }
             break;
@@ -167,18 +155,18 @@ int mxjvs_handle_frame(JvsBoard *b, const uint8_t *in, int in_len, uint8_t *out,
         }
         case JVS_CMD_WRITE_GPIO1: {
             uint8_t nb = RD();
-            for (int i = 0; i < nb; i++) RD();      /* solenoid 等。今は破棄 */
+            for (int i = 0; i < nb; i++) RD();
             WR(JVS_REPORT_OK);
             break;
         }
-        case JVS_CMD_WRITE_GPIO2:                    /* 0x37/0x38 = (byteIndex, byteData)。破棄して OK */
+        case JVS_CMD_WRITE_GPIO2:
         case JVS_CMD_WRITE_GPIO3:
             RD(); RD();
             WR(JVS_REPORT_OK);
             break;
         default:
             status = JVS_STATUS_UKCOM;
-            ri = end;                               /* 不明コマンド: 以降中断 */
+            ri = end;
             break;
         }
     }
@@ -189,10 +177,10 @@ int mxjvs_handle_frame(JvsBoard *b, const uint8_t *in, int in_len, uint8_t *out,
 
     resp[0] = JVS_SYNC;
     resp[1] = JVS_NODE_MASTER;
-    resp[2] = (uint8_t)(wp + 2);     /* len = STATUS + payload + sum */
+    resp[2] = (uint8_t)(wp + 2);
     resp[3] = status;
     int raw_resp_len = 4 + wp;
-    resp[raw_resp_len] = sum8(resp + 1, raw_resp_len - 1);  /* sum over [1..3+wp] */
+    resp[raw_resp_len] = sum8(resp + 1, raw_resp_len - 1);
     raw_resp_len += 1;
 
     return mask(resp, raw_resp_len, out, out_cap);
