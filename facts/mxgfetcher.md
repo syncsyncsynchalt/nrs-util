@@ -23,7 +23,7 @@ next=7)→7(alabex_auth_ready 待ち)→8→9。get_status が完走しないと
 
 ### get_status SM の RE 参照（現行 = serve-it）[S]
 
-現行 native は serve-it: `src/host/keychip_server.c` が 40113 を bind し本物の get_status 交換で SM を自然前進させ、`src/logic/patches.c` は 0x6FF980→ret1（state0 gate）＋ JL2JMP 3 個のみ。
+現行 native は serve-it: `src/host/keychip_server.c` が 40113 を bind し本物の get_status 交換で SM を自然前進させ、`src/logic/patches.c` は JL2JMP 3 個（0x97588A/0x97595F/0x975A1F）のみ。旧 0x6FF980（`hlsm_region_check`）→ret1 gate は撤去済（src に不在＝genuine 化）。
 
 recv completion 機構: get_status(40113) は raw winsock recv() を使い pcpaRecvResponse を通らない。PCPA completion state([stream+0x21C]) は 0x98B260 が書く。
 

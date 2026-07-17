@@ -17,7 +17,7 @@ boot は attract(FREE PLAY)到達、touch/card 完動("touch panel ok"/"card slo
   registrar **`amTaskOpen`(0x89dcb0)**`(tid,uid,ctxSize)`(`*node=tid;node[1]=uid;node[2]=3`)。
 - **uid = FourCC タグ [S]**: amTaskOpen 重複警告 `amDebugOut("...uid=%08x(%s)...",uid,&str)` が uid を 4B ASCII 低位順で文字列化(`DAT_02283014=uid&0xff`…)。
   例 `0x50474d4d`="MMGP" / `0x45`='E'=network-reception / `0x21`=card(tid==uid, devices.md)。計装 `api.c scene.delta` は tag(hex)+tag4(FourCC)。EntryMode 個々の uid は未裏取り[I]。
-- **scene 選択は scene-id global でない**(PROVEN): `DAT_016b8b54`=`amlib_subsystem_state`(keychip/usbio 状態, `==8`=keychip-ready; reader `keychip_errCode1_latcher`0x6f0a80/`usbio_errCode_mapper`0x6f0ae0)。0xD4B000 は state-string jump table(3 slot)で scene ctor 表でない。
+- **scene 選択は scene-id global でない**(PROVEN): `DAT_016b8b54`=`amlib_subsystem_state`(keychip/usbio 状態, `==8`=keychip-ready; reader `keychip_errCode1_latcher`0x6f0a80/`usbio_errCode_mapper`0x6f0ad0)。0xD4B000 は state-string jump table(3 slot)で scene ctor 表でない。
 - scene 本体 = vtable/RTTI ベース(nrs.exe 埋込 C++ クラス, RTTI 有)。update VA(node+0x24)=vtbl slot#2 生 addr → vtbl base(=slot#2−8) → vtbl[-4]=COL → COL+0x0c=TD → TD+0x08=mangled name。
   **entry flow scene 実クラス(直読, [S])**:
   | update VA(slot#2) | 実 RTTI class | COL | vtbl base |
@@ -75,7 +75,7 @@ boot net SM `hlsm_boot_network_sm`(0x457fe0) は alAbEx flags(`DAT_0210AED0/AED2
 
 ## 停止点 = credit/entry scene が非 active [L]（mmgp_diag/scene_diag 計装で確定）
 - **MMGP は state0 で不動**: `gate0x400=1`・`lockout=0`・`found=1` だが `state=0/sub=0/req=0/accept=0/msgres=-2`(タッチ後も不変)。state0→2 は `mmgp_request_start`(credit scene が呼ぶ)要だが **req=0=credit scene 未呼**。`mmgp_net_task_ready` は 'E' 不在なら 0 返し state0 通過許可(塞いでない)。
-- title active set = **35 node で安定**。`FUN_007274d0` は active list に不在。同居: `cardrw_ctx`(0x4f2930)/`touch_poll_update`(0x8b2750)/`mmgp_task_update`(0x6f3b40)/`amlib_init_sm`(0x89a010)。**credit(0x5eaae0)/card-auth(0x5e6200) 未生成**。
+- title active set = **35 node で安定**。`FUN_007274d0` は active list に不在。同居: `cardrw_ctx_update`(0x4f2930)/`touch_poll_update`(0x8b2750)/`mmgp_task_update`(0x6f3b40)/`amlib_init_sm`(0x89a010)。**credit(0x5eaae0)/card-auth(0x5e6200) 未生成**。
 - touch で `FUN_006f42c0`(state0-5 SM)＋thunk 0x4026f0 spawn するが credit/card-auth 依然未生成、attract demo 別ページ循環のみ。
 - ⇒ 開始 gate = 上流 ALL.NET/MMGP ゲームサーバ接続(「GAME SERVER 未完了・全国対戦受付終了」と整合)。alAbEx 強制も MMGP gate 強制(`|0x400`)も state0 のまま無効。
 
