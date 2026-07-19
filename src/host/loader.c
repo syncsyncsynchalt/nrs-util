@@ -75,7 +75,6 @@ enum {
 #define WM_APP_LOGLINE (WM_APP+1)
 #define WM_APP_STATUS  (WM_APP+2)
 #define WM_APP_RUNSTATE (WM_APP+3)
-#define WM_APP_SYNCSCROLL (WM_APP+4)
 #define WM_APP_LOGCLEAR (WM_APP+5)
 
 static HWND g_main, g_tab, g_status, g_log, g_logstatus, g_resume;
@@ -102,7 +101,7 @@ static HANDLE g_job = NULL;
 typedef struct { char ts[16]; char src[64]; Level lvl; char *msg; } Entry;
 static Entry  *g_ent;
 static size_t  g_ent_n, g_ent_cap;
-static int     g_errors, g_shown, g_disp;
+static int     g_errors;
 static int     g_paused = 0;
 
 static wchar_t* u8tow(const char *s){
@@ -234,23 +233,299 @@ static Level level_of(const char *lvl, const char *ev, const char *msg){
 
 static int g_autoscroll = 1;
 static void update_resume_btn(void);
-static int autoscroll_on(void){ return g_autoscroll; }
-static int g_in_rerender = 0;
+static void update_counts(void);
 
-static void log_append_colored(const wchar_t *wtext, COLORREF color){
-    int keep = !autoscroll_on() && !g_in_rerender;
-    POINT sp={0,0}; if(keep) SendMessageW(g_log, EM_GETSCROLLPOS, 0, (LPARAM)&sp);
-    int end = GetWindowTextLengthW(g_log);
-    SendMessageW(g_log, EM_SETSEL, end, end);
-    CHARFORMAT2W cf; ZeroMemory(&cf,sizeof cf);
-    cf.cbSize=sizeof cf; cf.dwMask=CFM_COLOR; cf.crTextColor=color;
-    SendMessageW(g_log, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf);
-    SendMessageW(g_log, EM_REPLACESEL, FALSE, (LPARAM)wtext);
-    if(keep) SendMessageW(g_log, EM_SETSCROLLPOS, 0, (LPARAM)&sp);
+/* ---- 仮想ログビュー ----
+   データは g_ent[] のまま。表示は「フィルタ通過エントリの index 配列 g_view」を持ち、
+   WM_PAINT で可視行だけ TextOut する。スクロール=先頭 index の増減、フィルタ適用=
+   g_view の再構築のみなので、行数に依存せず常に即応。 */
+static int    *g_view;
+static size_t  g_view_n, g_view_cap;
+static char    g_flt[128];               /* filter 文字列(UTF-8, キャッシュ) */
+static int     g_hideio, g_erronly;      /* チェックボックス状態のキャッシュ */
+static size_t  g_top;                    /* 先頭可視行 (g_view index) */
+static int     g_hpos;                   /* 水平スクロール位置 (文字数) */
+static int     g_lineh = 16, g_charw = 8;
+static size_t  g_sel_a = (size_t)-1, g_sel_b = (size_t)-1;  /* 行選択範囲 (g_view index) */
+static int     g_dirty = 0;              /* 追記あり: タイマーでまとめて再描画 */
+static size_t  g_maxchars = 80;
+
+static void fmt_entry(const Entry *e, char *out, int cap){
+    _snprintf(out, cap, "[%-12.12s] [%-22.22s] %s", e->ts, e->src, e->msg);
 }
-static int g_prog_scroll = 0;
-static void log_scroll_to_end(void){ g_prog_scroll=1; SendMessageW(g_log, WM_VSCROLL, SB_BOTTOM, 0); g_prog_scroll=0; }
-static void log_scroll_end(void){ if(autoscroll_on()) log_scroll_to_end(); }
+static int passes(const Entry *e){
+    if(g_hideio && e->lvl==L_IO) return 0;
+    if(g_erronly && e->lvl!=L_ERROR) return 0;
+    /* filter: 空白区切りトークン。全て AND、'-' 前置は除外。src/msg を対象に部分一致。 */
+    if(g_flt[0]){
+        char tmp[128]; strncpy(tmp,g_flt,sizeof tmp-1); tmp[sizeof tmp-1]=0;
+        char *save=NULL;
+        for(char *tok=strtok_s(tmp," ",&save); tok; tok=strtok_s(NULL," ",&save)){
+            int neg = (tok[0]=='-'); const char *t = neg? tok+1 : tok;
+            if(!*t) continue;
+            int m = has_ci(e->src,t)||has_ci(e->msg,t);
+            if(neg ? m : !m) return 0;
+        }
+    }
+    return 1;
+}
+
+static int logview_vis(void){
+    RECT rc; GetClientRect(g_log,&rc);
+    int v = rc.bottom / g_lineh;
+    return v>0 ? v : 1;
+}
+static size_t logview_max_top(void){
+    size_t vis=(size_t)logview_vis();
+    return g_view_n>vis ? g_view_n-vis : 0;
+}
+static void logview_update_scroll(void){
+    if(!g_log) return;
+    SCROLLINFO si; si.cbSize=sizeof si; si.fMask=SIF_RANGE|SIF_PAGE|SIF_POS; si.nMin=0;
+    si.nMax=(int)(g_view_n?g_view_n-1:0); si.nPage=(UINT)logview_vis(); si.nPos=(int)g_top;
+    SetScrollInfo(g_log,SB_VERT,&si,TRUE);
+    RECT rc; GetClientRect(g_log,&rc);
+    si.nMax=(int)g_maxchars; si.nPage=(UINT)(rc.right>0? rc.right/g_charw : 1); si.nPos=g_hpos;
+    SetScrollInfo(g_log,SB_HORZ,&si,TRUE);
+}
+static void logview_flush(void){
+    if(!g_dirty || !g_log) return;
+    g_dirty=0;
+    if(g_autoscroll) g_top=logview_max_top();
+    logview_update_scroll();
+    InvalidateRect(g_log,NULL,FALSE);
+    update_counts();
+}
+static void log_scroll_to_end(void){
+    g_top=logview_max_top();
+    logview_update_scroll();
+    InvalidateRect(g_log,NULL,FALSE);
+}
+static void view_push(size_t ent_idx){
+    if(g_view_n==g_view_cap){
+        g_view_cap = g_view_cap? g_view_cap*2 : 8192;
+        g_view = (int*)realloc(g_view, g_view_cap*sizeof(int));
+    }
+    g_view[g_view_n++]=(int)ent_idx;
+    size_t chars = 42+strlen(g_ent[ent_idx].msg);
+    if(chars>g_maxchars) g_maxchars=chars;
+    g_dirty=1;
+}
+static void view_rebuild(void){
+    g_view_n=0; g_maxchars=80;
+    for(size_t i=0;i<g_ent_n;i++) if(passes(&g_ent[i])) view_push(i);
+    g_sel_a=g_sel_b=(size_t)-1;
+    { size_t mt=logview_max_top(); if(g_top>mt) g_top=mt; }
+    g_dirty=1;
+    logview_flush();
+}
+static void logview_user_scroll(size_t t){
+    size_t maxt=logview_max_top();
+    if(t>maxt) t=maxt;
+    g_top=t;
+    if(g_autoscroll){ g_autoscroll=0; update_resume_btn(); }
+    logview_update_scroll();
+    InvalidateRect(g_log,NULL,FALSE);
+}
+static void logview_copy(void){
+    if(g_sel_a==(size_t)-1 || !g_view_n) return;
+    size_t lo=g_sel_a<g_sel_b?g_sel_a:g_sel_b, hi=g_sel_a<g_sel_b?g_sel_b:g_sel_a;
+    if(hi>=g_view_n) hi=g_view_n-1;
+    size_t cap=8192, len=0;
+    char *buf=(char*)malloc(cap); if(!buf) return;
+    for(size_t vi=lo; vi<=hi; vi++){
+        char line[1300]; fmt_entry(&g_ent[g_view[vi]], line, sizeof line);
+        size_t l=strlen(line);
+        if(len+l+3>cap){ while(len+l+3>cap) cap*=2; buf=(char*)realloc(buf,cap); if(!buf) return; }
+        memcpy(buf+len,line,l); len+=l; buf[len++]='\r'; buf[len++]='\n';
+    }
+    buf[len]=0;
+    wchar_t *w=u8tow(buf); free(buf);
+    if(w && OpenClipboard(g_log)){
+        EmptyClipboard();
+        size_t bytes=(wcslen(w)+1)*sizeof(wchar_t);
+        HGLOBAL hg=GlobalAlloc(GMEM_MOVEABLE,bytes);
+        if(hg){ void *p=GlobalLock(hg); memcpy(p,w,bytes); GlobalUnlock(hg);
+                SetClipboardData(CF_UNICODETEXT,hg); }
+        CloseClipboard();
+    }
+    free(w);
+}
+static void logview_paint(HWND h){
+    PAINTSTRUCT ps; HDC dc=BeginPaint(h,&ps);
+    RECT rc; GetClientRect(h,&rc);
+    HDC mem=CreateCompatibleDC(dc);
+    HBITMAP bmp=CreateCompatibleBitmap(dc,rc.right,rc.bottom);
+    HBITMAP ob=(HBITMAP)SelectObject(mem,bmp);
+    FillRect(mem,&rc,g_brBG);
+    HFONT of=(HFONT)SelectObject(mem,g_font);
+    SetBkMode(mem,TRANSPARENT);
+    int vis=logview_vis();
+    size_t lo=g_sel_a<g_sel_b?g_sel_a:g_sel_b, hi=g_sel_a<g_sel_b?g_sel_b:g_sel_a;
+    for(int i=0;i<vis;i++){
+        size_t vi=g_top+(size_t)i; if(vi>=g_view_n) break;
+        const Entry *e=&g_ent[g_view[vi]];
+        if(g_sel_a!=(size_t)-1 && vi>=lo && vi<=hi){
+            RECT lr={0,i*g_lineh,rc.right,(i+1)*g_lineh};
+            HBRUSH sb=CreateSolidBrush(HEXRGB(0x2d3a55)); FillRect(mem,&lr,sb); DeleteObject(sb);
+        }
+        char line[1300]; fmt_entry(e,line,sizeof line);
+        wchar_t w[1300]; int n=MultiByteToWideChar(CP_UTF8,0,line,-1,w,1300);
+        SetTextColor(mem,level_color(e->lvl));
+        TextOutW(mem, 2-g_hpos*g_charw, i*g_lineh, w, n?n-1:0);
+    }
+    SelectObject(mem,of);
+    BitBlt(dc,0,0,rc.right,rc.bottom,mem,0,0,SRCCOPY);
+    SelectObject(mem,ob); DeleteObject(bmp); DeleteDC(mem);
+    EndPaint(h,&ps);
+}
+/* フィルタ文字列を差し替えて再構築（編集ボックスの表示も同期） */
+static void logview_apply_filter(const char *u8){
+    strncpy(g_flt, u8, sizeof g_flt-1); g_flt[sizeof g_flt-1]=0;
+    wchar_t *w=u8tow(g_flt); if(w){ SetWindowTextW(g_filter, w); free(w); }
+    view_rebuild();
+}
+/* 右クリック: クリック行の ev(=src) を軸にワンクリック隔離／除外。RE のサブシステム分離導線。 */
+static void logview_context_menu(POINT screenPt, const char *src){
+    HMENU m=CreatePopupMenu(); if(!m) return;
+    if(src && src[0]){
+        wchar_t *ws=u8tow(src); wchar_t item[160];
+        if(ws){
+            _snwprintf(item,160,L"「%s」だけ表示",ws); AppendMenuW(m,MF_STRING,1,item);
+            _snwprintf(item,160,L"「%s」を除外",ws);   AppendMenuW(m,MF_STRING,2,item);
+            free(ws);
+        }
+    }
+    if(g_flt[0]) AppendMenuW(m,MF_STRING,3,L"フィルタ解除");
+    AppendMenuW(m,MF_SEPARATOR,0,NULL);
+    AppendMenuW(m,(g_sel_a==(size_t)-1?MF_GRAYED:0)|MF_STRING,4,L"選択行をコピー");
+    int cmd=(int)TrackPopupMenu(m,TPM_RETURNCMD|TPM_RIGHTBUTTON|TPM_TOPALIGN,
+                                screenPt.x,screenPt.y,0,g_main,NULL);
+    DestroyMenu(m);
+    if(cmd==1 && src){ logview_apply_filter(src); }
+    else if(cmd==2 && src){
+        char nf[128];
+        if(g_flt[0]) _snprintf(nf,sizeof nf,"%s -%s", g_flt, src);
+        else         _snprintf(nf,sizeof nf,"-%s", src);
+        logview_apply_filter(nf);
+    }
+    else if(cmd==3){ logview_apply_filter(""); }
+    else if(cmd==4){ logview_copy(); }
+}
+static LRESULT CALLBACK LogViewProc(HWND h, UINT msg, WPARAM wp, LPARAM lp){
+    switch(msg){
+    case WM_ERASEBKGND: return 1;
+    case WM_PAINT: logview_paint(h); return 0;
+    case WM_SIZE:
+        if(g_autoscroll) g_top=logview_max_top();
+        logview_update_scroll();
+        return 0;
+    case WM_VSCROLL: {
+        size_t t=g_top; size_t vis=(size_t)logview_vis();
+        switch(LOWORD(wp)){
+            case SB_LINEUP:   t = t? t-1 : 0; break;
+            case SB_LINEDOWN: t = t+1; break;
+            case SB_PAGEUP:   t = t>vis? t-vis : 0; break;
+            case SB_PAGEDOWN: t = t+vis; break;
+            case SB_TOP:      t = 0; break;
+            case SB_BOTTOM:   t = logview_max_top(); break;
+            case SB_THUMBTRACK: case SB_THUMBPOSITION: {
+                SCROLLINFO si; si.cbSize=sizeof si; si.fMask=SIF_TRACKPOS;
+                GetScrollInfo(h,SB_VERT,&si); t=(size_t)si.nTrackPos; break;
+            }
+            default: return 0;
+        }
+        logview_user_scroll(t);
+        return 0;
+    }
+    case WM_HSCROLL: {
+        RECT rc; GetClientRect(h,&rc); int page=rc.right/g_charw; if(page<1)page=1;
+        int p=g_hpos;
+        switch(LOWORD(wp)){
+            case SB_LINEUP:   p-=4; break;
+            case SB_LINEDOWN: p+=4; break;
+            case SB_PAGEUP:   p-=page; break;
+            case SB_PAGEDOWN: p+=page; break;
+            case SB_THUMBTRACK: case SB_THUMBPOSITION: {
+                SCROLLINFO si; si.cbSize=sizeof si; si.fMask=SIF_TRACKPOS;
+                GetScrollInfo(h,SB_HORZ,&si); p=si.nTrackPos; break;
+            }
+            default: return 0;
+        }
+        if(p<0)p=0; if(p>(int)g_maxchars)p=(int)g_maxchars;
+        g_hpos=p; logview_update_scroll(); InvalidateRect(h,NULL,FALSE);
+        return 0;
+    }
+    case WM_MOUSEWHEEL: {
+        static int acc; acc += GET_WHEEL_DELTA_WPARAM(wp);
+        int lines=acc/(WHEEL_DELTA/3); acc-=lines*(WHEEL_DELTA/3);
+        if(lines){
+            size_t t=g_top;
+            if(lines>0) t = t>(size_t)lines? t-(size_t)lines : 0;
+            else        t = t+(size_t)(-lines);
+            logview_user_scroll(t);
+        }
+        return 0;
+    }
+    case WM_GETDLGCODE: return DLGC_WANTARROWS;
+    case WM_CONTEXTMENU: {
+        POINT pt; size_t vi;
+        if(lp==(LPARAM)-1){                       /* キーボード(Shift+F10) */
+            vi = (g_sel_a!=(size_t)-1)? g_sel_a : g_top;
+            RECT rc; GetClientRect(h,&rc); pt.x=rc.left+8; pt.y=rc.top+8;
+            ClientToScreen(h,&pt);
+        } else {
+            pt.x=(short)LOWORD(lp); pt.y=(short)HIWORD(lp);
+            POINT cp=pt; ScreenToClient(h,&cp);
+            vi = g_top + (size_t)(cp.y<0?0:cp.y/g_lineh);
+            /* 選択外を右クリックしたらその行へ選択を移す（選択内なら維持=複数行コピー用） */
+            size_t lo=g_sel_a<g_sel_b?g_sel_a:g_sel_b, hi=g_sel_a<g_sel_b?g_sel_b:g_sel_a;
+            int inside=(g_sel_a!=(size_t)-1 && vi>=lo && vi<=hi);
+            if(g_view_n && vi<g_view_n && !inside){ g_sel_a=g_sel_b=vi; InvalidateRect(h,NULL,FALSE); }
+        }
+        char src[64]=""; int have=(g_view_n && vi<g_view_n);
+        if(have){ strncpy(src,g_ent[g_view[vi]].src,sizeof src-1); src[sizeof src-1]=0; }
+        logview_context_menu(pt, have?src:NULL);
+        return 0;
+    }
+    case WM_LBUTTONDOWN: {
+        SetFocus(h); SetCapture(h);
+        if(g_view_n){
+            size_t vi=g_top+(size_t)((int)(short)HIWORD(lp)/g_lineh);
+            if(vi>=g_view_n) vi=g_view_n-1;
+            g_sel_a=g_sel_b=vi;
+        } else g_sel_a=g_sel_b=(size_t)-1;
+        if(g_autoscroll){ g_autoscroll=0; update_resume_btn(); }
+        InvalidateRect(h,NULL,FALSE);
+        return 0;
+    }
+    case WM_MOUSEMOVE:
+        if(GetCapture()==h && g_view_n && g_sel_a!=(size_t)-1){
+            int y=(int)(short)HIWORD(lp);
+            long long vi=(long long)g_top + (y<0? -1 : y/g_lineh);
+            if(vi<0)vi=0; if(vi>=(long long)g_view_n)vi=(long long)g_view_n-1;
+            if((size_t)vi!=g_sel_b){ g_sel_b=(size_t)vi; InvalidateRect(h,NULL,FALSE); }
+        }
+        return 0;
+    case WM_LBUTTONUP: if(GetCapture()==h) ReleaseCapture(); return 0;
+    case WM_KEYDOWN: {
+        int ctrl=(GetKeyState(VK_CONTROL)&0x8000)!=0;
+        size_t vis=(size_t)logview_vis();
+        switch(wp){
+            case 'C': if(ctrl) logview_copy(); return 0;
+            case 'A': if(ctrl && g_view_n){ g_sel_a=0; g_sel_b=g_view_n-1; InvalidateRect(h,NULL,FALSE); } return 0;
+            case VK_UP:    logview_user_scroll(g_top? g_top-1:0); return 0;
+            case VK_DOWN:  logview_user_scroll(g_top+1); return 0;
+            case VK_PRIOR: logview_user_scroll(g_top>vis? g_top-vis:0); return 0;
+            case VK_NEXT:  logview_user_scroll(g_top+vis); return 0;
+            case VK_HOME:  if(ctrl) logview_user_scroll(0); return 0;
+            case VK_END:   if(ctrl) logview_user_scroll(logview_max_top()); return 0;
+        }
+        return 0;
+    }
+    }
+    return DefWindowProcW(h,msg,wp,lp);
+}
 
 static void re_append_colored(HWND re, const wchar_t *wtext, COLORREF color){
     int end=GetWindowTextLengthW(re);
@@ -260,21 +535,6 @@ static void re_append_colored(HWND re, const wchar_t *wtext, COLORREF color){
     SendMessageW(re, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf);
     SendMessageW(re, EM_REPLACESEL, FALSE, (LPARAM)wtext);
     SendMessageW(re, WM_VSCROLL, SB_BOTTOM, 0);
-}
-
-static void sync_autoscroll_to_view(void){
-    if(g_autoscroll){ g_autoscroll=0; update_resume_btn(); }
-}
-static WNDPROC g_log_oldproc;
-static LRESULT CALLBACK LogProc(HWND h, UINT msg, WPARAM wp, LPARAM lp){
-    LRESULT r=CallWindowProcW(g_log_oldproc,h,msg,wp,lp);
-    switch(msg){
-        case WM_MOUSEWHEEL: case WM_VSCROLL:
-        case WM_KEYDOWN:    case WM_LBUTTONUP:
-            if(!g_prog_scroll) PostMessageW(g_main, WM_APP_SYNCSCROLL, 0, 0);
-            break;
-    }
-    return r;
 }
 
 static void position_resume(void){
@@ -302,55 +562,10 @@ static LRESULT CALLBACK ResumeProc(HWND h, UINT msg, WPARAM wp, LPARAM lp){
     return DefWindowProcW(h,msg,wp,lp);
 }
 
-static void fmt_entry(const Entry *e, char *out, int cap){
-    _snprintf(out, cap, "[%-12.12s] [%-22.22s] %s", e->ts, e->src, e->msg);
-}
-static int passes(const Entry *e){
-    int hideio = SendMessageW(GetDlgItem(g_main,ID_HIDEIO),BM_GETCHECK,0,0)==BST_CHECKED;
-    int erronly= SendMessageW(GetDlgItem(g_main,ID_ERRONLY),BM_GETCHECK,0,0)==BST_CHECKED;
-    if(hideio && e->lvl==L_IO) return 0;
-    if(erronly && e->lvl!=L_ERROR) return 0;
-    wchar_t fw[128]; GetWindowTextW(g_filter, fw, 128);
-    if(fw[0]){
-        char *f = wtou8(fw); int ok = (has_ci(e->src,f)||has_ci(e->msg,f)); free(f);
-        if(!ok) return 0;
-    }
-    return 1;
-}
-static void log_append_entry(const Entry *e){
-    char line[1200]; fmt_entry(e, line, sizeof line);
-    strcat_s(line, sizeof line, "\r\n");
-    wchar_t *w = u8tow(line);
-    log_append_colored(w, level_color(e->lvl)); free(w);
-    g_disp++; g_shown++;
-    log_scroll_end();
-}
-static void update_counts(void);
-static void log_rerender(void){
-    g_in_rerender = 1;
-    SendMessageW(g_log, WM_SETREDRAW, FALSE, 0);
-    SetWindowTextW(g_log, L"");
-    g_disp=0; g_shown=0;
-    size_t start = 0, vis=0;
-    for(size_t i=g_ent_n; i>0; i--){ if(passes(&g_ent[i-1])){ vis++; if(vis>=8000){ start=i-1; break; } } }
-    for(size_t i=start; i<g_ent_n; i++){
-        if(!passes(&g_ent[i])) continue;
-        char line[1200]; fmt_entry(&g_ent[i], line, sizeof line);
-        strcat_s(line, sizeof line, "\r\n");
-        wchar_t *w=u8tow(line); log_append_colored(w, level_color(g_ent[i].lvl)); free(w);
-        g_disp++; g_shown++;
-    }
-    SendMessageW(g_log, WM_SETREDRAW, TRUE, 0);
-    InvalidateRect(g_log, NULL, TRUE);
-    g_in_rerender = 0;
-    log_scroll_end();
-    update_counts();
-}
-
 static void update_counts(void){
     char buf[MAX_PATH+128]; char *logu=wtou8(G_LOG);
-    _snprintf(buf,sizeof buf," %s  総数 %zu / 表示 %d / エラー %d%s",
-              logu, g_ent_n, g_shown, g_errors, g_paused?"  [停止中]":"");
+    _snprintf(buf,sizeof buf," %s  総数 %zu / 表示 %zu / エラー %d%s",
+              logu, g_ent_n, g_view_n, g_errors, g_paused?"  [停止中]":"");
     free(logu);
     wchar_t *w=u8tow(buf); SetWindowTextW(g_logstatus, w); free(w);
 }
@@ -412,8 +627,10 @@ static void ingest(const char *raw){
     if(g_ent_n>80000){
         size_t drop=20000; for(size_t i=0;i<drop;i++) free(g_ent[i].msg);
         memmove(g_ent, g_ent+drop, (g_ent_n-drop)*sizeof(Entry)); g_ent_n-=drop;
+        view_rebuild();  /* g_view の index がずれるため作り直し */
+    } else if(!g_paused && passes(e)){
+        view_push(g_ent_n-1);  /* 実描画はタイマーの logview_flush でまとめて行う */
     }
-    if(!g_paused && passes(e)) log_append_entry(e);
 
     if(g_card_log && strncmp(e->src, "card", 4)==0){
         char line[1200]; fmt_entry(e, line, sizeof line);
@@ -468,17 +685,22 @@ static DWORD WINAPI tail_thread(LPVOID arg){
             char buf[8192]; DWORD rd;
             while(ReadFile(h,buf,sizeof buf,&rd,NULL) && rd>0){
                 pos += rd;
+                /* 完成行をチャンク単位でまとめて 1 PostMessage。1 行=1 投函だと
+                   バースト時にメッセージキュー上限(10000)を溢れて行を取りこぼす。 */
+                char *batch=(char*)malloc((size_t)carry_n+rd+2); size_t bn=0;
                 for(DWORD i=0;i<rd;i++){
                     char c=buf[i];
                     if(c=='\n'){
-                        carry[carry_n]=0;
-                        char *line=_strdup(carry);
-                        PostMessageW(g_main, WM_APP_LOGLINE, 0, (LPARAM)line);
+                        memcpy(batch+bn,carry,(size_t)carry_n); bn+=(size_t)carry_n;
+                        batch[bn++]='\n';
                         carry_n=0;
                     } else if(carry_n<(int)sizeof carry-1){
                         carry[carry_n++]=c;
                     }
                 }
+                if(bn){ batch[bn]=0;
+                        if(!PostMessageW(g_main, WM_APP_LOGLINE, 0, (LPARAM)batch)) free(batch); }
+                else free(batch);
             }
             CloseHandle(h);
         }
@@ -641,17 +863,27 @@ static void poll_keys(void){
 }
 
 static void search_next(void){
-    wchar_t t[128]; GetWindowTextW(g_search,t,128); if(!t[0]) return;
-    static LONG from=0;
-    CHARRANGE all={from,-1};
-    FINDTEXTEXW ft; ft.chrg=all; ft.lpstrText=t;
-    LONG pos=(LONG)SendMessageW(g_log, EM_FINDTEXTEXW, FR_DOWN, (LPARAM)&ft);
-    if(pos<0){ from=0; ft.chrg.cpMin=0; ft.chrg.cpMax=-1;
-        pos=(LONG)SendMessageW(g_log, EM_FINDTEXTEXW, FR_DOWN, (LPARAM)&ft); }
-    if(pos<0){ SetWindowTextW(g_logstatus, L"検索: 見つかりません"); return; }
-    SendMessageW(g_log, EM_SETSEL, ft.chrgText.cpMin, ft.chrgText.cpMax);
-    SendMessageW(g_log, EM_SCROLLCARET, 0, 0);
-    from = ft.chrgText.cpMax;
+    wchar_t t[128]; GetWindowTextW(g_search,t,128); if(!t[0] || !g_view_n) return;
+    static size_t from=0;
+    if(from>=g_view_n) from=0;
+    char *f=wtou8(t);
+    size_t hit=(size_t)-1;
+    for(size_t k=0;k<g_view_n;k++){
+        size_t vi=(from+k)%g_view_n;
+        const Entry *e=&g_ent[g_view[vi]];
+        if(has_ci(e->src,f)||has_ci(e->msg,f)){ hit=vi; break; }
+    }
+    free(f);
+    if(hit==(size_t)-1){ SetWindowTextW(g_logstatus, L"検索: 見つかりません"); return; }
+    from=hit+1;
+    g_sel_a=g_sel_b=hit;
+    if(g_autoscroll){ g_autoscroll=0; update_resume_btn(); }
+    { size_t vis=(size_t)logview_vis();
+      size_t top = hit>vis/2 ? hit-vis/2 : 0;
+      size_t mt=logview_max_top(); if(top>mt) top=mt;
+      g_top=top; }
+    logview_update_scroll();
+    InvalidateRect(g_log,NULL,FALSE);
 }
 static void export_jsonl(void){
     wchar_t path[MAX_PATH]=L"";
@@ -676,8 +908,11 @@ static void export_jsonl(void){
 }
 static void log_clear(void){
     for(size_t i=0;i<g_ent_n;i++) free(g_ent[i].msg);
-    g_ent_n=0; g_errors=0; g_disp=0; g_shown=0;
-    SetWindowTextW(g_log, L""); update_counts();
+    g_ent_n=0; g_errors=0;
+    g_view_n=0; g_top=0; g_hpos=0; g_maxchars=80; g_sel_a=g_sel_b=(size_t)-1; g_dirty=0;
+    logview_update_scroll();
+    InvalidateRect(g_log, NULL, TRUE);
+    update_counts();
 }
 
 static int card_type_selected(void){
@@ -793,13 +1028,14 @@ static void build_ui(void){
     mk(L"BUTTON", L"クリア", BS_PUSHBUTTON, ID_CLEAR, g_fontUI);
     mk(L"BUTTON", L"JSONL書出", BS_PUSHBUTTON, ID_EXPORT, g_fontUI);
 
-    g_log = CreateWindowExW(0, MSFTEDIT_CLASS, L"",
-        WS_CHILD|WS_VISIBLE|WS_VSCROLL|ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL,
+    /* 仮想ログビュー（折返し無効: 1 エントリ=1 行、横スクロールあり） */
+    g_log = CreateWindowExW(0, L"nrsLogView", L"",
+        WS_CHILD|WS_VISIBLE|WS_VSCROLL|WS_HSCROLL,
         0,0,10,10, g_main, (HMENU)ID_LOG, GetModuleHandleW(NULL), NULL);
-    SendMessageW(g_log, WM_SETFONT, (WPARAM)g_font, TRUE);
-    SendMessageW(g_log, EM_SETBKGNDCOLOR, 0, (LPARAM)C_BG);
-    SendMessageW(g_log, EM_EXLIMITTEXT, 0, (LPARAM)0x7FFFFFFF);
-    g_log_oldproc=(WNDPROC)SetWindowLongPtrW(g_log, GWLP_WNDPROC, (LONG_PTR)LogProc);
+    { HDC dc=GetDC(g_log); HFONT of=(HFONT)SelectObject(dc,g_font);
+      TEXTMETRICW tm; if(GetTextMetricsW(dc,&tm)) g_lineh=tm.tmHeight+1;
+      SIZE sz; if(GetTextExtentPoint32W(dc,L"0",1,&sz)&&sz.cx) g_charw=sz.cx;
+      SelectObject(dc,of); ReleaseDC(g_log,dc); }
     g_logstatus = mk(L"STATIC", L"", SS_LEFT, ID_LOGSTATUS, g_fontUI);
     g_resume = CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE, L"nrsResume", L"",
         WS_POPUP, 0,0,200,24, g_main, NULL, GetModuleHandleW(NULL), NULL);
@@ -1019,10 +1255,18 @@ static LRESULT CALLBACK WndProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp){
         }
         else if(id==ID_FREEPLAY){ g_freeplay=SendMessageW((HWND)lp,BM_GETCHECK,0,0)==BST_CHECKED; write_cfg(); }
         else if(id==ID_TEST){ g_test=SendMessageW((HWND)lp,BM_GETCHECK,0,0)==BST_CHECKED; write_cfg(); }
-        else if(id==ID_FILTER && code==EN_CHANGE){ log_rerender(); }
-        else if(id==ID_HIDEIO || id==ID_ERRONLY){ log_rerender(); }
+        else if(id==ID_FILTER && code==EN_CHANGE){
+            wchar_t fw[128]; GetWindowTextW(g_filter, fw, 128);
+            char *f=wtou8(fw); strncpy(g_flt, f, sizeof g_flt-1); g_flt[sizeof g_flt-1]=0; free(f);
+            view_rebuild();
+        }
+        else if(id==ID_HIDEIO || id==ID_ERRONLY){
+            g_hideio = SendMessageW(GetDlgItem(g_main,ID_HIDEIO), BM_GETCHECK,0,0)==BST_CHECKED;
+            g_erronly= SendMessageW(GetDlgItem(g_main,ID_ERRONLY),BM_GETCHECK,0,0)==BST_CHECKED;
+            view_rebuild();
+        }
         else if(id==ID_SEARCHNEXT){ search_next(); }
-        else if(id==ID_PAUSE){ g_paused=SendMessageW((HWND)lp,BM_GETCHECK,0,0)==BST_CHECKED; if(!g_paused) log_rerender(); }
+        else if(id==ID_PAUSE){ g_paused=SendMessageW((HWND)lp,BM_GETCHECK,0,0)==BST_CHECKED; if(!g_paused) view_rebuild(); }
         else if(id==ID_CLEAR){ log_clear(); }
         else if(id==ID_EXPORT){ export_jsonl(); }
         else if(id==ID_SAVE){ write_cfg(); SetWindowTextW(g_cap, L"保存しました（再起動で反映）"); }
@@ -1066,14 +1310,25 @@ static LRESULT CALLBACK WndProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp){
     }
 
     case WM_APP_LOGLINE: {
-        char *line=(char*)lp; if(line){ ingest(line); free(line); }
+        char *batch=(char*)lp;
+        if(batch){
+            char *p=batch;
+            while(*p){
+                char *nl=strchr(p,'\n');
+                if(nl) *nl=0;
+                ingest(p);
+                if(!nl) break;
+                p=nl+1;
+            }
+            free(batch);
+            /* フラッド中は WM_TIMER(最低優先度)が届かないため、ここでも間引いて flush */
+            { static DWORD last; DWORD now=GetTickCount();
+              if(now-last>50){ last=now; logview_flush(); } }
+        }
         return 0;
     }
     case WM_APP_RUNSTATE:
         set_run_button((int)wp);
-        return 0;
-    case WM_APP_SYNCSCROLL:
-        sync_autoscroll_to_view();
         return 0;
     case WM_APP_LOGCLEAR:
         log_clear();
@@ -1086,7 +1341,7 @@ static LRESULT CALLBACK WndProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp){
     }
 
     case WM_TIMER:
-        if(wp==1){ poll_keys(); }
+        if(wp==1){ poll_keys(); logview_flush(); }
         return 0;
 
     case WM_DESTROY:
@@ -1398,6 +1653,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmd, int show){
     rc2.lpfnWndProc=ResumeProc; rc2.hInstance=hInst; rc2.lpszClassName=L"nrsResume";
     rc2.hCursor=LoadCursorW(NULL,(LPCWSTR)IDC_HAND);
     RegisterClassW(&rc2);
+    WNDCLASSW lv; ZeroMemory(&lv,sizeof lv);
+    lv.lpfnWndProc=LogViewProc; lv.hInstance=hInst; lv.lpszClassName=L"nrsLogView";
+    lv.hCursor=LoadCursorW(NULL,(LPCWSTR)IDC_ARROW);
+    RegisterClassW(&lv);
 
     g_main=CreateWindowExW(0, L"nrsEdgePanel", L"nrs-edge control panel",
         WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,CW_USEDEFAULT, 1200,780,
