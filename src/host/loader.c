@@ -436,7 +436,10 @@ static void emit(const char *ev, const char *msg, const char *lvl){
 static DWORD WINAPI tail_thread(LPVOID arg){
     (void)arg;
     LONGLONG pos=0; int first=1;
-    { wchar_t fh[8]; if(GetEnvironmentVariableW(L"NRS_TAIL_FROM_HEAD",fh,8)>0 && fh[0]==L'1') first=0; }
+    /* NRS_TAIL_SKIP = spawn 元(CLI)が見ていた旧ログ。初見のファイルがそれと別なら
+       既に新ランのログなので先頭から読む。同じなら旧ログの洪水を避け末尾から追従。 */
+    { wchar_t skip[MAX_PATH];
+      if(GetEnvironmentVariableW(L"NRS_TAIL_SKIP",skip,MAX_PATH)>0 && _wcsicmp(skip,G_LOG)!=0) first=0; }
     LONG seen_gen=g_log_gen;
     wchar_t cur[MAX_PATH]; wcscpy(cur, G_LOG);
     char carry[2048]; int carry_n=0;
@@ -1182,14 +1185,14 @@ static void cli_ensure_gui(int raise){
         return;
     }
     wchar_t exe[MAX_PATH]; GetModuleFileNameW(NULL, exe, MAX_PATH);
-    SetEnvironmentVariableW(L"NRS_TAIL_FROM_HEAD", L"1");
+    SetEnvironmentVariableW(L"NRS_TAIL_SKIP", G_LOG);
     STARTUPINFOW si; ZeroMemory(&si,sizeof si); si.cb=sizeof si;
     PROCESS_INFORMATION pi; ZeroMemory(&pi,sizeof pi);
     DWORD flags = DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB;
     BOOL ok = CreateProcessW(exe, NULL, NULL, NULL, FALSE, flags, NULL, NULL, &si, &pi);
     if(!ok) ok = CreateProcessW(exe, NULL, NULL, NULL, FALSE, DETACHED_PROCESS, NULL, NULL, &si, &pi);
     if(ok){ CloseHandle(pi.hThread); CloseHandle(pi.hProcess); }
-    SetEnvironmentVariableW(L"NRS_TAIL_FROM_HEAD", NULL);
+    SetEnvironmentVariableW(L"NRS_TAIL_SKIP", NULL);
 }
 
 static int wait_for_job(DWORD ms){
