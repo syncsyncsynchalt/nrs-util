@@ -1442,14 +1442,21 @@ static const char* subsys_of(const char *ev){
     return "other";
 }
 
+/* 窓を Z オーダー最前面へ浮上させる（フォアグラウンド奪取＝アクティブ化はしない。
+   SWP_NOACTIVATE 付きなので、背景プロセスから起動しても Windows のフォアグラウンド制限に
+   引っかからず Z オーダーだけ上げられる＝ユーザーのフォーカスは奪わない）。 */
+static void gui_raise(HWND hw){
+    if(!hw) return;
+    if(IsIconic(hw)) ShowWindow(hw, SW_RESTORE);
+    SetWindowPos(hw, HWND_TOPMOST,   0,0,0,0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
+    SetWindowPos(hw, HWND_NOTOPMOST, 0,0,0,0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
+}
+
 static void cli_ensure_gui(int raise){
     HWND hw = FindWindowW(L"nrsEdgePanel", NULL);
     if(hw){
         if(IsIconic(hw)) ShowWindow(hw, SW_RESTORE);
-        if(raise){
-            SetWindowPos(hw, HWND_TOPMOST,   0,0,0,0, SWP_NOMOVE|SWP_NOSIZE);
-            SetWindowPos(hw, HWND_NOTOPMOST, 0,0,0,0, SWP_NOMOVE|SWP_NOSIZE);
-        }
+        if(raise) gui_raise(hw);
         return;
     }
     wchar_t exe[MAX_PATH]; GetModuleFileNameW(NULL, exe, MAX_PATH);
@@ -1459,7 +1466,16 @@ static void cli_ensure_gui(int raise){
     DWORD flags = DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB;
     BOOL ok = CreateProcessW(exe, NULL, NULL, NULL, FALSE, flags, NULL, NULL, &si, &pi);
     if(!ok) ok = CreateProcessW(exe, NULL, NULL, NULL, FALSE, DETACHED_PROCESS, NULL, NULL, &si, &pi);
-    if(ok){ CloseHandle(pi.hThread); CloseHandle(pi.hProcess); }
+    if(ok){
+        /* 新規 spawn した GUI は、背景プロセス(loader CLI)が生成主なので Windows の
+           フォアグラウンド制限でアクティブ化されず裏に開く。窓が出るまで待って必ず浮上させる。
+           窓生成完了まで待つことで cmd_start の二重 spawn レース(既存窓未生成のまま再 spawn)も
+           解消される（後続 cli_ensure_gui の FindWindow が確実にヒットする）。 */
+        WaitForInputIdle(pi.hProcess, 3000);
+        for(int i=0; i<40 && !(hw=FindWindowW(L"nrsEdgePanel",NULL)); i++) Sleep(50);
+        gui_raise(hw);
+        CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+    }
     SetEnvironmentVariableW(L"NRS_TAIL_SKIP", NULL);
 }
 
