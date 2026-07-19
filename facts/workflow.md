@@ -82,6 +82,16 @@ docs/コメントの「できない・クラッシュ・効かない」系は Gh
   名前ベース device は `mxdev_*`/`*_force_ready`、関数フックは `host/gamehook.c` の detour 機構を使う。
 - 多目的 global に注意: `DAT_01696ad8` は is-DVD 判定と**筐体ロール(1=SERVER)**を兼用＝0 にすると SERVER→SATELLITE 表示が壊れる。安易に書かず実体を確認。
 
+## GUI 挙動の検証（Windows 固有の罠・PS 5.1）
+
+loader GUI（ログ窓など）の挙動を外部スクリプトで観測・検証するときの定石。実例＝「ログ窓 spawn 時に前回ランのログが流れる」バグの検証（`cli_ensure_gui` が `NRS_TAIL_SKIP` に旧ログパスを渡し、tail_thread が初見ファイル==G_LOG なら末尾追従・別なら先頭読み。commit 111f7ec）。
+
+- **GUI ウィンドウ観測は前面（対話ウィンドウステーション）から行う。** PowerShell `Start-Job` の子は**非対話 window station**で走り、対話デスクトップのウィンドウを `EnumWindows`/`FindWindowW` で列挙できない（全区間 `noGUI` になる）。バックグラウンド並行が要るなら「`Start-Process` で対象を非同期起動＋前面ループでサンプリング」にする。
+- **ネイティブコールバック内の出力はホスト出力に流れない。** `EnumChildWindows` の scriptblock delegate から `Write-Output` しても消える。`$script:` スコープの配列に溜め、列挙後にまとめて出す。
+- **owner-draw ログ窓は WM_GETTEXT で読めない。** 同僚の仮想ログビュー(`nrsLogView`)導入後は行本文が取れないので、行数は `g_logstatus`（`nrsLogView` の直後の Static）の「総数 N」から読む。
+- **PS 5.1 の `-File` はスクリプトを ANSI 解釈**（BOM 無し UTF-8 だと日本語コメントが誤デコードされ**次行を飲む**＝`New-Object`/`foreach` が null 化する謎バグ）。**テストスクリプトは ASCII のみで書く**（実行時にウィンドウから読む日本語データは可）。
+- **一瞬流れて消える系バグの検証は「陽性対照＋実経路」を対にする。** ①検出器が本当に洪水を見えること（逆条件で前回ログ全量=総数N が読める）と、②実 `loader.exe start` の本物の `cli_ensure_gui` 経路でフレッシュ GUI が旧ログを流し込まないこと、の両方を示す。合成 env を手で設定しただけ・最終状態だけの確認は片手落ち。`core_launch` は game 起動前に無条件で新ログ作成＋ポインタ切替するので、遷移前の「ptr=旧ログ」窓を前面高速サンプリング（Add-Type 事前ウォーム）で捉える。
+
 ## 静的パッチの clobber
 
 `patches_apply` は CREATE_SUSPENDED 注入のため entry より前に走る。
