@@ -509,6 +509,8 @@ static const char* inject(HANDLE proc, const wchar_t *dll_abspath){
 
 typedef struct { int ok; DWORD pid; char err[200]; } LaunchResult;
 
+static int proc_running(const wchar_t *name);  /* 定義は後方(1141付近) */
+
 static void core_launch(LaunchResult *r){
     r->ok=0; r->pid=0; r->err[0]=0;
     wchar_t hostdll[MAX_PATH], logicdll[MAX_PATH];
@@ -563,7 +565,18 @@ static int core_stop(void){
 }
 
 static int run_loader(void){
+    /* nrs.exe 単一化: CLI(cmd_start) と同じ run mutex で直列化し、
+       既に走っていれば二重起動しない。GUI ボタンは "実行中" として扱う(return 1)。 */
+    HANDLE runlock = CreateMutexW(NULL, FALSE, NRS_MUTEX_RUN);
+    if(runlock) WaitForSingleObject(runlock, 10000);
+    if(proc_running(L"nrs.exe")){
+        if(runlock){ ReleaseMutex(runlock); CloseHandle(runlock); }
+        emit("loader", "既に nrs.exe が起動中のため二重起動を抑止", "warn");
+        set_status(HEXRGB(0xffb454), "既に起動済み");
+        return 1;
+    }
     LaunchResult r; core_launch(&r);
+    if(runlock){ ReleaseMutex(runlock); CloseHandle(runlock); }
     if(!r.ok){
         char buf[260]; _snprintf(buf,sizeof buf,"起動失敗: %s", r.err);
         emit("loader", buf, "error"); set_status(HEXRGB(0xff5f5f), buf);
